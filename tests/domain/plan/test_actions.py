@@ -83,7 +83,7 @@ def _create_table_action() -> CreateTable:
 
 
 def _drop_primary_key() -> DropPrimaryKey:
-    return DropPrimaryKey()
+    return DropPrimaryKey("table_pk")
 
 
 def _concrete_action_types() -> list[type[Action]]:
@@ -158,8 +158,8 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetColumnComment("email", "customer email", ""), "email"),
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
-        (_drop_primary_key(), ""),
-        (SetPrimaryKey(_primary_key()), ""),
+        (_drop_primary_key(), "table_pk"),
+        (SetPrimaryKey(_primary_key()), "table_pk"),
         (DropForeignKey(_foreign_key()), "table_customer_id_fk"),
         (SetForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),
@@ -289,6 +289,11 @@ def test_plan_orders_property_before_type_widen_and_key_set():
     )
 
     assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
+
+
+def test_set_primary_key_rejects_an_unresolved_constraint_name():
+    with pytest.raises(ValueError, match="requires a resolved constraint name"):
+        SetPrimaryKey(PrimaryKeyConstraint(("id",)))
 
 
 def test_plan_reclusters_after_add_and_before_drop():

@@ -384,7 +384,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey(),
+            DropPrimaryKey("tbl_pk"),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
@@ -426,14 +426,6 @@ def test_set_primary_key_renders_composite_primary_key():
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
-    )
-
-
-def test_set_primary_key_resolves_the_default_name_from_the_plan_target():
-    action = SetPrimaryKey(primary_key=PrimaryKeyConstraint(("id",)))
-
-    assert _compile_single(action) == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)"
     )
 
 
@@ -554,7 +546,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
     DropForeignKey: DropForeignKey(constraint=_foreign_key()),
-    DropPrimaryKey: DropPrimaryKey(),
+    DropPrimaryKey: DropPrimaryKey("tbl_pk"),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),

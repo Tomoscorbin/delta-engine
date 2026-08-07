@@ -512,9 +512,10 @@ def _diff_primary_key(
     The comparison runs against raw observed names, not the
     rename-projected frame used by columns and layout: renaming a constrained
     column drops the constraint, so a renamed key must surface as an explicit
-    drop and set. ``SetPrimaryKey`` carries the declared columns verbatim:
-    actions are semantic values, and a declaration whose spelling disagrees
-    with the catalog is rejected as ``ColumnCaseDrift`` before any plan forms.
+    drop and set. Executable actions carry physical constraint names: the
+    observed name for a drop, and the explicit or deterministic creation name
+    for a set. A declaration whose column spelling disagrees with the catalog
+    is rejected as ``ColumnCaseDrift`` before any plan forms.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -530,9 +531,17 @@ def _diff_primary_key(
 
     actions: list[DropPrimaryKey | SetPrimaryKey] = []
     if observed_key is not None:
-        actions.append(DropPrimaryKey())
+        assert observed_key.constraint_name is not None
+        actions.append(DropPrimaryKey(constraint_name=observed_key.constraint_name))
     if desired_key is not None:
-        actions.append(SetPrimaryKey(primary_key=desired_key))
+        actions.append(
+            SetPrimaryKey(
+                primary_key=replace(
+                    desired_key,
+                    constraint_name=desired_key.resolved_name(desired.qualified_name.name),
+                )
+            )
+        )
     return tuple(actions)
 
 

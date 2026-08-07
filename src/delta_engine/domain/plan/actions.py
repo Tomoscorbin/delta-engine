@@ -338,26 +338,41 @@ class SetColumnNullability(Action):
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
+    constraint_name: str
+
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+
     @property
     def subject(self) -> str:
-        return ""
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """Set the declared primary key, resolving its default name at compilation."""
+    """Set a primary key whose physical name was resolved while diffing."""
 
     primary_key: PrimaryKeyConstraint
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
 
+    def __post_init__(self) -> None:
+        if self.primary_key.constraint_name is None:
+            raise ValueError("SetPrimaryKey requires a resolved constraint name")
+
+    @property
+    def constraint_name(self) -> str:
+        """Return the physical name guaranteed by this executable action."""
+        assert self.primary_key.constraint_name is not None
+        return self.primary_key.constraint_name
+
     @property
     def subject(self) -> str:
-        return ""
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)

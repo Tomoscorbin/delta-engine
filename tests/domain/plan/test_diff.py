@@ -689,6 +689,21 @@ def test_desired_only_primary_key_produces_added_change():
     assert diff.actions == (SetPrimaryKey(primary_key=pk),)
 
 
+def test_unnamed_primary_key_is_materialized_in_the_set_action():
+    desired_key = PrimaryKeyConstraint(columns=("id",))
+
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer(), nullable=False),),
+            primary_key=desired_key,
+        ),
+        _observed(columns=(DesiredColumn("id", Integer(), nullable=False),)),
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (SetPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "test_pk")),)
+
+
 def test_equal_primary_keys_by_column_set_produce_no_change():
     # Given the same PK column set under different orders and names
     desired_pk = PrimaryKeyConstraint(columns=("a", "b"))
@@ -721,7 +736,7 @@ def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
 
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey(),
+        DropPrimaryKey("legacy_pk"),
         SetPrimaryKey(primary_key=desired_pk),
     )
 
@@ -859,7 +874,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropPrimaryKey(),)
+    assert diff.actions == (DropPrimaryKey("legacy_pk"),)
 
 
 def test_changed_primary_key_produces_drop_and_set_actions():
@@ -880,7 +895,7 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     # Then the observed key is dropped and the desired key is set
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey(),
+        DropPrimaryKey("legacy_pk"),
         SetPrimaryKey(primary_key=desired_primary_key),
     )
 
@@ -1089,7 +1104,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropPrimaryKey(),
+        DropPrimaryKey("legacy_pk"),
         SetPrimaryKey(primary_key=desired_key),
     }
 
