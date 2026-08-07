@@ -9,6 +9,22 @@ def test_rejects_empty_columns():
         PrimaryKeyConstraint(columns=(), constraint_name="t_pk")
 
 
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param("id", id="bare-string"),
+        pytest.param(("id", 42), id="non-string-entry"),
+    ],
+)
+def test_rejects_invalid_column_collections(columns: object) -> None:
+    # Given / When / Then malformed column input fails at the constraint boundary.
+    with pytest.raises(TypeError):
+        PrimaryKeyConstraint(
+            columns=columns,  # type: ignore[arg-type]
+            constraint_name="t_pk",
+        )
+
+
 def test_rejects_duplicate_columns():
     # Given / Then a repeated column is an error
     with pytest.raises(ValueError):

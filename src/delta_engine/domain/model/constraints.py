@@ -8,6 +8,24 @@ from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
+def _constraint_columns(columns: object, *, kind: str) -> tuple[Identifier, ...]:
+    """Normalize one non-empty, unique list or tuple of constraint columns."""
+    if isinstance(columns, str) or not isinstance(columns, (list, tuple)):
+        raise TypeError(f"{kind} columns must be a list or tuple of strings")
+    if not columns:
+        raise ValueError(f"{kind} columns must not be empty")
+    if not all(isinstance(column, str) for column in columns):
+        raise TypeError(f"{kind} column names must be strings")
+
+    normalized = tuple(Identifier(column) for column in columns)
+    seen: set[Identifier] = set()
+    for column in normalized:
+        if column in seen:
+            raise ValueError(f"Duplicate {kind} column: {column}")
+        seen.add(column)
+    return normalized
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class PrimaryKeyConstraint:
     """
@@ -41,24 +59,11 @@ class PrimaryKeyConstraint:
         return hash((self.constraint_name, frozenset(self.columns)))
 
     def __post_init__(self) -> None:
-        columns = tuple(Identifier(column) for column in self.columns)
-        if not columns:
-            raise ValueError("columns must not be empty")
-
-        seen: set[str] = set()
-        for column in columns:
-            if column in seen:
-                raise ValueError(f"Duplicate primary key column: {column}")
-            seen.add(column)
-
-        if not isinstance(self.constraint_name, str):
-            raise TypeError("constraint_name must be a string")
-
-        if not self.constraint_name.strip():
-            raise ValueError("constraint_name must not be blank")
+        columns = _constraint_columns(self.columns, kind="primary key")
+        constraint_name = Identifier(self.constraint_name)
 
         object.__setattr__(self, "columns", columns)
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        object.__setattr__(self, "constraint_name", constraint_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,14 +94,11 @@ class ForeignKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
-        local_columns = tuple(Identifier(column) for column in self.local_columns)
-        referenced_columns = tuple(Identifier(column) for column in self.referenced_columns)
-
-        if not local_columns:
-            raise ValueError("local_columns must not be empty")
-
-        if not referenced_columns:
-            raise ValueError("referenced_columns must not be empty")
+        local_columns = _constraint_columns(self.local_columns, kind="foreign key local")
+        referenced_columns = _constraint_columns(
+            self.referenced_columns,
+            kind="foreign key referenced",
+        )
 
         if len(local_columns) != len(referenced_columns):
             raise ValueError(
@@ -115,27 +117,11 @@ class ForeignKeyConstraint:
             key=lambda pair: pair[0].lower(),
         )
 
-        seen_local: set[str] = set()
-        for column in local_columns:
-            if column in seen_local:
-                raise ValueError(f"Duplicate foreign key local column: {column}")
-            seen_local.add(column)
-
-        seen_referenced: set[str] = set()
-        for column in referenced_columns:
-            if column in seen_referenced:
-                raise ValueError(f"Duplicate foreign key referenced column: {column}")
-            seen_referenced.add(column)
-
-        if not isinstance(self.constraint_name, str):
-            raise TypeError("constraint_name must be a string")
-
-        if not self.constraint_name.strip():
-            raise ValueError("constraint_name must not be blank")
+        constraint_name = Identifier(self.constraint_name)
 
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        object.__setattr__(self, "constraint_name", constraint_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +145,4 @@ class ForeignKeyReference:
     referencing_table: QualifiedName
 
     def __post_init__(self) -> None:
-        if not self.constraint_name.strip():
-            raise ValueError("constraint_name must not be blank")
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))

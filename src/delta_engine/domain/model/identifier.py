@@ -24,6 +24,8 @@ class Identifier(str):
 
     def __new__(cls, spelling: str) -> Self:
         """Validate and intern the spelling; blank identifiers are invalid."""
+        if not isinstance(spelling, str):
+            raise TypeError("Identifier spelling must be a string")
         if not spelling.strip():
             raise ValueError(f"Identifier must not be blank: {spelling!r}")
         return super().__new__(cls, spelling)

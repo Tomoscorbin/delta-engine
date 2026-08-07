@@ -726,6 +726,32 @@ def test_foreign_key_name_rejects_invalid_values(
         )
 
 
+@pytest.mark.parametrize(
+    ("columns", "expected_error"),
+    [
+        pytest.param([], ValueError, id="empty-sequence"),
+        pytest.param({}, ValueError, id="empty-mapping"),
+        pytest.param({"customer_id"}, TypeError, id="unsupported-collection"),
+        pytest.param(["customer_id", 42], TypeError, id="non-string-sequence-entry"),
+        pytest.param({"customer_id": 42}, TypeError, id="non-string-mapping-value"),
+        pytest.param({42: "id"}, TypeError, id="non-string-mapping-key"),
+        pytest.param("  ", ValueError, id="blank-string"),
+        pytest.param(["  "], ValueError, id="blank-sequence-entry"),
+        pytest.param({"customer_id": "  "}, ValueError, id="blank-mapping-entry"),
+    ],
+)
+def test_foreign_key_rejects_invalid_column_input(
+    columns: object,
+    expected_error: type[Exception],
+) -> None:
+    # Given / When / Then invalid syntax fails before an owning table is constructed.
+    with pytest.raises(expected_error):
+        ForeignKey(
+            columns=columns,  # type: ignore[arg-type]
+            references=_customers(),
+        )
+
+
 def test_delta_table_defaults_to_no_foreign_keys():
     # Given a table with no foreign_keys argument
     table = DeltaTable(
@@ -1682,18 +1708,13 @@ def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
     ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
 
 
-def test_delta_table_rejects_non_table_reference():
+def test_foreign_key_rejects_non_table_reference_during_its_construction():
     # Given a reference that is neither a DeltaTable nor Self
-    # When / Then construction rejects the unsupported reference type
+    # When / Then the ForeignKey boundary rejects it without needing an owner
     with pytest.raises(TypeError):
-        DeltaTable(
-            catalog="cat",
-            schema="sch",
-            name="orders",
-            columns=[Column("customer_id", Integer())],
-            foreign_keys=[
-                ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")  # type: ignore[arg-type]
-            ],
+        ForeignKey(
+            columns={"customer_id": "id"},
+            references="cat.sch.customers",  # type: ignore[arg-type]
         )
 
 
@@ -1817,6 +1838,22 @@ def test_foreign_key_accepts_columns_as_any_mapping():
     [constraint] = orders.to_desired_table().foreign_keys
     assert tuple(str(c) for c in constraint.local_columns) == ("customer_id",)
     assert tuple(str(c) for c in constraint.referenced_columns) == ("id",)
+
+
+def test_foreign_key_defensively_copies_mutable_column_input() -> None:
+    # Given mutable sequence and mapping declarations
+    sequence = ["customer_id"]
+    mapping = {"customer_id": "id"}
+
+    # When declarations are constructed and the inputs later change
+    sequence_declaration = ForeignKey(columns=sequence, references=_customers())
+    mapping_declaration = ForeignKey(columns=mapping, references=_customers())
+    sequence.append("tenant_id")
+    mapping["tenant_id"] = "tenant_id"
+
+    # Then each declaration retains the input snapshot from construction
+    assert sequence_declaration.columns == ("customer_id",)
+    assert dict(mapping_declaration.columns) == {"customer_id": "id"}
 
 
 def test_mapping_insertion_order_is_irrelevant():

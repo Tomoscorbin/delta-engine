@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, ForeignKeyReference
 
 
 def _customers() -> QualifiedName:
@@ -68,6 +68,29 @@ def test_rejects_empty_referenced_columns():
         )
 
 
+@pytest.mark.parametrize(
+    ("local_columns", "referenced_columns"),
+    [
+        pytest.param("customer_id", ("id",), id="bare-local-string"),
+        pytest.param(("customer_id",), "id", id="bare-referenced-string"),
+        pytest.param(("customer_id", 42), ("tenant_id", "id"), id="non-string-local"),
+        pytest.param(("customer_id", "tenant_id"), ("id", 42), id="non-string-referenced"),
+    ],
+)
+def test_rejects_invalid_column_collections(
+    local_columns: object,
+    referenced_columns: object,
+) -> None:
+    # Given / When / Then malformed columns fail at the constraint boundary.
+    with pytest.raises(TypeError):
+        ForeignKeyConstraint(
+            local_columns=local_columns,  # type: ignore[arg-type]
+            referenced_table=_customers(),
+            referenced_columns=referenced_columns,  # type: ignore[arg-type]
+            constraint_name="x_fk",
+        )
+
+
 def test_rejects_mismatched_column_counts():
     # Given local and referenced column tuples of different lengths
     # When / Then construction is rejected
@@ -120,6 +143,15 @@ def test_rejects_invalid_constraint_name(
             referenced_table=_customers(),
             referenced_columns=("id",),
             constraint_name=constraint_name,  # type: ignore[arg-type]
+        )
+
+
+def test_foreign_key_reference_rejects_non_string_constraint_name() -> None:
+    # Given / When / Then an invalid name fails with a deliberate boundary error.
+    with pytest.raises(TypeError):
+        ForeignKeyReference(
+            constraint_name=42,  # type: ignore[arg-type]
+            referencing_table=_customers(),
         )
 
 
