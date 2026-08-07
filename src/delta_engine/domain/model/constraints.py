@@ -42,10 +42,6 @@ class PrimaryKeyConstraint:
 
     def __post_init__(self) -> None:
         columns = tuple(self.columns)
-        object.__setattr__(self, "columns", tuple(Identifier(column) for column in columns))
-        if not self.columns:
-            raise ValueError("columns must not be empty")
-
         seen: set[str] = set()
         for column in self.columns:
             if column in seen:
@@ -54,8 +50,14 @@ class PrimaryKeyConstraint:
 
         if not isinstance(self.constraint_name, str):
             raise TypeError("constraint_name must be a string")
+
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+
+        if not self.columns:
+            raise ValueError("columns must not be empty")
+
+        object.__setattr__(self, "columns", tuple(Identifier(column) for column in columns))
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
 
@@ -90,8 +92,7 @@ class ForeignKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "local_columns", tuple(self.local_columns))
-        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
+
         if not self.local_columns:
             raise ValueError("local_columns must not be empty")
 
@@ -118,8 +119,6 @@ class ForeignKeyConstraint:
             ),
             key=lambda pair: pair[0].lower(),
         )
-        object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
-        object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
 
         seen_local: set[str] = set()
         for column in self.local_columns:
@@ -135,6 +134,11 @@ class ForeignKeyConstraint:
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+
+        object.__setattr__(self, "local_columns", tuple(self.local_columns))
+        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
+        object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
+        object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
     @property
