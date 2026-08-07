@@ -458,15 +458,13 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
-    # A table has one primary key but many foreign keys, so a foreign key's
-    # local columns are part of its identity rather than a detail of it.
     local_columns = ", ".join(action.constraint.local_columns)
     return (
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"foreign key ({local_columns})",
-            detail=(f"→ {action.constraint.referenced_table}",),
+            subject=f"foreign key {action.constraint.constraint_name}",
+            detail=(f"({local_columns}) → {action.constraint.referenced_table}",),
         ),
     )
 

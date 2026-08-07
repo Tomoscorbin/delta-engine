@@ -205,16 +205,14 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             DropPrimaryKey("legacy_pk"),
             (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key legacy_pk"),),
         ),
-        # A table has one primary key but many foreign keys, so the local
-        # columns identify the constraint rather than describing it.
         (
             SetForeignKey(constraint=_foreign_key()),
             (
                 DiffEntry(
                     DiffCategory.KEYS,
                     DiffOperation.ADD,
-                    "foreign key (customer_id)",
-                    ("→ cat.sch.customers",),
+                    "foreign key orders_customer_id_fk",
+                    ("(customer_id) → cat.sch.customers",),
                 ),
             ),
         ),

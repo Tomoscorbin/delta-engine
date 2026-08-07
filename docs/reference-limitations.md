@@ -61,10 +61,11 @@ lowercase spelling. Despite that case-insensitive collision rule,
 `DROP CONSTRAINT` requires the exact catalog spelling; with `IF EXISTS`, a
 case mismatch silently does nothing. Databricks generates a name when raw SQL
 omits one. Delta-engine creates an unnamed public primary-key declaration as
-`{table}_pk`; `primary_key_name` can manage another spelling explicitly.
-Foreign-key names are still engine-generated. Databricks has no direct
-constraint-rename clause: changing a managed name requires dropping and
-recreating the constraint.
+`{table}_pk`; `primary_key_name` can manage another spelling explicitly. It
+creates an unnamed public foreign-key declaration as
+`{table}_{local_columns}_fk`; `ForeignKey(name=...)` can manage another
+spelling explicitly. Databricks has no direct constraint-rename clause:
+changing a managed name requires dropping and recreating the constraint.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and
@@ -89,7 +90,7 @@ columns](how-to-configure-table.md#column-mapping-and-dropping-columns).
 | Table properties          |       ✓       | Six managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties))                                                                                                   |
 | Table and column tags     |       ✓       | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                                                                                                                          |
 | Primary keys              |       ✓       | Declared at table level; names may be explicitly managed ([primary keys](how-to-configure-table.md#primary-keys))                                                                                                         |
-| Foreign keys              |       ✓       | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys))                                                 |
+| Foreign keys              |       ✓       | Must target the referenced table's primary key; orders the sync; names may be explicitly managed ([foreign keys](how-to-configure-table.md#foreign-keys))                                                                  |
 | Partitioning              |  Create only  | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                                                                       |
 | Clustering                |       ✓       | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                                                                  |
 | Metadata-only scope       |       ✓       | `scope="metadata"` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                                                                                 |

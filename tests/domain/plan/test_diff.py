@@ -733,7 +733,7 @@ def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
 # ---------- constraint changes
 
 
-def test_present_table_diffs_foreign_keys_by_signature():
+def test_present_table_diffs_foreign_keys_by_name_and_definition():
     # Given one FK declared-and-present, one declared-but-absent,
     # and one observed-but-undeclared
     shared = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
@@ -761,10 +761,70 @@ def test_present_table_diffs_foreign_keys_by_signature():
 
     # Then the absent declaration is set and the undeclared observation dropped
     assert isinstance(drift, TableDrift)
-    set_actions = [a for a in drift.actions if isinstance(a, SetForeignKey)]
-    drop_actions = [a for a in drift.actions if isinstance(a, DropForeignKey)]
-    assert [a.constraint for a in set_actions] == [declared_only]
-    assert [a.constraint.constraint_name for a in drop_actions] == ["legacy_archive_fk"]
+    assert drift.actions == (
+        DropForeignKey(constraint=observed_only),
+        SetForeignKey(constraint=declared_only),
+    )
+
+
+def test_foreign_key_name_drift_replaces_the_constraint():
+    # Given the same FK definition under different desired and observed names
+    desired_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    observed_key = _foreign_key("legacy_customer_fk", local_columns=("customer_id",))
+    columns = (DesiredColumn("customer_id", String()),)
+
+    # When the table is diffed
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(desired_key,)),
+        _observed(columns=columns, foreign_keys=(observed_key,)),
+    )
+
+    # Then the observed occurrence is dropped and the desired one is set
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == (
+        DropForeignKey(constraint=observed_key),
+        SetForeignKey(constraint=desired_key),
+    )
+
+
+def test_foreign_key_name_identity_is_case_insensitive():
+    # Given matching definitions whose physical-name spelling differs only by case
+    desired_key = _foreign_key("Orders_Customer_FK", local_columns=("customer_id",))
+    observed_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    columns = (DesiredColumn("customer_id", String()),)
+
+    # When the table is diffed
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(desired_key,)),
+        _observed(columns=columns, foreign_keys=(observed_key,)),
+    )
+
+    # Then identifier-equivalent names converge without replacement
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == ()
+
+
+def test_foreign_key_definition_drift_under_the_same_name_replaces_the_constraint():
+    # Given one physical FK name whose desired and observed definitions differ
+    desired_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    observed_key = _foreign_key("orders_customer_fk", local_columns=("legacy_customer_id",))
+    columns = (
+        DesiredColumn("customer_id", String()),
+        DesiredColumn("legacy_customer_id", String()),
+    )
+
+    # When the table is diffed
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(desired_key,)),
+        _observed(columns=columns, foreign_keys=(observed_key,)),
+    )
+
+    # Then the stale definition is replaced under that name
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == (
+        DropForeignKey(constraint=observed_key),
+        SetForeignKey(constraint=desired_key),
+    )
 
 
 def test_set_foreign_key_carries_the_declared_spelling():

@@ -682,6 +682,50 @@ def test_delta_table_accepts_foreign_keys_parameter():
     assert foreign_key.constraint_name == "orders_customer_id_fk"
 
 
+def test_foreign_key_name_is_preserved_as_explicit_managed_state():
+    # Given a foreign key with an explicit physical name
+    customers = _customers()
+    declaration = ForeignKey(
+        columns="customer_id",
+        references=customers,
+        name="Orders_Customer_Relationship",
+    )
+
+    # When the declaration is attached to its owning table
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("customer_id", Integer())],
+        foreign_keys=[declaration],
+    )
+
+    # Then the public declaration and domain constraint preserve its spelling
+    assert declaration.name == "Orders_Customer_Relationship"
+    [constraint] = orders.to_desired_table().foreign_keys
+    assert str(constraint.constraint_name) == "Orders_Customer_Relationship"
+
+
+@pytest.mark.parametrize(
+    ("invalid_name", "expected_error"),
+    [
+        pytest.param("  ", ValueError, id="blank"),
+        pytest.param(42, TypeError, id="not-a-string"),
+    ],
+)
+def test_foreign_key_name_rejects_invalid_values(
+    invalid_name: object,
+    expected_error: type[Exception],
+):
+    # Given / When / Then an invalid physical name is rejected at declaration
+    with pytest.raises(expected_error):
+        ForeignKey(
+            columns="customer_id",
+            references=_customers(),
+            name=invalid_name,  # type: ignore[arg-type]
+        )
+
+
 def test_delta_table_defaults_to_no_foreign_keys():
     # Given a table with no foreign_keys argument
     table = DeltaTable(
@@ -1454,8 +1498,8 @@ def _customers() -> DeltaTable:
     )
 
 
-def test_foreign_key_declaration_has_only_columns_and_references():
-    # Given / When / Then the public declaration rejects internal fields
+def test_foreign_key_declaration_rejects_internal_constraint_fields():
+    # Given / When / Then the public declaration rejects lowered domain fields
     with pytest.raises(TypeError):
         ForeignKey(  # type: ignore[call-arg]
             columns={"customer_id": "id"},
@@ -1580,9 +1624,9 @@ def test_delta_table_rejects_cross_catalog_foreign_key():
         )
 
 
-def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
-    # Given two FKs over different local columns whose generated constraint
-    # names collide: ('a', 'b_c') and ('a_b', 'c') both derive orders_a_b_c_fk
+def _table_with_colliding_generated_foreign_key_names(
+    names: tuple[str | None, str | None] = (None, None),
+) -> DeltaTable:
     parts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1593,24 +1637,49 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
         ],
         primary_key=["x", "y"],
     )
+    return DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[
+            Column("a", Integer()),
+            Column("b_c", Integer()),
+            Column("a_b", Integer()),
+            Column("c", Integer()),
+        ],
+        foreign_keys=[
+            ForeignKey(
+                columns={"a": "x", "b_c": "y"},
+                references=parts,
+                name=names[0],
+            ),
+            ForeignKey(
+                columns={"a_b": "x", "c": "y"},
+                references=parts,
+                name=names[1],
+            ),
+        ],
+    )
+
+
+def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
+    # Given two FKs whose distinct column sets both derive orders_a_b_c_fk
 
     # When / Then the collision is rejected at declaration time
     with pytest.raises(ValueError):
-        DeltaTable(
-            catalog="cat",
-            schema="sch",
-            name="orders",
-            columns=[
-                Column("a", Integer()),
-                Column("b_c", Integer()),
-                Column("a_b", Integer()),
-                Column("c", Integer()),
-            ],
-            foreign_keys=[
-                ForeignKey(columns={"a": "x", "b_c": "y"}, references=parts),
-                ForeignKey(columns={"a_b": "x", "c": "y"}, references=parts),
-            ],
-        )
+        _table_with_colliding_generated_foreign_key_names()
+
+
+def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
+    # Given two structurally distinct FKs whose generated names would collide
+
+    # When one declaration supplies a distinct physical name
+    orders = _table_with_colliding_generated_foreign_key_names((None, "orders_parts_two_fk"))
+
+    # Then construction succeeds with one generated and one explicit name
+    assert tuple(
+        str(constraint.constraint_name) for constraint in orders.to_desired_table().foreign_keys
+    ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
 
 
 def test_delta_table_rejects_non_table_reference():

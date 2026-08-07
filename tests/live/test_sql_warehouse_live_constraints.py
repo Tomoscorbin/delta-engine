@@ -156,10 +156,8 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
     )
 
 
-def test_explicit_primary_key_name_and_structural_foreign_key_match_avoid_drift(
-    live_connection, live_tables
-):
-    """An explicit PK name and structural FK identity match existing constraints."""
+def test_explicit_constraint_names_avoid_drift(live_connection, live_tables):
+    """Explicit PK and FK names adopt matching existing constraints."""
     # Given live constraints under names the engine would not generate
     table_name = live_tables("adopted_names")
     execute_sql(
@@ -172,8 +170,7 @@ def test_explicit_primary_key_name_and_structural_foreign_key_match_avoid_drift(
         f"ALTER TABLE {qualified_table(table_name)} ADD CONSTRAINT {table_name}_legacy_fk "
         f"FOREIGN KEY (manager_id) REFERENCES {qualified_table(table_name)} (id)",
     )
-    # Primary-key names are managed, so matching the legacy name is explicit.
-    # Foreign-key identity remains structural until explicit FK names are added.
+    # Both physical names are managed, so adopting the legacy names is explicit.
     declaration = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -184,7 +181,13 @@ def test_explicit_primary_key_name_and_structural_foreign_key_match_avoid_drift(
         ),
         primary_key=("id",),
         primary_key_name=f"{table_name}_legacy_pk",
-        foreign_keys=(ForeignKey(columns={"manager_id": "id"}, references=Self),),
+        foreign_keys=(
+            ForeignKey(
+                columns={"manager_id": "id"},
+                references=Self,
+                name=f"{table_name}_legacy_fk",
+            ),
+        ),
     )
 
     # When syncing the matching declaration
