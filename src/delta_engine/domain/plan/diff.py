@@ -507,28 +507,34 @@ def _diff_primary_key(
     """
     Return primary-key actions; a changed key becomes a drop and a set.
 
-    A primary key is identified by its column set, with absence its own
-    identity. The comparison runs against raw observed names, not the
+    A primary key is identified by its column set and physical name. The
+    comparison runs against raw observed names, not the
     rename-projected frame used by columns and layout: renaming a constrained
     column drops the constraint, so a renamed key must surface as an explicit
-    drop and set. ``SetPrimaryKey`` carries the declared columns verbatim:
-    actions are semantic values, and a declaration whose spelling disagrees
-    with the catalog is rejected as ``ColumnCaseDrift`` before any plan forms.
+    drop and set. Both desired and observed constraints already carry physical
+    names. A declaration whose column spelling disagrees with the catalog is
+    rejected as ``ColumnCaseDrift`` before any plan forms.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
-    desired_signature = desired_key.signature if desired_key is not None else None
-    observed_signature = observed_key.signature if observed_key is not None else None
-    if desired_signature == observed_signature:
+    if desired_key is None:
+        if observed_key is None:
+            return ()
+        return (DropPrimaryKey(constraint_name=observed_key.constraint_name),)
+
+    if observed_key is None:
+        return (SetPrimaryKey(primary_key=desired_key),)
+
+    same_name = desired_key.constraint_name == observed_key.constraint_name
+    same_columns = desired_key.signature == observed_key.signature
+    if same_name and same_columns:
         return ()
 
-    actions: list[DropPrimaryKey | SetPrimaryKey] = []
-    if observed_key is not None:
-        actions.append(DropPrimaryKey(primary_key=observed_key))
-    if desired_key is not None:
-        actions.append(SetPrimaryKey(primary_key=desired_key))
-    return tuple(actions)
+    return (
+        DropPrimaryKey(constraint_name=observed_key.constraint_name),
+        SetPrimaryKey(primary_key=desired_key),
+    )
 
 
 def _diff_foreign_keys(

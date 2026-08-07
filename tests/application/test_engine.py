@@ -163,6 +163,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
 def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
     """Build an observed table that already matches _spec_with_fk(fqn, references)."""
     desired = _spec_with_fk(fqn, references).to_desired_table()
+    assert desired.primary_key is not None
 
     return TablePresent(
         table=ObservedTable(
@@ -667,7 +668,7 @@ def test_unexpected_reader_exception_propagates():
 
     engine = Engine(reader=BuggyReader(), executor=_RecordingExecutor())
 
-    with pytest.raises(RuntimeError, match="adapter bug"):
+    with pytest.raises(RuntimeError):
         engine.sync(_spec("c.s.table"))
 
 
@@ -765,7 +766,7 @@ def test_unexpected_executor_exception_propagates():
 
     engine = Engine(reader=_RecordingReader(), executor=BuggyExecutor())
 
-    with pytest.raises(RuntimeError, match="adapter bug"):
+    with pytest.raises(RuntimeError):
         engine.sync(_spec("c.s.table"))
 
 

@@ -156,13 +156,11 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
     )
 
 
-def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
+def test_explicit_primary_key_name_and_structural_foreign_key_match_avoid_drift(
     live_connection, live_tables
 ):
-    """Adopts a live key created under foreign constraint names, finding no drift."""
-    # Constraint identity is structural: a live PK/FK created under names the
-    # engine would never generate is still the declared constraint, so a sync
-    # finds no drift and the foreign names survive.
+    """An explicit PK name and structural FK identity match existing constraints."""
+    # Given live constraints under names the engine would not generate
     table_name = live_tables("adopted_names")
     execute_sql(
         live_connection,
@@ -174,6 +172,8 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
         f"ALTER TABLE {qualified_table(table_name)} ADD CONSTRAINT {table_name}_legacy_fk "
         f"FOREIGN KEY (manager_id) REFERENCES {qualified_table(table_name)} (id)",
     )
+    # Primary-key names are managed, so matching the legacy name is explicit.
+    # Foreign-key identity remains structural until explicit FK names are added.
     declaration = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -183,11 +183,14 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
             Column("manager_id", Integer()),
         ),
         primary_key=("id",),
+        primary_key_name=f"{table_name}_legacy_pk",
         foreign_keys=(ForeignKey(columns={"manager_id": "id"}, references=Self),),
     )
 
+    # When syncing the matching declaration
     report = build_sql_engine(live_connection).sync(declaration)
 
+    # Then no changes are needed and both physical names survive
     assert report.has_failures is False
     assert report.has_changes is False
     state = read_live_table(live_connection, table_name)

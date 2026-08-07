@@ -336,21 +336,24 @@ class SetColumnNullability(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropPrimaryKey(Action):
-    """Drop a complete observed primary key constraint."""
+    """Drop the table's observed primary key."""
 
-    primary_key: PrimaryKeyConstraint
+    constraint_name: str
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+
     @property
     def subject(self) -> str:
-        return ""
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """Set a complete declared primary key constraint."""
+    """Set the declared primary key."""
 
     primary_key: PrimaryKeyConstraint
 
@@ -359,7 +362,7 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        return ""
+        return self.primary_key.constraint_name
 
 
 @dataclass(frozen=True, slots=True)

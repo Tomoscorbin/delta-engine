@@ -54,8 +54,10 @@ def main() -> None:
             Column("name", String()),
         ],
         primary_key=["id"],
+        primary_key_name="customers_business_key",
     )
     assert table.to_desired_table().qualified_name.name == "customers"
+    assert table.primary_key_name == "customers_business_key"
     assert Engine is not None
 
     for distribution_name in (

@@ -192,11 +192,18 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
         ),
         (
             SetPrimaryKey(primary_key=_primary_key(("id", "tenant_id"))),
-            (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id, tenant_id)",)),),
+            (
+                DiffEntry(
+                    DiffCategory.KEYS,
+                    DiffOperation.ADD,
+                    "primary key tbl_pk",
+                    ("(id, tenant_id)",),
+                ),
+            ),
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key()),
-            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key"),),
+            DropPrimaryKey("legacy_pk"),
+            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key legacy_pk"),),
         ),
         # A table has one primary key but many foreign keys, so the local
         # columns identify the constraint rather than describing it.
@@ -351,27 +358,6 @@ def test_action_entries_render_expected(action, expected):
     assert action_entries(action) == expected
 
 
-def test_create_table_entries_list_columns_with_types_and_primary_key():
-    # Given a CreateTable for a table with a not-null id, a nullable name, and a PK
-    action = CreateTable(
-        table=DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(
-                DesiredColumn("id", Integer(), nullable=False),
-                DesiredColumn("name", String()),
-            ),
-            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
-        )
-    )
-
-    # Then it expands to one columns entry per column (with types) plus the primary key
-    assert action_entries(action) == (
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "name", ("String",)),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id)",)),
-    )
-
-
 def test_create_table_entries_include_clustering_without_optimize_hint():
     # Given a CREATE TABLE that declares clustering keys
     action = CreateTable(
@@ -405,7 +391,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
                 "delta.logRetentionDuration": None,
             },
             partitioned_by=("day",),
-            primary_key=_primary_key(),
+            primary_key=PrimaryKeyConstraint(("id",), "tbl_pk"),
         )
     )
 
@@ -414,7 +400,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
     assert action_entries(action) == (
         DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
         DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "day", ("String",)),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id)",)),
+        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key tbl_pk", ("(id)",)),
         DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, "partitioning", ("(day)",)),
         DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, "delta.appendOnly", ("= 'true'",)),
         DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column id", ("'identifier'",)),

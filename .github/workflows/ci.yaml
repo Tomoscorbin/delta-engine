@@ -41,6 +41,7 @@ jobs:
                   Column("name", String(), nullable=True),
               ],
               primary_key=["id"],
+              primary_key_name="customers_business_key",
           )
 
           desired = table.to_desired_table()
@@ -49,6 +50,7 @@ jobs:
           assert desired.qualified_name.schema == "silver"
           assert desired.qualified_name.name == "customers"
           assert table.primary_key == ("id",)
+          assert table.primary_key_name == "customers_business_key"
           assert Engine is not None
           PY
 

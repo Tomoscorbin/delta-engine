@@ -67,7 +67,10 @@ class _Target:
             case _ as unreachable:
                 assert_never(unreachable)
 
-        return cls(name=name, alter_clause=f"{alter_keyword} {name}")
+        return cls(
+            name=name,
+            alter_clause=f"{alter_keyword} {name}",
+        )
 
 
 def compile_plan(plan: ActionPlan) -> CompiledPlan:
@@ -103,8 +106,8 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = table.primary_key.constraint_name
-        column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
+        constraint_name = backtick(table.primary_key.constraint_name)
+        column_defs.append(f"CONSTRAINT {constraint_name} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
     table_comment = _table_comment_clause(table.comment)

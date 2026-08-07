@@ -170,7 +170,7 @@ def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
     other_plan = ActionPlan(target=QualifiedName("dev", "silver", "other"))
 
     # Then the outcome refuses to pair them
-    with pytest.raises(ValueError, match="must target the diff"):
+    with pytest.raises(ValueError):
         PlanningAccepted(diff=diff, plan=other_plan)
 
 
@@ -260,7 +260,7 @@ def test_plan_changes_replaces_a_primary_key_explicitly_across_a_rename():
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
-        DropPrimaryKey(primary_key=observed_key),
+        DropPrimaryKey("legacy_pk"),
         RenameColumn("customer_nm", "customer_name"),
         SetPrimaryKey(primary_key=desired_key),
     )

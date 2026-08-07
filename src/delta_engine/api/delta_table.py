@@ -524,6 +524,7 @@ class _NormalizedDeclaration:
     partitioned_by: tuple[Identifier, ...]
     clustered_by: tuple[Identifier, ...]
     primary_key: tuple[Identifier, ...] | None
+    primary_key_name: Identifier | None
     foreign_key_declarations: tuple[ForeignKey, ...]
     scope: TableScope
 
@@ -540,6 +541,7 @@ def _normalize_declaration(
     partitioned_by: ListOrTuple[str],
     clustered_by: ListOrTuple[str],
     primary_key: ListOrTuple[str] | None,
+    primary_key_name: str | None,
     foreign_keys: Iterable[ForeignKey] | None,
     scope: ScopeName,
 ) -> _NormalizedDeclaration:
@@ -558,6 +560,14 @@ def _normalize_declaration(
                 f" write {field_name}=[{value!r}] for one column"
             )
 
+    if primary_key_name is not None:
+        if not isinstance(primary_key_name, str):
+            raise TypeError("primary_key_name must be a string or None")
+        if primary_key is None:
+            raise ValueError("primary_key_name requires primary_key")
+        if not primary_key_name.strip():
+            raise ValueError("primary_key_name must not be blank")
+
     return _NormalizedDeclaration(
         qualified_name=QualifiedName(catalog, schema, name),
         columns=tuple(columns),
@@ -569,6 +579,7 @@ def _normalize_declaration(
         primary_key=(
             tuple(Identifier(name) for name in primary_key) if primary_key is not None else None
         ),
+        primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
         foreign_key_declarations=tuple(foreign_keys or ()),
         scope=table_scope_for(scope),
     )
@@ -608,7 +619,11 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     primary_key_constraint = (
         PrimaryKeyConstraint(
             columns=primary_key_columns,
-            constraint_name=f"{declaration.qualified_name.name}_pk",
+            constraint_name=(
+                declaration.primary_key_name
+                if declaration.primary_key_name is not None
+                else Identifier(f"{declaration.qualified_name.name}_pk")
+            ),
         )
         if primary_key_columns is not None
         else None
@@ -668,6 +683,7 @@ class DeltaTable:
         primary_key: ListOrTuple[str] | None = None,
         foreign_keys: Iterable[ForeignKey] | None = None,
         scope: ScopeName = "full",
+        primary_key_name: str | None = None,
     ) -> None:
         """
         Initialise a DeltaTable definition.
@@ -687,6 +703,9 @@ class DeltaTable:
                 ``partitioned_by``.
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
+            primary_key_name: Optional physical name to manage for the primary
+                key. When omitted, a matching observed name is adopted and a
+                new key is created as ``{table}_pk``.
             foreign_keys: Foreign key relationships declared on this table.
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
@@ -720,6 +739,7 @@ class DeltaTable:
             partitioned_by=partitioned_by,
             clustered_by=clustered_by,
             primary_key=primary_key,
+            primary_key_name=primary_key_name,
             foreign_keys=foreign_keys,
             scope=scope,
         )
@@ -780,6 +800,12 @@ class DeltaTable:
     def primary_key(self) -> tuple[str, ...]:
         """Column names declared as the primary key, in declaration order."""
         return self._desired_table.primary_key_columns
+
+    @property
+    def primary_key_name(self) -> str | None:
+        """Generated or explicitly declared primary-key name, if a key exists."""
+        primary_key = self._desired_table.primary_key
+        return str(primary_key.constraint_name) if primary_key is not None else None
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:

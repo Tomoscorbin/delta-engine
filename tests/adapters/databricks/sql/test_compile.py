@@ -291,7 +291,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{_TARGET.name}_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="tbl_pk"),
     )
 
     # When compiling
@@ -375,7 +375,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key()),
+            DropPrimaryKey("tbl_pk"),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
@@ -537,7 +537,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
     DropForeignKey: DropForeignKey(constraint=_foreign_key()),
-    DropPrimaryKey: DropPrimaryKey(primary_key=_primary_key()),
+    DropPrimaryKey: DropPrimaryKey("tbl_pk"),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),

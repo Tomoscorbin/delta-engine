@@ -229,14 +229,14 @@ def drift_entries(drift: TableDrift) -> tuple[DiffEntry, ...]:
 def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     entries = [_column_add_entry(column) for column in action.table.columns]
 
-    primary_key_columns = action.table.primary_key_columns
-    if primary_key_columns:
+    primary_key = action.table.primary_key
+    if primary_key is not None:
         entries.append(
             DiffEntry(
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
-                subject="primary key",
-                detail=_columns_detail(primary_key_columns),
+                subject=f"primary key {primary_key.constraint_name}",
+                detail=_columns_detail(primary_key.columns),
             )
         )
 
@@ -439,7 +439,7 @@ def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject="primary key",
+            subject=f"primary key {action.primary_key.constraint_name}",
             detail=_columns_detail(action.primary_key.columns),
         ),
     )
@@ -447,7 +447,13 @@ def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, subject="primary key"),)
+    return (
+        DiffEntry(
+            DiffCategory.KEYS,
+            DiffOperation.REMOVE,
+            subject=f"primary key {action.constraint_name}",
+        ),
+    )
 
 
 @action_entries.register
