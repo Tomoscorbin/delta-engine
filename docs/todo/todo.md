@@ -11,6 +11,29 @@
       The focused [2026-07-29 Databricks runtime compatibility audit](2026-07-29-databricks-runtime-compatibility-audit.md) records the evidence gaps, proposed minimum live coverage, serverless and warehouse-channel scope, runtime diagnostics, metadata-evolution policy, and prioritized assurance backlog.
 - [ ] Add Spark-backend support for Dedicated access-mode compute (`data_security_mode` value `SINGLE_USER`). It does not currently work and should be treated as unsupported. Identify the incompatible boundary, implement the narrow fix, and add a live regression before documenting support. See the [runtime compatibility audit](2026-07-29-databricks-runtime-compatibility-audit.md).
 - [ ] Create external tables. The read boundary accepts existing external Delta tables (PR #249) and every planned action is a location-agnostic ALTER that reconciles them like managed ones, but the engine cannot create one: `DeltaTable` has no way to declare a location and `compile_create_table` emits no `LOCATION`, so a declared table that is absent is always created managed. Needs a declaration surface, compiler support, validation thought (location drift?), and live coverage against a workspace with an external location.
+- [ ] Build the catalog-to-declaration generator designed in
+      [2026-07-30-catalog-to-declaration-codegen-design.md](2026-07-30-catalog-to-declaration-codegen-design.md),
+      step-by-step in
+      [2026-07-30-catalog-to-declaration-codegen-plan.md](2026-07-30-catalog-to-declaration-codegen-plan.md)
+      (eight tasks, TDD, each ending in a commit).
+      `delta-engine generate CATALOG.SCHEMA.TABLE` provides one supported
+      operation that reads a table and emits a deterministic, importable module
+      containing its supported declaration state. For an ordinary table without
+      outbound foreign keys, the full `Engine.sync(..., dry_run=True)` pipeline
+      must report no failures and no changes. V1 deliberately omits every
+      outbound foreign key, including self-references, under one policy: a source
+      comment and mirrored stderr warning list each complete relationship and
+      state the conditional apply consequence, without generating an executable
+      repair expression.
+      A separate test pins that the only resulting drift is the corresponding
+      `DropForeignKey` actions. Streaming-table scope remains a separate warned
+      limitation. All foreign-key source generation, relationship closure,
+      schema-wide discovery, and the Spark reader path are deferred. The
+      CLI command is the only supported public surface; the warehouse reader
+      factory, observed-to-declaration projection, and Python rendering stay
+      internal. The existing serialisation sites remain local because they
+      encode different boundary contracts, so this feature does not introduce
+      a shared serialisation layer or require a wider architectural redesign.
 - [ ] Databricks reader now reads via `DESCRIBE TABLE EXTENDED … AS JSON` (2026-07-15; per-table round trips ~8→4, both backends share one JSON parser + assembly). Effects on items below: **(7)** struct field names with special characters now round-trip — the JSON reports field names as strings rather than embedded in DDL text, so the parser no longer skips them; keep #7 open only to confirm live, and the declaration-gate workaround is unnecessary. **(4)** struct field nullability is now carried by the AS JSON source (`fields[].nullable`), so modeling it is gated on the domain `StructField` type, not the observation source. **R1 (verify live before relying on it):** managed properties are read from AS JSON's `table_properties` and projected through `DELTA_PROPERTY_POLICY`, and an observed-but-undeclared managed property is a hard validation failure — confirm on a live workspace that `table_properties` never synthesizes a default for any of the 6 managed keys when unset (especially `logRetentionDuration` / `deletedFileRetentionDuration`, which the sampled tables did not exercise); fallback is to read that property from `DESCRIBE DETAIL`. Also confirm `table_constraints` never carries CHECK/UNIQUE bodies (the parser skips unrecognized constraint types rather than failing the read).
 - [x] Live-workspace verification of the warehouse backend (PR #206). DONE 2026-07-12 via the live suite (`uv run pytest tests/live -m databricks_e2e --no-cov`, all green against Unity Catalog): (1) information_schema saw just-created tables within one sync — the create-then-resync idempotency test passed with no stale absence; (2) PK/tag/property rows flowed correctly through the shared `sql/rows.py` mappers across the whole suite; (3) deliberate failure probe: `ServerOperationError` exposes NO structured SQLSTATE/condition attribute in connector 4.x — the error condition appears only as the bracketed message prefix (e.g. `[DELTA_FEATURES_REQUIRE_MANUAL_ENABLEMENT] ...`), and `context` carries only `diagnostic-info` (stack trace) and `operation-id`. A `condition` field on the failure types would therefore require parsing the message head on the warehouse path; decide separately whether that is worth it alongside PySpark's `getCondition()` on the Spark path.
 - [x] Model struct field nullability. RESOLVED 2026-08-04: `StructField` carries `nullable`, and SQL creation plus AS JSON observation round-trip it. Drift in an existing struct is visible as a change to the owning column's complete type and remains blocked by the existing non-widening rule; nested mutation is deliberately deferred until there is a concrete need. Declarations in every scope reject a non-null field below a nullable parent or an array/map because Databricks cannot deploy those states.
