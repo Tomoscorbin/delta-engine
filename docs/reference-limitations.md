@@ -54,6 +54,13 @@ rule.
 `DESCRIBE TABLE` shows the spelling to copy. Callers that relied on lowercase
 accessor values should apply their own presentation policy.
 
+Constraint names occupy one case-insensitive namespace per schema, across
+tables and constraint kinds, while `information_schema` preserves their
+declared spelling. Databricks generates a name when raw SQL omits one, but
+delta-engine currently supplies its own names. Databricks has no direct
+constraint-rename clause: changing a name requires dropping and recreating the
+constraint.
+
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and
 no periods, spaces, forward slashes, control characters, or DEL. Column names

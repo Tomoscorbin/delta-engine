@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
+from databricks.sql.exc import ServerOperationError
+
 from delta_engine import (
     SyncFailedError,
     TableRunStatus,
@@ -191,6 +193,134 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
     state = read_live_table(live_connection, table_name)
     assert state["primary_key_name"] == f"{table_name}_legacy_pk"
     assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
+
+
+def test_platform_preserves_custom_constraint_names_and_drops_them_case_insensitively(
+    live_connection, live_tables
+):
+    """Custom key names retain their spelling but resolve case-insensitively when dropped."""
+    # Name spelling is display metadata, not identity. This is the platform
+    # boundary behind treating an explicitly requested name as a case-insensitive
+    # identifier while retaining its spelling for SQL and reports.
+    parent_name = live_tables("custom_name_parent")
+    child_name = live_tables("custom_name_child")
+    primary_key_name = f"{parent_name}_CustomPk"
+    foreign_key_name = f"{child_name}_CustomFk"
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} "
+        f"(id INT NOT NULL, CONSTRAINT `{primary_key_name}` PRIMARY KEY (id)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} "
+        f"(parent_id INT, CONSTRAINT `{foreign_key_name}` FOREIGN KEY (parent_id) "
+        f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
+    )
+
+    parent = read_live_table(live_connection, parent_name)
+    child = read_live_table(live_connection, child_name)
+    assert parent["primary_key_name"] == primary_key_name
+    assert child["foreign_keys"] == ((foreign_key_name, "parent_id", parent_name, "id"),)
+
+    # DROP CONSTRAINT is how the engine removes an observed FK. A different
+    # spelling of the same name resolves, while the engine's name-independent
+    # DROP PRIMARY KEY form also works for a custom-named PK.
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(child_name)} "
+        f"DROP CONSTRAINT IF EXISTS `{foreign_key_name.swapcase()}`",
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(parent_name)} DROP PRIMARY KEY IF EXISTS",
+    )
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
+    assert read_live_table(live_connection, parent_name)["primary_key"] == ()
+
+
+def test_platform_generates_names_for_unnamed_primary_and_foreign_keys(
+    live_connection, live_tables
+):
+    """Databricks accepts unnamed keys and exposes the generated names in the catalog."""
+    # The engine will continue to materialize its own default names. This pin
+    # records that raw SQL callers may omit names without making generated-name
+    # shape or stability part of the engine's contract.
+    parent_name = live_tables("unnamed_parent")
+    child_name = live_tables("unnamed_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} "
+        "(id INT NOT NULL, PRIMARY KEY (id)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} "
+        f"(parent_id INT, FOREIGN KEY (parent_id) "
+        f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
+    )
+
+    primary_key_name = read_live_table(live_connection, parent_name)["primary_key_name"]
+    [(foreign_key_name, local_column, referenced_table, referenced_column)] = read_live_table(
+        live_connection, child_name
+    )["foreign_keys"]
+    assert isinstance(primary_key_name, str) and primary_key_name
+    assert isinstance(foreign_key_name, str) and foreign_key_name
+    assert primary_key_name.casefold() != foreign_key_name.casefold()
+    assert local_column == "parent_id"
+    assert referenced_table == parent_name
+    assert referenced_column == "id"
+
+
+def test_platform_uses_one_case_insensitive_constraint_name_namespace_per_schema(
+    live_connection, live_tables
+):
+    """PK and FK names on different tables still collide case-insensitively within a schema."""
+    parent_name = live_tables("constraint_namespace_parent")
+    child_name = live_tables("constraint_namespace_child")
+    shared_name = f"{parent_name}_SharedConstraint"
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} "
+        f"(id INT NOT NULL, CONSTRAINT `{shared_name}` PRIMARY KEY (id)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (parent_id INT) USING DELTA",
+    )
+
+    # The conflicting name belongs to a different constraint kind and table;
+    # swapped case proves the namespace compares identifiers, not raw strings.
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(child_name)} "
+            f"ADD CONSTRAINT `{shared_name.swapcase()}` FOREIGN KEY (parent_id) "
+            f"REFERENCES {qualified_table(parent_name)} (id)",
+        )
+
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
+
+
+def test_platform_does_not_offer_a_direct_constraint_rename_clause(live_connection, live_tables):
+    """Constraint names change only by dropping and recreating the constraint."""
+    table_name = live_tables("constraint_rename")
+    old_name = f"{table_name}_OldPk"
+    new_name = f"{table_name}_NewPk"
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} "
+        f"(id INT NOT NULL, CONSTRAINT `{old_name}` PRIMARY KEY (id)) USING DELTA",
+    )
+
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} "
+            f"RENAME CONSTRAINT `{old_name}` TO `{new_name}`",
+        )
+
+    assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name
 
 
 def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
