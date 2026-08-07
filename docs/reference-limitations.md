@@ -19,10 +19,11 @@ the page with the detail.
 
 ## Identifier handling
 
-Identifiers are case-insensitive, matching the platform: Databricks resolves
-all identifiers case-insensitively (backticked or not), and Unity Catalog
-stores catalog, schema, and table names in lowercase. Object name parts are
-therefore normalized to lowercase, exactly as the catalog stores them.
+Catalog, schema, table, and ordinary column references are case-insensitive,
+whether backticked or not. Unity Catalog stores catalog, schema, and table
+names in lowercase, so object name parts are normalized to lowercase exactly
+as the catalog stores them. Constraint-name DDL has an exception described
+below.
 
 Column names and nested struct field names keep their declared or observed
 spelling. Constraint names do not: Unity Catalog stores them in lowercase.
@@ -56,10 +57,12 @@ accessor values should apply their own presentation policy.
 
 Constraint names occupy one case-insensitive namespace per schema, across
 tables and constraint kinds, and `information_schema` exposes their normalized
-lowercase spelling. Databricks generates a name when raw SQL omits one, but
-delta-engine currently supplies its own names. Databricks has no direct
-constraint-rename clause: changing a name requires dropping and recreating
-the constraint.
+lowercase spelling. Despite that case-insensitive collision rule,
+`DROP CONSTRAINT` requires the exact catalog spelling; with `IF EXISTS`, a
+case mismatch silently does nothing. Databricks generates a name when raw SQL
+omits one, but delta-engine currently supplies its own names. Databricks has no
+direct constraint-rename clause: changing a name requires dropping and
+recreating the constraint.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and

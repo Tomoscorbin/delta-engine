@@ -195,13 +195,14 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
     assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
 
 
-def test_platform_lowercases_custom_constraint_names_and_drops_them_case_insensitively(
+def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_named_drop(
     live_connection, live_tables
 ):
-    """Custom key names are stored lowercase and resolve case-insensitively when dropped."""
-    # Constraint name spelling is not identity or retained display metadata.
-    # This is the platform boundary behind normalizing an explicitly requested
-    # name as a case-insensitive identifier.
+    """Custom key names are stored lowercase, which named drops must spell exactly."""
+    # Constraint names collide case-insensitively (pinned separately), but
+    # information_schema does not retain display spelling and DROP CONSTRAINT
+    # is case-sensitive. This asymmetry makes observed physical identity
+    # distinct from the user's naming intent.
     parent_name = live_tables("custom_name_parent")
     child_name = live_tables("custom_name_child")
     primary_key_name = f"{parent_name}_CustomPk"
@@ -223,13 +224,22 @@ def test_platform_lowercases_custom_constraint_names_and_drops_them_case_insensi
     assert parent["primary_key_name"] == primary_key_name.lower()
     assert child["foreign_keys"] == ((foreign_key_name.lower(), "parent_id", parent_name, "id"),)
 
-    # DROP CONSTRAINT is how the engine removes an observed FK. A different
-    # spelling of the same name resolves, while the engine's name-independent
-    # DROP PRIMARY KEY form also works for a custom-named PK.
+    # IF EXISTS hides the case mismatch as an absent constraint: the FK stays.
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(child_name)} "
         f"DROP CONSTRAINT IF EXISTS `{foreign_key_name.swapcase()}`",
+    )
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (foreign_key_name.lower(), "parent_id", parent_name, "id"),
+    )
+
+    # The observed catalog spelling succeeds, as does the engine's
+    # name-independent DROP PRIMARY KEY form for the custom-named PK.
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(child_name)} "
+        f"DROP CONSTRAINT IF EXISTS `{foreign_key_name.lower()}`",
     )
     execute_sql(
         live_connection,
