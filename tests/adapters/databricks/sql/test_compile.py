@@ -291,7 +291,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{_TARGET.name}_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
     )
 
     # When compiling
@@ -303,6 +303,15 @@ def test_create_table_inlines_primary_key_constraint():
         " (`id` INT NOT NULL, `name` STRING, CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
         " USING delta"
     )
+
+
+def test_create_table_uses_an_explicit_primary_key_name():
+    action = _create_table(
+        DesiredColumn("id", Integer(), nullable=False),
+        primary_key=PrimaryKeyConstraint(("id",), "business_key"),
+    )
+
+    assert "CONSTRAINT `business_key` PRIMARY KEY (`id`)" in _compile_single(action)
 
 
 def test_create_table_without_primary_key_omits_constraint_clause():
@@ -375,7 +384,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key()),
+            DropPrimaryKey(),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
@@ -417,6 +426,14 @@ def test_set_primary_key_renders_composite_primary_key():
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+    )
+
+
+def test_set_primary_key_resolves_the_default_name_from_the_plan_target():
+    action = SetPrimaryKey(primary_key=PrimaryKeyConstraint(("id",)))
+
+    assert _compile_single(action) == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)"
     )
 
 
@@ -537,7 +554,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
     DropForeignKey: DropForeignKey(constraint=_foreign_key()),
-    DropPrimaryKey: DropPrimaryKey(primary_key=_primary_key()),
+    DropPrimaryKey: DropPrimaryKey(),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),

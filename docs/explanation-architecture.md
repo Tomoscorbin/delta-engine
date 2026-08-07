@@ -680,7 +680,8 @@ executing.
 
 - rejects property keys the engine does not manage (valued or `None`) and
   rejects invalid declared property values
-- generates a primary-key constraint from the table-level `primary_key` argument
+- lowers the table-level `primary_key` and optional `primary_key_name` into one
+  `PrimaryKeyConstraint`
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values
 - validates structural invariants such as non-empty columns, unique column
@@ -750,30 +751,24 @@ declaration shape.
 
 ## Constraint names
 
-Constraint names are data, not hidden compiler policy.
+Constraint names remain data on the concrete key objects; the domain does not
+introduce separate definition, desired-specification, or physical-occurrence
+wrappers.
 
-For desired tables, the API layer generates names when a `DeltaTable` is lowered
-to a `DesiredTable`:
+`PrimaryKeyConstraint` owns the complete primary-key naming policy behind two
+operations. Its satisfaction check compares the column set and, only when the
+desired name is explicit, the name's case-insensitive identifier identity. Its
+name resolver returns that explicit name or the `{table}_pk` default used for
+creation. Desired tables may therefore carry `constraint_name=None`, while the
+reader always supplies the catalog name on an observed table. `DesiredTable`
+and `ObservedTable` provide the lifecycle context without changing the value's
+shape.
 
-- primary key: `{table}_pk`
-- foreign key: `{table}_{local_columns}_fk`, joining the local columns in
-  sorted order, so the name is independent of declaration order
-
-For observed tables, the reader adapter reads constraint names from the catalog.
-After that, names live on `PrimaryKeyConstraint` and `ForeignKeyConstraint`
-objects. The differ and SQL compiler read the names directly instead of
-deriving them again.
-
-The diff uses constraint content, not names alone, to decide identity:
-
-- primary-key identity is the set of key columns; declaration order and
-  constraint name do not make two primary keys different.
-- foreign-key identity is the signature of local columns, referenced table, and
-  referenced columns; an unchanged FK with a different catalog constraint name
-  stays idempotent.
-
-This keeps naming policy at the boundary where the domain model is populated and
-keeps downstream planning focused on schema facts.
+Foreign keys retain their current concrete `ForeignKeyConstraint`. Their
+generated name is `{table}_{local_columns}_fk`, joining the local columns in
+sorted order, and their current diff identity excludes the name. Explicit FK
+naming is intentionally deferred until the FK declaration and resolution
+design is simplified separately.
 
 ## Reporting and failure semantics
 

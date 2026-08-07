@@ -51,6 +51,7 @@ class _Target:
 
     name: str
     alter_clause: str
+    table_name: str
 
     @classmethod
     def for_relation(cls, qualified_name: QualifiedName, kind: TableKind) -> Self:
@@ -67,7 +68,11 @@ class _Target:
             case _ as unreachable:
                 assert_never(unreachable)
 
-        return cls(name=name, alter_clause=f"{alter_keyword} {name}")
+        return cls(
+            name=name,
+            alter_clause=f"{alter_keyword} {name}",
+            table_name=qualified_name.name,
+        )
 
 
 def compile_plan(plan: ActionPlan) -> CompiledPlan:
@@ -103,7 +108,7 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = table.primary_key.constraint_name
+        constraint_name = table.primary_key.resolved_name(table.qualified_name.name)
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
@@ -249,7 +254,7 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
-    constraint = backtick(action.primary_key.constraint_name)
+    constraint = backtick(action.primary_key.resolved_name(target.table_name))
     return f"{target.alter_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
 
 

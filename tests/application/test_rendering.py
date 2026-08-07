@@ -195,7 +195,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id, tenant_id)",)),),
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key()),
+            DropPrimaryKey(),
             (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key"),),
         ),
         # A table has one primary key but many foreign keys, so the local

@@ -691,7 +691,7 @@ def test_desired_only_primary_key_produces_added_change():
 
 def test_equal_primary_keys_by_column_set_produce_no_change():
     # Given the same PK column set under different orders and names
-    desired_pk = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="test_pk")
+    desired_pk = PrimaryKeyConstraint(columns=("a", "b"))
     observed_pk = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="other_name")
     columns = (
         DesiredColumn("a", Integer(), nullable=False),
@@ -707,6 +707,41 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()
+
+
+def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
+    desired_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="managed_pk")
+    observed_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+    columns = (DesiredColumn("id", Integer(), nullable=False),)
+
+    diff = diff_table(
+        _desired(columns=columns, primary_key=desired_pk),
+        _observed(columns=columns, primary_key=observed_pk),
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (
+        DropPrimaryKey(),
+        SetPrimaryKey(primary_key=desired_pk),
+    )
+
+
+def test_explicit_primary_key_name_matches_catalog_normalization():
+    columns = (DesiredColumn("id", Integer(), nullable=False),)
+
+    diff = diff_table(
+        _desired(
+            columns=columns,
+            primary_key=PrimaryKeyConstraint(("id",), "Orders_PK"),
+        ),
+        _observed(
+            columns=columns,
+            primary_key=PrimaryKeyConstraint(("id",), "orders_pk"),
+        ),
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == ()
 
 
 # ---------- constraint changes
@@ -824,7 +859,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropPrimaryKey(primary_key=primary_key),)
+    assert diff.actions == (DropPrimaryKey(),)
 
 
 def test_changed_primary_key_produces_drop_and_set_actions():
@@ -845,7 +880,7 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     # Then the observed key is dropped and the desired key is set
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey(primary_key=observed_primary_key),
+        DropPrimaryKey(),
         SetPrimaryKey(primary_key=desired_primary_key),
     )
 
@@ -1054,7 +1089,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropPrimaryKey(primary_key=observed_key),
+        DropPrimaryKey(),
         SetPrimaryKey(primary_key=desired_key),
     }
 

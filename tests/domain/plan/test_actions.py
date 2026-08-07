@@ -83,7 +83,7 @@ def _create_table_action() -> CreateTable:
 
 
 def _drop_primary_key() -> DropPrimaryKey:
-    return DropPrimaryKey(primary_key=_primary_key())
+    return DropPrimaryKey()
 
 
 def _concrete_action_types() -> list[type[Action]]:

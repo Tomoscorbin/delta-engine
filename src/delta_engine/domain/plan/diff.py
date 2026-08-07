@@ -507,8 +507,9 @@ def _diff_primary_key(
     """
     Return primary-key actions; a changed key becomes a drop and a set.
 
-    A primary key is identified by its column set, with absence its own
-    identity. The comparison runs against raw observed names, not the
+    A primary key is identified by its column set. An omitted desired name
+    adopts any matching observed occurrence; an explicit name is managed.
+    The comparison runs against raw observed names, not the
     rename-projected frame used by columns and layout: renaming a constrained
     column drops the constraint, so a renamed key must surface as an explicit
     drop and set. ``SetPrimaryKey`` carries the declared columns verbatim:
@@ -518,14 +519,18 @@ def _diff_primary_key(
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
-    desired_signature = desired_key.signature if desired_key is not None else None
-    observed_signature = observed_key.signature if observed_key is not None else None
-    if desired_signature == observed_signature:
+    if desired_key is None and observed_key is None:
+        return ()
+    if (
+        desired_key is not None
+        and observed_key is not None
+        and desired_key.is_satisfied_by(observed_key)
+    ):
         return ()
 
     actions: list[DropPrimaryKey | SetPrimaryKey] = []
     if observed_key is not None:
-        actions.append(DropPrimaryKey(primary_key=observed_key))
+        actions.append(DropPrimaryKey())
     if desired_key is not None:
         actions.append(SetPrimaryKey(primary_key=desired_key))
     return tuple(actions)

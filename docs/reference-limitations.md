@@ -60,8 +60,10 @@ tables and constraint kinds, and `information_schema` exposes their normalized
 lowercase spelling. Despite that case-insensitive collision rule,
 `DROP CONSTRAINT` requires the exact catalog spelling; with `IF EXISTS`, a
 case mismatch silently does nothing. Databricks generates a name when raw SQL
-omits one, but delta-engine currently supplies its own names. Databricks has no
-direct constraint-rename clause: changing a name requires dropping and
+omits one. Delta-engine creates an unnamed public primary-key declaration as
+`{table}_pk`; `primary_key_name` can manage another spelling explicitly.
+Foreign-key names are still engine-generated. Databricks has no direct
+constraint-rename clause: changing a managed name requires dropping and
 recreating the constraint.
 
 Declared catalog, schema, and table names are validated against Unity
@@ -86,7 +88,7 @@ columns](how-to-configure-table.md#column-mapping-and-dropping-columns).
 | Table and column comments |       ✓       | Always managed; an empty declaration clears the comment ([comments](how-to-configure-table.md#comments))                                                                                                                  |
 | Table properties          |       ✓       | Six managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties))                                                                                                   |
 | Table and column tags     |       ✓       | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                                                                                                                          |
-| Primary keys              |       ✓       | Declared at table level ([primary keys](how-to-configure-table.md#primary-keys))                                                                                                                                          |
+| Primary keys              |       ✓       | Declared at table level; names may be explicitly managed ([primary keys](how-to-configure-table.md#primary-keys))                                                                                                         |
 | Foreign keys              |       ✓       | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys))                                                 |
 | Partitioning              |  Create only  | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                                                                       |
 | Clustering                |       ✓       | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                                                                  |

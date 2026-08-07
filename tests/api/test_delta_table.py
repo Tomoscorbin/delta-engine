@@ -503,11 +503,29 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
         primary_key=["tenant_id", "id"],
     )
 
-    # Then the constraint carries the declared columns and generated name
+    # Then the constraint carries the columns while leaving its name unpinned
     desired = table.to_desired_table()
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
-    assert desired.primary_key.constraint_name == "accounts_pk"
+    assert desired.primary_key.constraint_name is None
+    assert table.primary_key_name is None
+
+
+def test_primary_key_name_is_preserved_as_explicit_managed_state():
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="accounts",
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
+        primary_key_name="Accounts_Business_Key",
+    )
+
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert str(desired.primary_key.constraint_name) == "Accounts_Business_Key"
+    assert table.primary_key == ("id",)
+    assert table.primary_key_name == "Accounts_Business_Key"
 
 
 def test_no_primary_key_parameter_means_no_key():
@@ -520,6 +538,33 @@ def test_no_primary_key_parameter_means_no_key():
 
     assert table.to_desired_table().primary_key is None
     assert table.primary_key == ()
+    assert table.primary_key_name is None
+
+
+def test_primary_key_name_requires_a_primary_key():
+    with pytest.raises(ValueError, match="primary_key_name requires primary_key"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer())],
+            primary_key_name="events_pk",
+        )
+
+
+def test_primary_key_name_must_be_a_non_blank_string():
+    kwargs = {
+        "catalog": "cat",
+        "schema": "sch",
+        "name": "events",
+        "columns": [Column("id", Integer(), nullable=False)],
+        "primary_key": ["id"],
+    }
+
+    with pytest.raises(ValueError, match="primary_key_name must not be blank"):
+        DeltaTable(**kwargs, primary_key_name="  ")
+    with pytest.raises(TypeError, match="primary_key_name must be a string or None"):
+        DeltaTable(**kwargs, primary_key_name=42)  # type: ignore[arg-type]
 
 
 def test_empty_primary_key_sequence_is_rejected():
@@ -591,8 +636,8 @@ def test_delta_table_passes_pk_to_desired_table():
     # When converting to domain
     desired = table.to_desired_table()
 
-    # Then primary_key is set as a value object carrying its engine-generated name
-    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
+    # Then primary_key is set as an unpinned value object
+    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():

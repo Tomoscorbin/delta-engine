@@ -472,10 +472,37 @@ orders = DeltaTable(
 )
 ```
 
-The engine names the constraint `{table}_pk` — `orders_pk` above. The name is
-generated when the `DeltaTable` is lowered to the domain model, then carried as
-data through diffing and SQL generation rather than re-derived; it is not
-exposed on the table object.
+When the engine creates this key, it names the constraint `{table}_pk` —
+`orders_pk` above. Leaving the name unspecified also means that an existing
+primary key over the same columns is adopted under whatever name it already
+has, avoiding a needless replacement.
+
+### Choose a primary-key name
+
+Pass `primary_key_name` when the physical name is managed state:
+
+```python
+orders = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="orders",
+    columns=[Column("order_id", Integer(), nullable=False)],
+    primary_key=["order_id"],
+    primary_key_name="orders_business_key",
+)
+```
+
+An explicit name must accompany `primary_key`. If the live key has the same
+columns under another name, the engine drops and recreates it because
+Databricks has no direct constraint-rename operation. Name identity is
+case-insensitive, so a declared `Orders_Business_Key` matches the catalog's
+normalized `orders_business_key` spelling.
+
+Constraint names share one case-insensitive namespace across all tables and
+constraint kinds in a schema. Choose an explicit name that is unique across
+that whole schema. `DeltaTable.primary_key_name` returns the explicit name, or
+`None` when the declaration leaves it unpinned; `DeltaTable.primary_key`
+continues to return the tuple of key columns.
 
 ### Composite primary keys
 
@@ -517,19 +544,17 @@ engine plan that drops and re-adds the key restores the default `NORELY` form.
 
 ### Drift
 
-The engine detects primary key drift by comparing the _column set_, not the
-constraint name. The generated `{table}_pk` name is used only to emit the DDL;
-it never participates in the comparison. So a primary key already on the table
-with the same columns under a different name — one created by hand or by another
-tool — is not drift and produces no action, which keeps repeated syncs
-idempotent.
+The engine first compares primary keys by their _column set_. An omitted name
+adopts a matching observed key under any name. An explicit name is managed and
+must match too.
 
-| Change                       | Actions emitted                       |
-| ---------------------------- | ------------------------------------- |
-| Primary key added            | `SetPrimaryKey`                       |
-| Primary key removed          | `DropPrimaryKey`                      |
-| Primary key columns changed  | `DropPrimaryKey` then `SetPrimaryKey` |
-| Same columns, any name/order | nothing                               |
+| Change                                   | Actions emitted                       |
+| ---------------------------------------- | ------------------------------------- |
+| Primary key added                        | `SetPrimaryKey`                       |
+| Primary key removed                      | `DropPrimaryKey`                      |
+| Primary key columns changed              | `DropPrimaryKey` then `SetPrimaryKey` |
+| Same columns/order changed, name omitted | nothing; adopt the observed name      |
+| Same columns, explicit name changed      | `DropPrimaryKey` then `SetPrimaryKey` |
 
 Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
 as equal.

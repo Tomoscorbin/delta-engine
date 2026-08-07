@@ -140,6 +140,15 @@ def test_observed_table_has_primary_key_field():
     assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
+def test_observed_table_rejects_an_unnamed_primary_key():
+    with pytest.raises(ValueError, match="Observed primary key must have a constraint name"):
+        ObservedTable(
+            qualified_name=_QN,
+            columns=(_OBSERVED_COL,),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
+        )
+
+
 def test_desired_table_rejects_nullable_primary_key_column():
     # Given a desired table whose primary key column is nullable
     # Then construction raises — a nullable PK is not a well-formed desired schema

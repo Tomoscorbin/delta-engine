@@ -163,12 +163,16 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
 def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
     """Build an observed table that already matches _spec_with_fk(fqn, references)."""
     desired = _spec_with_fk(fqn, references).to_desired_table()
+    assert desired.primary_key is not None
 
     return TablePresent(
         table=ObservedTable(
             qualified_name=desired.qualified_name,
             columns=as_observed_columns(desired.columns),
-            primary_key=desired.primary_key,
+            primary_key=PrimaryKeyConstraint(
+                desired.primary_key.columns,
+                desired.primary_key.resolved_name(desired.qualified_name.name),
+            ),
             foreign_keys=desired.foreign_keys,
         )
     )
