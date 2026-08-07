@@ -763,11 +763,14 @@ reader likewise supplies the catalog name when it constructs an observed key.
 The differ can therefore compare column-set and case-insensitive name identity
 without resolving lifecycle state, and the compiler consumes the same value.
 
-Foreign keys retain their current concrete `ForeignKeyConstraint`. Their
-generated name is `{table}_{local_columns}_fk`, joining the local columns in
-sorted order, and their current diff identity excludes the name. Explicit FK
-naming is intentionally deferred until the FK declaration and resolution
-design is simplified separately.
+Every `ForeignKeyConstraint` is likewise complete: it carries its physical name
+as well as its local-to-referenced definition. Public `ForeignKey.name=None` is
+input shorthand only. When the declaration is attached to a `DeltaTable`, the
+API layer already knows the owner and generates `{table}_{local_columns}_fk`
+once; an explicit name passes through unchanged. Canonicalized column pairs and
+case-insensitive identifiers make normal constraint equality express both
+physical-name and structural identity. The differ and compiler consume that
+same complete value.
 
 ## Reporting and failure semantics
 

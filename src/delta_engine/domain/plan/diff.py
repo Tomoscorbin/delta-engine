@@ -543,24 +543,31 @@ def _diff_foreign_keys(
     """
     Return set/drop actions converging the table's foreign keys.
 
-    Constraints are matched by content signature (columns and referenced
-    table; names excluded), so a generated name and a catalog name still
-    match. A declared-but-absent constraint is set carrying the declaration
-    verbatim; an observed-but-undeclared one is dropped carrying the observed
-    constraint — drops go by name. Everything here reads the child's own
-    snapshot; whether the referenced table can hold up its end is the
-    relationship resolver's judgment, not a difference.
+    A constraint is present only when its physical name and definition match.
+    Missing names are added, extra names are dropped, and a definition change
+    under the same name becomes a drop and set. Names use ``Identifier``
+    equality, so spelling case is immaterial. Everything here reads the
+    child's own snapshot; whether the referenced table can hold up its end is
+    the relationship resolver's judgment, not a difference.
     """
-    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
-    actions: list[SetForeignKey | DropForeignKey] = []
-    for signature, constraint in desired_by_signature.items():
-        if signature not in observed_by_signature:
-            actions.append(SetForeignKey(constraint=constraint))
-    for signature, constraint in observed_by_signature.items():
-        if signature not in desired_by_signature:
-            actions.append(DropForeignKey(constraint=constraint))
-    return tuple(actions)
+    desired_by_name = {fk.constraint_name: fk for fk in desired.foreign_keys}
+    observed_by_name = {fk.constraint_name: fk for fk in observed.foreign_keys}
+    drops: list[DropForeignKey] = []
+    sets: list[SetForeignKey] = []
+
+    for name, desired_constraint in desired_by_name.items():
+        observed_constraint = observed_by_name.get(name)
+        if observed_constraint is None:
+            sets.append(SetForeignKey(constraint=desired_constraint))
+        elif desired_constraint != observed_constraint:
+            drops.append(DropForeignKey(constraint=observed_constraint))
+            sets.append(SetForeignKey(constraint=desired_constraint))
+
+    for name, observed_constraint in observed_by_name.items():
+        if name not in desired_by_name:
+            drops.append(DropForeignKey(constraint=observed_constraint))
+
+    return (*drops, *sets)
 
 
 def _diff_table_metadata(

@@ -595,7 +595,11 @@ orders = DeltaTable(
     ],
     primary_key=["order_id"],
     foreign_keys=[
-        ForeignKey(columns="customer_id", references=customers),
+        ForeignKey(
+            columns="customer_id",
+            references=customers,
+            name="orders_customer_fk",
+        ),
     ],
 )
 ```
@@ -603,18 +607,20 @@ orders = DeltaTable(
 Referencing the target `DeltaTable` object — rather than a dotted table name —
 lets the engine resolve the declaration against that table's primary key,
 validate the resulting column pairs, and capture the target's qualified name.
-The constraint name is generated at lowering as
-`{table}_{local_columns}_fk`, joining the local columns in sorted
-order (`orders_customer_id_fk` above). The name cannot be chosen, and drift
-matching never depends on it — a foreign key created outside the engine under a
-different name still matches by content.
+Set `name` when you need to adopt or choose the physical constraint name. When
+it is omitted, the owning `DeltaTable` generates
+`{table}_{local_columns}_fk`, joining the local columns in sorted order
+(`orders_customer_id_fk` for the example without its explicit name). The name
+is materialized once when the `DeltaTable` is constructed; downstream planning
+and SQL consume that complete constraint.
 
 Generated names join local columns with underscores, so two foreign keys over
 different columns can derive the same name — `("a", "b_c")` and `("a_b", "c")`
 both derive `orders_a_b_c_fk`. A within-table collision is rejected when the
-`DeltaTable` is constructed; rename a local column so the names differ.
-Databricks scopes constraint names to the schema, so a generated name can also
-collide with a constraint on _another_ table — that case is not checked and
+`DeltaTable` is constructed; give either `ForeignKey` an explicit, distinct
+name. Databricks scopes constraint names to the schema, so generated or
+explicit names can also collide with a constraint on _another_ table. The
+engine does not yet validate that schema-wide namespace, so such a collision
 fails at execution.
 
 Each local column's data type must match its referenced primary-key column's
@@ -725,20 +731,20 @@ being silently assumed correct.
 
 ### Drift
 
-The engine matches foreign keys by content — local columns, referenced table,
-and referenced columns — not by constraint name.
+The engine compares foreign keys by physical name and definition: local
+columns, referenced table, and referenced columns. An omitted public name
+becomes the managed generated name when the `DeltaTable` is constructed. Use
+`name` to adopt a differently named live constraint. Name identity is
+case-insensitive, while the spelling supplied by the declaration is preserved
+for SQL and previews.
 
 | Change                                      | Actions emitted                       |
 | ------------------------------------------- | ------------------------------------- |
 | Foreign key added                           | `SetForeignKey`                       |
 | Foreign key removed                         | `DropForeignKey`                      |
-| Foreign key changed                         | `DropForeignKey` then `SetForeignKey` |
-| Same foreign key, different constraint name | nothing                               |
+| Foreign key definition changed              | `DropForeignKey` then `SetForeignKey` |
+| Same definition, physical name changed      | `DropForeignKey` then `SetForeignKey` |
 | No change                                   | nothing                               |
-
-Matching by content keeps syncs idempotent: a foreign key created outside this
-engine, under a name the engine would not derive, produces no actions as long
-as its columns and referenced table match the declaration.
 
 ### Constraints are informational
 
