@@ -412,7 +412,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
                 "delta.logRetentionDuration": None,
             },
             partitioned_by=("day",),
-            primary_key=PrimaryKeyConstraint(("id",)),
+            primary_key=PrimaryKeyConstraint(("id",), "tbl_pk"),
         )
     )
 

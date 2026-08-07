@@ -619,7 +619,11 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     primary_key_constraint = (
         PrimaryKeyConstraint(
             columns=primary_key_columns,
-            constraint_name=declaration.primary_key_name,
+            constraint_name=(
+                declaration.primary_key_name
+                if declaration.primary_key_name is not None
+                else Identifier(f"{declaration.qualified_name.name}_pk")
+            ),
         )
         if primary_key_columns is not None
         else None
@@ -799,11 +803,9 @@ class DeltaTable:
 
     @property
     def primary_key_name(self) -> str | None:
-        """Explicitly managed primary-key name, or ``None`` when unpinned."""
+        """Generated or explicitly declared primary-key name, if a key exists."""
         primary_key = self._desired_table.primary_key
-        if primary_key is None or primary_key.constraint_name is None:
-            return None
-        return str(primary_key.constraint_name)
+        return str(primary_key.constraint_name) if primary_key is not None else None
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:

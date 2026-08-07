@@ -353,26 +353,16 @@ class DropPrimaryKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """Set a primary key whose physical name was resolved while diffing."""
+    """Set the declared primary key."""
 
     primary_key: PrimaryKeyConstraint
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
 
-    def __post_init__(self) -> None:
-        if self.primary_key.constraint_name is None:
-            raise ValueError("SetPrimaryKey requires a resolved constraint name")
-
-    @property
-    def constraint_name(self) -> str:
-        """Return the physical name guaranteed by this executable action."""
-        assert self.primary_key.constraint_name is not None
-        return self.primary_key.constraint_name
-
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.primary_key.constraint_name
 
 
 @dataclass(frozen=True, slots=True)

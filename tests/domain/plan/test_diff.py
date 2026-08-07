@@ -689,24 +689,9 @@ def test_desired_only_primary_key_produces_added_change():
     assert diff.actions == (SetPrimaryKey(primary_key=pk),)
 
 
-def test_unnamed_primary_key_is_materialized_in_the_set_action():
-    desired_key = PrimaryKeyConstraint(columns=("id",))
-
-    diff = diff_table(
-        _desired(
-            columns=(DesiredColumn("id", Integer(), nullable=False),),
-            primary_key=desired_key,
-        ),
-        _observed(columns=(DesiredColumn("id", Integer(), nullable=False),)),
-    )
-
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == (SetPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "test_pk")),)
-
-
-def test_equal_primary_keys_by_column_set_produce_no_change():
-    # Given the same PK column set under different orders and names
-    desired_pk = PrimaryKeyConstraint(columns=("a", "b"))
+def test_equal_primary_keys_by_column_set_and_name_produce_no_change():
+    # Given the same PK column set and name under different orders and casing
+    desired_pk = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="Other_Name")
     observed_pk = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="other_name")
     columns = (
         DesiredColumn("a", Integer(), nullable=False),
@@ -718,7 +703,7 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
         _observed(columns=columns, primary_key=observed_pk),
     )
 
-    # Then identity is column-set equality — no change
+    # Then column-set and identifier-name identity agree — no change
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()

@@ -755,14 +755,13 @@ Constraint names remain data on the concrete key objects; the domain does not
 introduce separate definition, desired-specification, or physical-occurrence
 wrappers.
 
-`PrimaryKeyConstraint` owns the complete primary-key naming policy behind two
-operations. Its satisfaction check compares the column set and, only when the
-desired name is explicit, the name's case-insensitive identifier identity. Its
-name resolver returns that explicit name or the `{table}_pk` default used for
-creation. Desired tables may therefore carry `constraint_name=None`, while the
-reader always supplies the catalog name on an observed table. `DesiredTable`
-and `ObservedTable` provide the lifecycle context without changing the value's
-shape.
+Every `PrimaryKeyConstraint` is complete: it carries its physical name as well
+as its columns. Public `primary_key_name=None` is input shorthand only. When
+the declaration is lowered, the API layer already knows the owning table and
+generates `{table}_pk` once; an explicit name passes through unchanged. The
+reader likewise supplies the catalog name when it constructs an observed key.
+The differ can therefore compare column-set and case-insensitive name identity
+without resolving lifecycle state, and the compiler consumes the same value.
 
 Foreign keys retain their current concrete `ForeignKeyConstraint`. Their
 generated name is `{table}_{local_columns}_fk`, joining the local columns in

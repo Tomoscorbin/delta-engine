@@ -27,15 +27,14 @@ class PrimaryKeyConstraint:
     Attributes:
         columns: Ordered tuple of column names, preserving their supplied
             spelling. Identity and duplicates are judged by identifier key.
-        constraint_name: Optional managed constraint name, preserving its
-            spelling. ``None`` on desired state adopts a matching observed
-            name and resolves to ``{table}_pk`` when the key is created.
-            Catalog-observed keys always carry their physical name.
+        constraint_name: Physical constraint name, preserving its spelling.
+            Public declarations generate the default ``{table}_pk`` name before
+            constructing this domain value.
 
     """
 
     columns: ListOrTuple[str]
-    constraint_name: str | None = None
+    constraint_name: str
 
     @property
     def signature(self) -> KeySignature:
@@ -45,14 +44,8 @@ class PrimaryKeyConstraint:
     def is_satisfied_by(self, observed: Self) -> bool:
         """Return whether ``observed`` satisfies this desired primary key."""
         return self.signature == observed.signature and (
-            self.constraint_name is None or self.constraint_name == observed.constraint_name
+            self.constraint_name == observed.constraint_name
         )
-
-    def resolved_name(self, owner_table_name: str) -> Identifier:
-        """Return the explicit name, or the deterministic name used for creation."""
-        if self.constraint_name is not None:
-            return Identifier(self.constraint_name)
-        return Identifier(f"{owner_table_name}_pk")
 
     def __post_init__(self) -> None:
         columns = tuple(self.columns)
@@ -66,12 +59,11 @@ class PrimaryKeyConstraint:
                 raise ValueError(f"Duplicate primary key column: {column}")
             seen.add(column)
 
-        if self.constraint_name is not None:
-            if not isinstance(self.constraint_name, str):
-                raise TypeError("constraint_name must be a string or None")
-            if not self.constraint_name.strip():
-                raise ValueError("constraint_name must not be blank")
-            object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        if not isinstance(self.constraint_name, str):
+            raise TypeError("constraint_name must be a string")
+        if not self.constraint_name.strip():
+            raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
 
 @dataclass(frozen=True, slots=True)

@@ -169,10 +169,7 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=desired.qualified_name,
             columns=as_observed_columns(desired.columns),
-            primary_key=PrimaryKeyConstraint(
-                desired.primary_key.columns,
-                desired.primary_key.resolved_name(desired.qualified_name.name),
-            ),
+            primary_key=desired.primary_key,
             foreign_keys=desired.foreign_keys,
         )
     )

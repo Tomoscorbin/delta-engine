@@ -352,9 +352,6 @@ class ObservedTable:
         return tuple(self.primary_key.columns) if self.primary_key is not None else ()
 
     def __post_init__(self) -> None:
-        if self.primary_key is not None and self.primary_key.constraint_name is None:
-            raise ValueError("Observed primary key must have a constraint name")
-
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         partitioned_by = tuple(self.partitioned_by)

@@ -291,11 +291,6 @@ def test_plan_orders_property_before_type_widen_and_key_set():
     assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
 
 
-def test_set_primary_key_rejects_an_unresolved_constraint_name():
-    with pytest.raises(ValueError, match="requires a resolved constraint name"):
-        SetPrimaryKey(PrimaryKeyConstraint(("id",)))
-
-
 def test_plan_reclusters_after_add_and_before_drop():
     plan = _plan(
         DropColumn(_observed_column("old_region")),

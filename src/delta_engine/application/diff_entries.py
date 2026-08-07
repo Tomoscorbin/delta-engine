@@ -231,12 +231,11 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
 
     primary_key = action.table.primary_key
     if primary_key is not None:
-        constraint_name = primary_key.resolved_name(action.table.qualified_name.name)
         entries.append(
             DiffEntry(
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
-                subject=f"primary key {constraint_name}",
+                subject=f"primary key {primary_key.constraint_name}",
                 detail=_columns_detail(primary_key.columns),
             )
         )
@@ -440,7 +439,7 @@ def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"primary key {action.constraint_name}",
+            subject=f"primary key {action.primary_key.constraint_name}",
             detail=_columns_detail(action.primary_key.columns),
         ),
     )

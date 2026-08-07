@@ -473,9 +473,8 @@ orders = DeltaTable(
 ```
 
 When the engine creates this key, it names the constraint `{table}_pk` —
-`orders_pk` above. Leaving the name unspecified also means that an existing
-primary key over the same columns is adopted under whatever name it already
-has, avoiding a needless replacement.
+`orders_pk` above. The name is generated when the `DeltaTable` is constructed
+and is managed state, just like an explicitly supplied name.
 
 ### Choose a primary-key name
 
@@ -500,9 +499,9 @@ normalized `orders_business_key` spelling.
 
 Constraint names share one case-insensitive namespace across all tables and
 constraint kinds in a schema. Choose an explicit name that is unique across
-that whole schema. `DeltaTable.primary_key_name` returns the explicit name, or
-`None` when the declaration leaves it unpinned; `DeltaTable.primary_key`
-continues to return the tuple of key columns.
+that whole schema. `DeltaTable.primary_key_name` returns the generated or
+explicit name, or `None` when the table has no primary key;
+`DeltaTable.primary_key` continues to return the tuple of key columns.
 
 ### Composite primary keys
 
@@ -544,17 +543,16 @@ engine plan that drops and re-adds the key restores the default `NORELY` form.
 
 ### Drift
 
-The engine first compares primary keys by their _column set_. An omitted name
-adopts a matching observed key under any name. An explicit name is managed and
-must match too.
+The engine compares primary keys by their _column set_ and physical name. An
+omitted public name becomes the managed `{table}_pk` default during
+construction; use `primary_key_name` to adopt a differently named live key.
 
 | Change                                   | Actions emitted                       |
 | ---------------------------------------- | ------------------------------------- |
 | Primary key added                        | `SetPrimaryKey`                       |
 | Primary key removed                      | `DropPrimaryKey`                      |
 | Primary key columns changed              | `DropPrimaryKey` then `SetPrimaryKey` |
-| Same columns/order changed, name omitted | nothing; adopt the observed name      |
-| Same columns, explicit name changed      | `DropPrimaryKey` then `SetPrimaryKey` |
+| Same columns, physical name changed      | `DropPrimaryKey` then `SetPrimaryKey` |
 
 Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
 as equal.

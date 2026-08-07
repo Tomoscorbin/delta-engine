@@ -503,12 +503,12 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
         primary_key=["tenant_id", "id"],
     )
 
-    # Then the constraint carries the columns while leaving its name unpinned
+    # Then lowering generates the physical name once the owning table is known
     desired = table.to_desired_table()
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
-    assert desired.primary_key.constraint_name is None
-    assert table.primary_key_name is None
+    assert desired.primary_key.constraint_name == "accounts_pk"
+    assert table.primary_key_name == "accounts_pk"
 
 
 def test_primary_key_name_is_preserved_as_explicit_managed_state():
@@ -636,8 +636,8 @@ def test_delta_table_passes_pk_to_desired_table():
     # When converting to domain
     desired = table.to_desired_table()
 
-    # Then primary_key is set as an unpinned value object
-    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",))
+    # Then primary_key is complete, including its generated physical name
+    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():
