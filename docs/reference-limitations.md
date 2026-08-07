@@ -61,10 +61,11 @@ lowercase spelling. Despite that case-insensitive collision rule,
 `DROP CONSTRAINT` requires the exact catalog spelling; with `IF EXISTS`, a
 case mismatch silently does nothing. Databricks generates a name when raw SQL
 omits one. Delta-engine creates an unnamed public primary-key declaration as
-`{table}_pk`; `primary_key_name` can manage another spelling explicitly.
-Foreign-key names are still engine-generated. Databricks has no direct
-constraint-rename clause: changing a managed name requires dropping and
-recreating the constraint.
+`{table}_pk`; `primary_key_name` can manage another spelling explicitly. It
+creates an unnamed public foreign-key declaration as
+`{table}_{local_columns}_fk`; `ForeignKey(name=...)` can manage another
+spelling explicitly. Databricks has no direct constraint-rename clause:
+changing a managed name requires dropping and recreating the constraint.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and

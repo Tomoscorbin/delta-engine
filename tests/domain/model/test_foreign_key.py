@@ -167,24 +167,6 @@ def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
     assert tuple(str(column) for column in constraint.referenced_columns) == ("a_id", "z_id")
 
 
-def test_constraint_identity_is_case_insensitive():
-    referenced = QualifiedName("cat", "sch", "parent")
-    camel = ForeignKeyConstraint(
-        local_columns=("OrderId",),
-        referenced_table=referenced,
-        referenced_columns=("Id",),
-        constraint_name="t_orderid_fk",
-    )
-    lower = ForeignKeyConstraint(
-        local_columns=("orderid",),
-        referenced_table=referenced,
-        referenced_columns=("id",),
-        constraint_name="t_orderid_fk",
-    )
-
-    assert camel == lower
-
-
 def test_rejects_local_columns_differing_only_by_case_as_duplicates():
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
@@ -196,6 +178,7 @@ def test_rejects_local_columns_differing_only_by_case_as_duplicates():
 
 
 def test_constraints_match_across_case_variant_spellings() -> None:
+    # Given the same constraint under different column and name casing
     declared = ForeignKeyConstraint(
         local_columns=("orderref",),
         referenced_table=QualifiedName("cat", "sch", "parent"),
@@ -208,6 +191,8 @@ def test_constraints_match_across_case_variant_spellings() -> None:
         referenced_columns=("OrderId",),
         constraint_name="CHILD_ORDERREF_FK",
     )
+
+    # Then identity is case-insensitive while each spelling is preserved
     assert declared == observed
     assert str(declared.local_columns[0]) == "orderref"
     assert str(observed.local_columns[0]) == "OrderRef"

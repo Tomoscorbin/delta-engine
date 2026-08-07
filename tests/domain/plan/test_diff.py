@@ -761,10 +761,10 @@ def test_present_table_diffs_foreign_keys_by_name_and_definition():
 
     # Then the absent declaration is set and the undeclared observation dropped
     assert isinstance(drift, TableDrift)
-    set_actions = [a for a in drift.actions if isinstance(a, SetForeignKey)]
-    drop_actions = [a for a in drift.actions if isinstance(a, DropForeignKey)]
-    assert [a.constraint for a in set_actions] == [declared_only]
-    assert [a.constraint.constraint_name for a in drop_actions] == ["legacy_archive_fk"]
+    assert drift.actions == (
+        DropForeignKey(constraint=observed_only),
+        SetForeignKey(constraint=declared_only),
+    )
 
 
 def test_foreign_key_name_drift_replaces_the_constraint():

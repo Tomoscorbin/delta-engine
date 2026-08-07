@@ -703,7 +703,7 @@ def test_foreign_key_name_is_preserved_as_explicit_managed_state():
     # Then the public declaration and domain constraint preserve its spelling
     assert declaration.name == "Orders_Customer_Relationship"
     [constraint] = orders.to_desired_table().foreign_keys
-    assert constraint.constraint_name == "Orders_Customer_Relationship"
+    assert str(constraint.constraint_name) == "Orders_Customer_Relationship"
 
 
 @pytest.mark.parametrize(
@@ -1670,18 +1670,16 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
         _table_with_colliding_generated_foreign_key_names()
 
 
-def test_explicit_names_disambiguate_generated_foreign_key_name_collisions():
+def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
     # Given two structurally distinct FKs whose generated names would collide
 
-    # When each declaration supplies a distinct physical name
-    orders = _table_with_colliding_generated_foreign_key_names(
-        ("orders_parts_one_fk", "orders_parts_two_fk")
-    )
+    # When one declaration supplies a distinct physical name
+    orders = _table_with_colliding_generated_foreign_key_names((None, "orders_parts_two_fk"))
 
-    # Then construction succeeds with both explicit names
+    # Then construction succeeds with one generated and one explicit name
     assert tuple(
-        constraint.constraint_name for constraint in orders.to_desired_table().foreign_keys
-    ) == ("orders_parts_one_fk", "orders_parts_two_fk")
+        str(constraint.constraint_name) for constraint in orders.to_desired_table().foreign_keys
+    ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
 
 
 def test_delta_table_rejects_non_table_reference():
