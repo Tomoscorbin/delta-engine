@@ -15,7 +15,7 @@ def key_signature(columns: Iterable[str]) -> KeySignature:
     return frozenset(Identifier(column) for column in columns)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class PrimaryKeyConstraint:
     """
     A primary key constraint declaration.
@@ -39,6 +39,18 @@ class PrimaryKeyConstraint:
     def signature(self) -> KeySignature:
         """Content identity, excluding physical name and declaration order."""
         return key_signature(self.columns)
+
+    def matches_columns(self, columns: Iterable[str]) -> bool:
+        """Return whether columns identify this key, ignoring order and case."""
+        return self.signature == key_signature(columns)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PrimaryKeyConstraint):
+            return NotImplemented
+        return self.constraint_name == other.constraint_name and self.matches_columns(other.columns)
+
+    def __hash__(self) -> int:
+        return hash((self.constraint_name, self.signature))
 
     def __post_init__(self) -> None:
         columns = tuple(Identifier(column) for column in self.columns)
