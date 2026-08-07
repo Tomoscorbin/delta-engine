@@ -58,7 +58,7 @@ class TestIdentifierSpelling:
 
 class TestIdentifierConstruction:
     def test_non_string_spelling_is_rejected_deliberately(self) -> None:
-        # Given / When / Then a non-string cannot reach string operations.
+        # When a non-string spelling is supplied, then construction fails deliberately
         with pytest.raises(TypeError):
             Identifier(42)  # type: ignore[arg-type]
 
