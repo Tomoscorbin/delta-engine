@@ -4,13 +4,29 @@ from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 
 
 def test_rejects_empty_columns():
-    # Given / Then constructing with no columns is an error
+    # When a primary key has no columns, then construction fails
     with pytest.raises(ValueError):
         PrimaryKeyConstraint(columns=(), constraint_name="t_pk")
 
 
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param("id", id="bare-string"),
+        pytest.param(("id", 42), id="non-string-entry"),
+    ],
+)
+def test_rejects_invalid_column_collections(columns: object) -> None:
+    # When malformed columns are supplied, then construction fails at the value boundary
+    with pytest.raises(TypeError):
+        PrimaryKeyConstraint(
+            columns=columns,  # type: ignore[arg-type]
+            constraint_name="t_pk",
+        )
+
+
 def test_rejects_duplicate_columns():
-    # Given / Then a repeated column is an error
+    # When a primary key repeats a column, then construction fails
     with pytest.raises(ValueError):
         PrimaryKeyConstraint(columns=("id", "id"), constraint_name="t_pk")
 
@@ -26,7 +42,7 @@ def test_rejects_invalid_constraint_name(
     invalid_name: object,
     expected_error: type[Exception],
 ):
-    # Given / When / Then an invalid physical name is rejected
+    # When the physical name is invalid, then construction fails deliberately
     with pytest.raises(expected_error):
         PrimaryKeyConstraint(
             columns=("id",),
@@ -93,6 +109,6 @@ def test_matches_columns_excludes_the_constraint_name_from_comparison():
 
 
 def test_rejects_columns_differing_only_by_case_as_duplicates():
-    # Given / When / Then two spellings of one identifier are rejected as duplicates
+    # When one column is repeated with different casing, then construction fails
     with pytest.raises(ValueError):
         PrimaryKeyConstraint(columns=("id", "ID"), constraint_name="t_pk")

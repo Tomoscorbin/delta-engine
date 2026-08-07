@@ -548,7 +548,7 @@ def test_no_primary_key_parameter_means_no_key():
 
 
 def test_primary_key_name_requires_a_primary_key():
-    # Given / When / Then a physical name without a key is rejected
+    # When a physical name is supplied without a key, then the declaration is rejected
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -579,7 +579,7 @@ def test_primary_key_name_rejects_invalid_values(
         "primary_key": ["id"],
     }
 
-    # When / Then an invalid physical name is rejected clearly
+    # When the physical name is invalid, then construction fails deliberately
     with pytest.raises(expected_error):
         DeltaTable(**kwargs, primary_key_name=invalid_name)  # type: ignore[arg-type]
 
@@ -717,12 +717,38 @@ def test_foreign_key_name_rejects_invalid_values(
     invalid_name: object,
     expected_error: type[Exception],
 ):
-    # Given / When / Then an invalid physical name is rejected at declaration
+    # When the physical name is invalid, then the ForeignKey declaration rejects it
     with pytest.raises(expected_error):
         ForeignKey(
             columns="customer_id",
             references=_customers(),
             name=invalid_name,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("columns", "expected_error"),
+    [
+        pytest.param([], ValueError, id="empty-sequence"),
+        pytest.param({}, ValueError, id="empty-mapping"),
+        pytest.param({"customer_id"}, TypeError, id="unsupported-collection"),
+        pytest.param(["customer_id", 42], TypeError, id="non-string-sequence-entry"),
+        pytest.param({"customer_id": 42}, TypeError, id="non-string-mapping-value"),
+        pytest.param({42: "id"}, TypeError, id="non-string-mapping-key"),
+        pytest.param("  ", ValueError, id="blank-string"),
+        pytest.param(["  "], ValueError, id="blank-sequence-entry"),
+        pytest.param({"customer_id": "  "}, ValueError, id="blank-mapping-entry"),
+    ],
+)
+def test_foreign_key_rejects_invalid_column_input(
+    columns: object,
+    expected_error: type[Exception],
+) -> None:
+    # When column syntax is invalid, then ForeignKey rejects it without needing an owner
+    with pytest.raises(expected_error):
+        ForeignKey(
+            columns=columns,  # type: ignore[arg-type]
+            references=_customers(),
         )
 
 
@@ -781,7 +807,7 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
         primary_key=["id"],
     )
 
-    # When / Then domain validation fires at construction time
+    # When the owner is constructed, then domain validation rejects the missing column
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -942,7 +968,7 @@ def test_a_restricted_scope_still_lowers_everything_declared():
 
 def test_delta_table_rejects_unknown_scope():
     # Given a scope value outside the named scopes
-    # When / Then construction fails
+    # When the table is constructed, then the unknown scope is rejected
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
@@ -1499,7 +1525,7 @@ def _customers() -> DeltaTable:
 
 
 def test_foreign_key_declaration_rejects_internal_constraint_fields():
-    # Given / When / Then the public declaration rejects lowered domain fields
+    # When lowered domain fields are supplied, then the public declaration rejects them
     with pytest.raises(TypeError):
         ForeignKey(  # type: ignore[call-arg]
             columns={"customer_id": "id"},
@@ -1577,7 +1603,7 @@ def test_delta_table_rejects_reference_to_table_with_no_primary_key():
         columns=[Column("id", Integer())],
     )
 
-    # When / Then construction fails because there is no key to infer
+    # When the child is constructed, then the missing target key prevents inference
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -1589,8 +1615,7 @@ def test_delta_table_rejects_reference_to_table_with_no_primary_key():
 
 
 def test_delta_table_rejects_self_reference_without_primary_key():
-    # Given a table with no primary key that references itself
-    # When / Then construction fails because there is no key to reference
+    # When a table without a primary key references itself, then construction fails
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -1611,7 +1636,8 @@ def test_delta_table_rejects_cross_catalog_foreign_key():
         primary_key=["id"],
     )
 
-    # When / Then the declaration is rejected: information_schema is
+    # When the child is declared, then the cross-catalog relationship is rejected:
+    # information_schema is
     # per-catalog, so the engine could create the constraint but never
     # observe it, and every later sync would re-plan and fail.
     with pytest.raises(ValueError):
@@ -1665,7 +1691,7 @@ def _table_with_colliding_generated_foreign_key_names(
 def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
     # Given two FKs whose distinct column sets both derive orders_a_b_c_fk
 
-    # When / Then the collision is rejected at declaration time
+    # When both are declared, then the collision is rejected
     with pytest.raises(ValueError):
         _table_with_colliding_generated_foreign_key_names()
 
@@ -1682,18 +1708,12 @@ def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
     ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
 
 
-def test_delta_table_rejects_non_table_reference():
-    # Given a reference that is neither a DeltaTable nor Self
-    # When / Then construction rejects the unsupported reference type
+def test_foreign_key_rejects_non_table_reference_during_its_construction():
+    # When the reference is neither a DeltaTable nor Self, then ForeignKey rejects it
     with pytest.raises(TypeError):
-        DeltaTable(
-            catalog="cat",
-            schema="sch",
-            name="orders",
-            columns=[Column("customer_id", Integer())],
-            foreign_keys=[
-                ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")  # type: ignore[arg-type]
-            ],
+        ForeignKey(
+            columns={"customer_id": "id"},
+            references="cat.sch.customers",  # type: ignore[arg-type]
         )
 
 
@@ -1707,7 +1727,7 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
         primary_key=["id"],
     )
 
-    # When / Then construction fails because the local column type does not match
+    # When the child is constructed, then the local-column type mismatch is rejected
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -1723,8 +1743,7 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
 
 
 def test_self_referential_foreign_key_rejects_type_mismatch():
-    # Given a self-referential foreign key whose local column type differs from the primary key
-    # When / Then construction fails because the local column type does not match
+    # When a self-reference has a different local type, then construction fails
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -1753,7 +1772,7 @@ def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
         primary_key=["tenant_id", "id"],
     )
 
-    # When / Then construction fails because one column pair has incompatible types
+    # When the child is constructed, then the incompatible pair is rejected
     with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
@@ -1817,6 +1836,22 @@ def test_foreign_key_accepts_columns_as_any_mapping():
     [constraint] = orders.to_desired_table().foreign_keys
     assert tuple(str(c) for c in constraint.local_columns) == ("customer_id",)
     assert tuple(str(c) for c in constraint.referenced_columns) == ("id",)
+
+
+def test_foreign_key_defensively_copies_mutable_column_input() -> None:
+    # Given mutable sequence and mapping declarations
+    sequence = ["customer_id"]
+    mapping = {"customer_id": "id"}
+
+    # When declarations are constructed and the inputs later change
+    sequence_declaration = ForeignKey(columns=sequence, references=_customers())
+    mapping_declaration = ForeignKey(columns=mapping, references=_customers())
+    sequence.append("tenant_id")
+    mapping["tenant_id"] = "tenant_id"
+
+    # Then each declaration retains the input snapshot from construction
+    assert sequence_declaration.columns == ("customer_id",)
+    assert dict(mapping_declaration.columns) == {"customer_id": "id"}
 
 
 def test_mapping_insertion_order_is_irrelevant():

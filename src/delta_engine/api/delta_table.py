@@ -364,13 +364,30 @@ class ForeignKey:
         frozen: tuple[str, ...] | Mapping[str, str]
         match self.columns:
             case str():
+                Identifier(self.columns)
                 frozen = (self.columns,)
             case Mapping():
-                frozen = MappingProxyType(dict(self.columns))
+                mapping = dict(self.columns)
+                if not mapping:
+                    raise ValueError("foreign key columns must not be empty")
+                if not all(
+                    isinstance(local, str) and isinstance(referenced, str)
+                    for local, referenced in mapping.items()
+                ):
+                    raise TypeError("foreign key mapping keys and values must be strings")
+                for local, referenced in mapping.items():
+                    Identifier(local)
+                    Identifier(referenced)
+                frozen = MappingProxyType(mapping)
             case list() | tuple():
-                if not all(isinstance(column, str) for column in self.columns):
+                sequence = tuple(self.columns)
+                if not sequence:
+                    raise ValueError("foreign key columns must not be empty")
+                if not all(isinstance(column, str) for column in sequence):
                     raise TypeError("foreign key columns must be strings")
-                frozen = tuple(self.columns)
+                for column in sequence:
+                    Identifier(column)
+                frozen = sequence
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
@@ -379,10 +396,12 @@ class ForeignKey:
                 )
 
         if self.name is not None:
-            if not isinstance(self.name, str):
-                raise TypeError("foreign key name must be a string or None")
-            if not self.name.strip():
-                raise ValueError("foreign key name must not be blank")
+            Identifier(self.name)
+
+        if not isinstance(self.references, (DeltaTable, _SelfReference)):
+            raise TypeError(
+                f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
+            )
 
         object.__setattr__(self, "columns", frozen)
 
@@ -486,18 +505,13 @@ class ForeignKey:
         column: primary-key columns are validated to exist on whichever
         table declares them.
         """
-        match self.references:
-            case _SelfReference():
-                types = {column.name: column.data_type for column in owner_columns}
-                return _ReferencedSide(owner_name, owner_primary_key, types)
-            case DeltaTable() as target:
-                desired = target.to_desired_table()
-                types = {column.name: column.data_type for column in desired.columns}
-                return _ReferencedSide(desired.qualified_name, desired.primary_key, types)
-            case _:
-                raise TypeError(
-                    f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
-                )
+        if isinstance(self.references, _SelfReference):
+            types = {column.name: column.data_type for column in owner_columns}
+            return _ReferencedSide(owner_name, owner_primary_key, types)
+
+        desired = self.references.to_desired_table()
+        types = {column.name: column.data_type for column in desired.columns}
+        return _ReferencedSide(desired.qualified_name, desired.primary_key, types)
 
     def _resolve_column_pairs(
         self,

@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, ForeignKeyReference
 
 
 def _customers() -> QualifiedName:
@@ -47,7 +47,7 @@ def test_constraint_identity_includes_the_referenced_table():
 
 
 def test_rejects_empty_local_columns():
-    # Given / When / Then an empty local-column tuple is rejected
+    # When a foreign key has no local columns, then construction fails
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
             local_columns=(),
@@ -58,7 +58,7 @@ def test_rejects_empty_local_columns():
 
 
 def test_rejects_empty_referenced_columns():
-    # Given / When / Then an empty referenced-column tuple is rejected
+    # When a foreign key has no referenced columns, then construction fails
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
             local_columns=("customer_id",),
@@ -68,9 +68,32 @@ def test_rejects_empty_referenced_columns():
         )
 
 
+@pytest.mark.parametrize(
+    ("local_columns", "referenced_columns"),
+    [
+        pytest.param("customer_id", ("id",), id="bare-local-string"),
+        pytest.param(("customer_id",), "id", id="bare-referenced-string"),
+        pytest.param(("customer_id", 42), ("tenant_id", "id"), id="non-string-local"),
+        pytest.param(("customer_id", "tenant_id"), ("id", 42), id="non-string-referenced"),
+    ],
+)
+def test_rejects_invalid_column_collections(
+    local_columns: object,
+    referenced_columns: object,
+) -> None:
+    # When malformed columns are supplied, then construction fails at the value boundary
+    with pytest.raises(TypeError):
+        ForeignKeyConstraint(
+            local_columns=local_columns,  # type: ignore[arg-type]
+            referenced_table=_customers(),
+            referenced_columns=referenced_columns,  # type: ignore[arg-type]
+            constraint_name="x_fk",
+        )
+
+
 def test_rejects_mismatched_column_counts():
     # Given local and referenced column tuples of different lengths
-    # When / Then construction is rejected
+    # When the foreign key is constructed, then the mismatch is rejected
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
             local_columns=("a", "b"),
@@ -81,7 +104,7 @@ def test_rejects_mismatched_column_counts():
 
 
 def test_rejects_duplicate_local_columns():
-    # Given / When / Then a repeated local column is rejected
+    # When a foreign key repeats a local column, then construction fails
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
             local_columns=("customer_id", "customer_id"),
@@ -92,7 +115,7 @@ def test_rejects_duplicate_local_columns():
 
 
 def test_rejects_duplicate_referenced_columns():
-    # Given / When / Then a repeated referenced column is rejected
+    # When a foreign key repeats a referenced column, then construction fails
     with pytest.raises(ValueError):
         ForeignKeyConstraint(
             local_columns=("customer_id", "tenant_id"),
@@ -113,13 +136,22 @@ def test_rejects_invalid_constraint_name(
     constraint_name: object,
     expected_error: type[Exception],
 ):
-    # Given / When / Then an invalid physical name is rejected
+    # When the physical name is invalid, then construction fails deliberately
     with pytest.raises(expected_error):
         ForeignKeyConstraint(
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=("id",),
             constraint_name=constraint_name,  # type: ignore[arg-type]
+        )
+
+
+def test_foreign_key_reference_rejects_non_string_constraint_name() -> None:
+    # When the physical name is not a string, then construction fails deliberately
+    with pytest.raises(TypeError):
+        ForeignKeyReference(
+            constraint_name=42,  # type: ignore[arg-type]
+            referencing_table=_customers(),
         )
 
 

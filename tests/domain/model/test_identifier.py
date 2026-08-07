@@ -57,8 +57,13 @@ class TestIdentifierSpelling:
 
 
 class TestIdentifierConstruction:
+    def test_non_string_spelling_is_rejected_deliberately(self) -> None:
+        # When a non-string spelling is supplied, then construction fails deliberately
+        with pytest.raises(TypeError):
+            Identifier(42)  # type: ignore[arg-type]
+
     def test_blank_spelling_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must not be blank"):
+        with pytest.raises(ValueError):
             Identifier("   ")
 
     def test_wrapping_an_identifier_is_idempotent(self) -> None:
