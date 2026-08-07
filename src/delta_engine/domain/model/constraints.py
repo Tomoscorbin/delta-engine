@@ -2,7 +2,6 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Self
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
@@ -40,12 +39,6 @@ class PrimaryKeyConstraint:
     def signature(self) -> KeySignature:
         """Content identity, excluding physical name and declaration order."""
         return key_signature(self.columns)
-
-    def is_satisfied_by(self, observed: Self) -> bool:
-        """Return whether ``observed`` satisfies this desired primary key."""
-        return self.signature == observed.signature and (
-            self.constraint_name == observed.constraint_name
-        )
 
     def __post_init__(self) -> None:
         columns = tuple(self.columns)

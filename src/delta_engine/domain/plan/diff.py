@@ -523,7 +523,8 @@ def _diff_primary_key(
     if (
         desired_key is not None
         and observed_key is not None
-        and desired_key.is_satisfied_by(observed_key)
+        and desired_key.constraint_name == observed_key.constraint_name
+        and desired_key.signature == observed_key.signature
     ):
         return ()
 

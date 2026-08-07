@@ -44,18 +44,3 @@ def test_signature_is_identical_across_declaration_casing():
 def test_rejects_columns_differing_only_by_case_as_duplicates():
     with pytest.raises(ValueError, match=r"[Dd]uplicate"):
         PrimaryKeyConstraint(columns=("id", "ID"), constraint_name="t_pk")
-
-
-def test_matching_column_sets_and_names_satisfy_across_identifier_case():
-    desired = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="Orders_PK")
-    observed = PrimaryKeyConstraint(columns=("B", "A"), constraint_name="orders_pk")
-
-    assert desired.is_satisfied_by(observed)
-
-
-def test_different_physical_name_does_not_satisfy_the_constraint():
-    desired = PrimaryKeyConstraint(columns=("id",), constraint_name="Orders_PK")
-
-    assert not desired.is_satisfied_by(
-        PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
-    )
