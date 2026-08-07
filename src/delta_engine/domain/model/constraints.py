@@ -146,7 +146,11 @@ class ForeignKeyConstraint:
         ``constraint_name`` so generated and catalog names still match by
         content.
         """
-        return (tuple(self.local_columns), self.referenced_table, tuple(self.referenced_columns))
+        return (
+            tuple(self.local_columns),
+            self.referenced_table,
+            tuple(self.referenced_columns),
+        )  # TODO: namedTuple instead?
 
     @property
     def referenced_key_signature(self) -> KeySignature:
