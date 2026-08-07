@@ -35,7 +35,6 @@ from delta_engine.domain.model import (
     TableAspect,
     TableScope,
     Variant,
-    key_signature,
 )
 
 # Delta permits these characters in column names only under column mapping.
@@ -329,7 +328,7 @@ class _ReferencedSide(NamedTuple):
     """The referenced side of a foreign key, resolved at lowering time."""
 
     table: QualifiedName
-    key_columns: tuple[str, ...]
+    primary_key: PrimaryKeyConstraint | None
     column_types: dict[str, DataType]
 
 
@@ -391,7 +390,7 @@ class ForeignKey:
         self,
         owner_name: QualifiedName,
         owner_columns: tuple[Column, ...],
-        owner_primary_key: tuple[str, ...],
+        owner_primary_key: PrimaryKeyConstraint | None,
     ) -> ForeignKeyConstraint:
         """
         Lower this declaration into a domain constraint.
@@ -413,23 +412,24 @@ class ForeignKey:
                 " catalog."
             )
 
-        if not referenced.key_columns:
+        primary_key = referenced.primary_key
+        if primary_key is None:
             raise ValueError(
                 f"foreign key references {referenced.table}, which declares no primary key"
             )
 
         pairs = tuple(
             (Identifier(local), Identifier(parent))
-            for local, parent in self._resolve_column_pairs(referenced)
+            for local, parent in self._resolve_column_pairs(referenced.table, primary_key)
         )
         local_names = {column.name: column.name for column in owner_columns}
         referenced_names = {name: name for name in referenced.column_types}
         local_columns = tuple(local_names.get(local, local) for local, _ in pairs)
         referenced_columns = tuple(referenced_names.get(parent, parent) for _, parent in pairs)
 
-        declared = key_signature(referenced_columns)
-        key = key_signature(referenced.key_columns)
-        if declared != key:
+        if not primary_key.matches_columns(referenced_columns):
+            declared = set(referenced_columns)
+            key = set(primary_key.columns)
             missing = sorted(key - declared)
             extra = sorted(declared - key)
             details = []
@@ -439,7 +439,7 @@ class ForeignKey:
                 details.append(f"not in the key: {', '.join(extra)}")
             raise ValueError(
                 f"foreign key columns must reference {referenced.table}'s"
-                f" primary key ({', '.join(referenced.key_columns)}) exactly;"
+                f" primary key ({', '.join(primary_key.columns)}) exactly;"
                 f" {'; '.join(details)}"
             )
 
@@ -474,7 +474,7 @@ class ForeignKey:
         self,
         owner_name: QualifiedName,
         owner_columns: tuple[Column, ...],
-        owner_primary_key: tuple[str, ...],
+        owner_primary_key: PrimaryKeyConstraint | None,
     ) -> _ReferencedSide:
         """
         Resolve ``references`` to the referenced side of the constraint.
@@ -493,7 +493,7 @@ class ForeignKey:
             case DeltaTable() as target:
                 desired = target.to_desired_table()
                 types = {column.name: column.data_type for column in desired.columns}
-                return _ReferencedSide(desired.qualified_name, desired.primary_key_columns, types)
+                return _ReferencedSide(desired.qualified_name, desired.primary_key, types)
             case _:
                 raise TypeError(
                     f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
@@ -501,24 +501,25 @@ class ForeignKey:
 
     def _resolve_column_pairs(
         self,
-        referenced: _ReferencedSide,
+        referenced_table: QualifiedName,
+        primary_key: PrimaryKeyConstraint,
     ) -> tuple[tuple[str, str], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
         if isinstance(self.columns, Mapping):
             return tuple(self.columns.items())
 
         local_columns = tuple(self.columns)
-        parent_columns = referenced.key_columns
+        parent_columns = tuple(primary_key.columns)
 
         # a single-column parent has only one possible pairing
         if len(local_columns) == 1 and len(parent_columns) == 1:
             return ((local_columns[0], parent_columns[0]),)
 
-        if key_signature(local_columns) == key_signature(parent_columns):
+        if primary_key.matches_columns(local_columns):
             return tuple((column, column) for column in local_columns)
 
         raise ValueError(
-            f"cannot infer foreign key column pairing for {referenced.table};"
+            f"cannot infer foreign key column pairing for {referenced_table};"
             f" local columns are ({', '.join(local_columns)}) and the referenced"
             f" primary key is ({', '.join(parent_columns)}). Provide an explicit"
             " mapping of {local column: referenced column}."
@@ -641,14 +642,11 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         if primary_key_columns is not None
         else None
     )
-    owner_primary_key = (
-        tuple(primary_key_constraint.columns) if primary_key_constraint is not None else ()
-    )
     foreign_keys = [
         foreign_key._to_constraint(
             declaration.qualified_name,
             declaration.columns,
-            owner_primary_key,
+            primary_key_constraint,
         )
         for foreign_key in declaration.foreign_key_declarations
     ]

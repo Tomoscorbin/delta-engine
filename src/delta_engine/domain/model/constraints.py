@@ -7,13 +7,6 @@ from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
-KeySignature = frozenset[str]
-
-
-def key_signature(columns: Iterable[str]) -> KeySignature:
-    """Return the order-independent, case-insensitive identity of a key's columns."""
-    return frozenset(Identifier(column) for column in columns)
-
 
 @dataclass(frozen=True, slots=True, eq=False)
 class PrimaryKeyConstraint:
@@ -35,14 +28,9 @@ class PrimaryKeyConstraint:
     columns: ListOrTuple[str]
     constraint_name: str
 
-    @property
-    def signature(self) -> KeySignature:
-        """Content identity, excluding physical name and declaration order."""
-        return key_signature(self.columns)
-
     def matches_columns(self, columns: Iterable[str]) -> bool:
         """Return whether columns identify this key, ignoring order and case."""
-        return self.signature == key_signature(columns)
+        return frozenset(self.columns) == frozenset(Identifier(column) for column in columns)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PrimaryKeyConstraint):
@@ -50,7 +38,7 @@ class PrimaryKeyConstraint:
         return self.constraint_name == other.constraint_name and self.matches_columns(other.columns)
 
     def __hash__(self) -> int:
-        return hash((self.constraint_name, self.signature))
+        return hash((self.constraint_name, frozenset(self.columns)))
 
     def __post_init__(self) -> None:
         columns = tuple(Identifier(column) for column in self.columns)
@@ -148,11 +136,6 @@ class ForeignKeyConstraint:
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
-
-    @property
-    def referenced_key_signature(self) -> KeySignature:
-        """Identity of the primary key targeted by this foreign key."""
-        return key_signature(self.referenced_columns)
 
 
 @dataclass(frozen=True, slots=True)

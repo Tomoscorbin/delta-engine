@@ -306,55 +306,52 @@ their explicit follow-up actions. Coverage exercises a populated creation in
 both semantic reporting and compiled SQL; property absence assertions are
 correctly omitted because a new table already satisfies them.
 
-## 5. Put key identity on the key values
+## 5. Put key identity behind the primary-key value
 
 ### Cause
 
-The code intentionally treats primary-key identity as its column set: physical
-constraint name and column order do not determine whether the desired and
-observed key are the same. `PrimaryKeyConstraint` does not expose that identity,
-though. Three callers reconstruct it themselves:
+The code needs two related primary-key operations: managed constraint equality
+includes the physical constraint name, while foreign-key targeting compares
+only the key's case-insensitive, order-independent column set. Initially,
+callers reconstructed the latter operation themselves:
 
 - foreign-key API lowering compares a set of referenced columns with the
   parent's key columns;
-- `_diff_primary_key` converts desired and observed columns to frozensets; and
-- dependency resolution builds a set-valued primary-key index and compares
+- `_diff_primary_key` separately compared names and column sets; and
+- dependency resolution built a set-valued primary-key index and compared
   foreign-key referenced columns against it.
 
-The neighboring `ForeignKeyConstraint` already exposes `signature`, making the
-asymmetry especially visible. Dataclass equality is not a safe substitute for
-primary keys because it includes ordered columns and `constraint_name`.
+Passing these set-valued projections around exposed the representation of key
+identity and required callers to understand its normalization rules.
 
 Relevant code:
 
 - `src/delta_engine/domain/model/constraints.py`
 - `src/delta_engine/api/delta_table.py` (`ForeignKey._to_constraint`)
 - `src/delta_engine/domain/plan/diff.py` (`_diff_primary_key`)
-- `src/delta_engine/application/dependency_resolution.py`
+- `src/delta_engine/application/relationships.py`
 
 ### Proposed consolidation
 
-Give `PrimaryKeyConstraint` a semantic `signature`, and give a foreign key a
-named projection or predicate for its referenced key:
+Give `PrimaryKeyConstraint` ordinary value equality for complete managed
+identity and an intent-level predicate for the narrower targeting question:
 
 ```python
-type KeySignature = frozenset[str]
-
-PrimaryKeyConstraint.signature -> KeySignature
-ForeignKeyConstraint.referenced_key_signature -> KeySignature
+desired_primary_key == observed_primary_key
+primary_key.matches_columns(foreign_key.referenced_columns)
 ```
 
-Diffing and resolution should compare those values. API lowering can use the
-same vocabulary even before it creates the final constraint. Ordered columns
-remain available for deterministic SQL rendering; the signature states only
-semantic identity.
+API lowering and relationship validation should carry the primary-key object
+rather than a lossy projection of it. Ordered columns remain available for
+deterministic SQL rendering and exact-spelling validation; their set identity
+stays hidden behind `matches_columns`.
 
 ### Implemented
 
-Primary-key identity is now exposed as `PrimaryKeyConstraint.signature`, with
-foreign keys exposing `referenced_key_signature`. API lowering, diffing, and
-dependency resolution use these shared projections instead of reconstructing
-set identity independently. Ordered columns remain available for SQL output.
+`PrimaryKeyConstraint` now owns semantic equality, hashing, and column-set
+matching. API lowering carries the referenced primary-key value, and
+relationship validation indexes those values directly. No signature type or
+projection escapes the constraint module.
 
 ## 6. Contain physical SQL invocation per backend
 
@@ -489,7 +486,7 @@ one module:
    This gives correctness-review item 10 a natural implementation home.
 2. Preserve observed tag values on tag actions; it is a small, local proof of
    the “actions carry their meaning” rule.
-3. Add primary-key signatures and replace caller-created sets.
+3. Put primary-key equality and column matching behind the key value.
 4. Redesign run outcome storage and put the target on successful action plans
    together; both remove parallel values from the phase chain.
 5. Make creation's affected aspects and semantic projection complete.
