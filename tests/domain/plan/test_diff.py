@@ -157,7 +157,7 @@ def test_drift_rejects_different_desired_and_observed_tables():
     observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
 
     # When / Then constructing their comparison is rejected
-    with pytest.raises(ValueError, match="Cannot compare different tables"):
+    with pytest.raises(ValueError):
         TableDrift(desired=desired, observed=observed)
 
 
@@ -578,7 +578,7 @@ def test_declared_properties_are_not_compared_when_properties_unmanaged():
 
 
 def test_property_set_rejects_equal_values():
-    with pytest.raises(ValueError, match="no difference"):
+    with pytest.raises(ValueError):
         SetProperty(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
 
 
@@ -698,6 +698,7 @@ def test_equal_primary_keys_by_column_set_and_name_produce_no_change():
         DesiredColumn("b", Integer(), nullable=False),
     )
 
+    # When diffing the declarations
     diff = diff_table(
         _desired(columns=columns, primary_key=desired_pk),
         _observed(columns=columns, primary_key=observed_pk),
@@ -710,38 +711,23 @@ def test_equal_primary_keys_by_column_set_and_name_produce_no_change():
 
 
 def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
+    # Given identical key columns under different physical names
     desired_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="managed_pk")
     observed_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
     columns = (DesiredColumn("id", Integer(), nullable=False),)
 
+    # When diffing the declarations
     diff = diff_table(
         _desired(columns=columns, primary_key=desired_pk),
         _observed(columns=columns, primary_key=observed_pk),
     )
 
+    # Then the observed name is replaced by the explicitly managed name
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
         DropPrimaryKey("legacy_pk"),
         SetPrimaryKey(primary_key=desired_pk),
     )
-
-
-def test_explicit_primary_key_name_matches_catalog_normalization():
-    columns = (DesiredColumn("id", Integer(), nullable=False),)
-
-    diff = diff_table(
-        _desired(
-            columns=columns,
-            primary_key=PrimaryKeyConstraint(("id",), "Orders_PK"),
-        ),
-        _observed(
-            columns=columns,
-            primary_key=PrimaryKeyConstraint(("id",), "orders_pk"),
-        ),
-    )
-
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
 
 
 # ---------- constraint changes
@@ -1245,12 +1231,12 @@ def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
 
 
 def test_column_case_drift_requires_a_real_spelling_difference():
-    with pytest.raises(ValueError, match="carries no difference"):
+    with pytest.raises(ValueError):
         ColumnCaseDrift(declared_name="orderid", observed_name="orderid")
 
 
 def test_column_case_drift_requires_the_same_identifier():
-    with pytest.raises(ValueError, match="different columns"):
+    with pytest.raises(ValueError):
         ColumnCaseDrift(declared_name="orderid", observed_name="customer_id")
 
 

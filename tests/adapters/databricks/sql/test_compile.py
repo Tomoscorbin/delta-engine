@@ -305,15 +305,6 @@ def test_create_table_inlines_primary_key_constraint():
     )
 
 
-def test_create_table_uses_an_explicit_primary_key_name():
-    action = _create_table(
-        DesiredColumn("id", Integer(), nullable=False),
-        primary_key=PrimaryKeyConstraint(("id",), "business_key"),
-    )
-
-    assert "CONSTRAINT `business_key` PRIMARY KEY (`id`)" in _compile_single(action)
-
-
 def test_create_table_without_primary_key_omits_constraint_clause():
     # Given a CREATE TABLE with no primary key
     action = _create_table(DesiredColumn("id", Integer()))

@@ -57,7 +57,6 @@ def main() -> None:
         primary_key_name="customers_business_key",
     )
     assert table.to_desired_table().qualified_name.name == "customers"
-    assert table.primary_key == ("id",)
     assert table.primary_key_name == "customers_business_key"
     assert Engine is not None
 

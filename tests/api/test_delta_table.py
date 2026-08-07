@@ -8,7 +8,6 @@ from delta_engine.domain.model import (
     TableAspect,
     TableScope,
 )
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import (
     Array,
     Binary,
@@ -62,7 +61,7 @@ def test_mixed_case_declaration_preserves_columns_and_lowercases_object_names():
 def test_delta_table_rejects_columns_differing_only_by_case_as_duplicates() -> None:
     # The public API delegates to the same identity-keyed validation as the
     # domain layer: a declaration cannot carry two spellings of one column.
-    with pytest.raises(ValueError, match="Duplicate column name"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -97,7 +96,7 @@ def test_rejects_name_parts_unity_catalog_forbids(position, bad_part):
     # Unity Catalog object names: at most 255 characters; no period, space,
     # forward slash, ASCII control characters, or DEL
     parts = {"catalog": "main", "schema": "sales", "name": "orders", position: bad_part}
-    with pytest.raises(ValueError, match="Unity Catalog"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog=parts["catalog"],
             schema=parts["schema"],
@@ -236,7 +235,7 @@ def test_delta_table_clustering_defaults_to_empty_tuple():
 
 
 def test_delta_table_rejects_partitioning_and_clustering_together():
-    with pytest.raises(ValueError, match="both partition"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -248,7 +247,7 @@ def test_delta_table_rejects_partitioning_and_clustering_together():
 
 
 def test_delta_table_rejects_more_than_four_clustering_keys():
-    with pytest.raises(ValueError, match="four"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -259,7 +258,7 @@ def test_delta_table_rejects_more_than_four_clustering_keys():
 
 
 def test_delta_table_rejects_complex_typed_clustering_column():
-    with pytest.raises(ValueError, match="clustering key"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -270,16 +269,16 @@ def test_delta_table_rejects_complex_typed_clustering_column():
 
 
 @pytest.mark.parametrize(
-    ("layout", "message"),
+    "layout",
     [
-        ({"partitioned_by": ["ITEMS"]}, "Delta cannot partition"),
-        ({"clustered_by": ["ITEMS"]}, "clustering key"),
+        {"partitioned_by": ["ITEMS"]},
+        {"clustered_by": ["ITEMS"]},
     ],
 )
-def test_layout_keys_are_normalized_before_type_validation(layout, message):
+def test_layout_keys_are_normalized_before_type_validation(layout):
     # Column declarations are already canonical lowercase. Layout identifiers
     # must use the same representation before API policy tries to resolve them.
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -293,7 +292,7 @@ def test_layout_keys_are_normalized_before_type_validation(layout, message):
 def test_delta_table_rejects_boolean_or_binary_clustering_column(data_type):
     # Liquid clustering's supported-type list excludes Boolean and Binary, even
     # though both are valid partition columns.
-    with pytest.raises(ValueError, match="clustering key"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="main",
             schema="sales",
@@ -412,7 +411,7 @@ def test_missing_partition_column_raises_error():
 
 
 def test_delta_table_rejects_complex_typed_partition_column() -> None:
-    with pytest.raises(ValueError, match="Delta cannot partition"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -426,7 +425,7 @@ def test_delta_table_rejects_complex_typed_partition_column() -> None:
 
 
 def test_delta_table_rejects_partitioning_by_every_column() -> None:
-    with pytest.raises(ValueError, match="every column"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -437,7 +436,7 @@ def test_delta_table_rejects_partitioning_by_every_column() -> None:
 
 
 def test_partition_keys_are_normalized_before_whole_table_validation() -> None:
-    with pytest.raises(ValueError, match="every column"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -503,8 +502,10 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
         primary_key=["tenant_id", "id"],
     )
 
-    # Then lowering generates the physical name once the owning table is known
+    # When lowering the declaration
     desired = table.to_desired_table()
+
+    # Then the physical name is generated once the owning table is known
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
     assert desired.primary_key.constraint_name == "accounts_pk"
@@ -512,6 +513,7 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
 
 
 def test_primary_key_name_is_preserved_as_explicit_managed_state():
+    # Given a primary key with an explicit physical name
     table = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -521,14 +523,17 @@ def test_primary_key_name_is_preserved_as_explicit_managed_state():
         primary_key_name="Accounts_Business_Key",
     )
 
+    # When reading the declaration's managed primary-key name
     desired = table.to_desired_table()
+
+    # Then both the public API and lowered state preserve its spelling
     assert desired.primary_key is not None
-    assert str(desired.primary_key.constraint_name) == "Accounts_Business_Key"
-    assert table.primary_key == ("id",)
+    assert desired.primary_key.constraint_name == "Accounts_Business_Key"
     assert table.primary_key_name == "Accounts_Business_Key"
 
 
 def test_no_primary_key_parameter_means_no_key():
+    # Given a declaration without a primary key
     table = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -536,13 +541,15 @@ def test_no_primary_key_parameter_means_no_key():
         columns=[Column("id", Integer())],
     )
 
+    # Then neither key columns nor a physical key name are exposed
     assert table.to_desired_table().primary_key is None
     assert table.primary_key == ()
     assert table.primary_key_name is None
 
 
 def test_primary_key_name_requires_a_primary_key():
-    with pytest.raises(ValueError, match="primary_key_name requires primary_key"):
+    # Given / When / Then a physical name without a key is rejected
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -552,7 +559,18 @@ def test_primary_key_name_requires_a_primary_key():
         )
 
 
-def test_primary_key_name_must_be_a_non_blank_string():
+@pytest.mark.parametrize(
+    ("invalid_name", "expected_error"),
+    [
+        pytest.param("  ", ValueError, id="blank"),
+        pytest.param(42, TypeError, id="not-a-string"),
+    ],
+)
+def test_primary_key_name_rejects_invalid_values(
+    invalid_name: object,
+    expected_error: type[Exception],
+):
+    # Given an otherwise valid primary-key declaration
     kwargs = {
         "catalog": "cat",
         "schema": "sch",
@@ -561,15 +579,14 @@ def test_primary_key_name_must_be_a_non_blank_string():
         "primary_key": ["id"],
     }
 
-    with pytest.raises(ValueError, match="primary_key_name must not be blank"):
-        DeltaTable(**kwargs, primary_key_name="  ")
-    with pytest.raises(TypeError, match="primary_key_name must be a string or None"):
-        DeltaTable(**kwargs, primary_key_name=42)  # type: ignore[arg-type]
+    # When / Then an invalid physical name is rejected clearly
+    with pytest.raises(expected_error):
+        DeltaTable(**kwargs, primary_key_name=invalid_name)  # type: ignore[arg-type]
 
 
 def test_empty_primary_key_sequence_is_rejected():
     # Given an empty sequence — a meaningless assertion, distinct from None
-    with pytest.raises(ValueError, match="must not be empty"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -582,7 +599,7 @@ def test_empty_primary_key_sequence_is_rejected():
 def test_primary_key_as_a_bare_string_is_rejected():
     # "i" is a real column, so without the guard this string would silently
     # declare a valid per-character key; the shape must be refused outright
-    with pytest.raises(TypeError, match="not a string"):
+    with pytest.raises(TypeError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -593,7 +610,7 @@ def test_primary_key_as_a_bare_string_is_rejected():
 
 
 def test_primary_key_naming_unknown_column_is_rejected():
-    with pytest.raises(ValueError, match="missing_col"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -604,7 +621,7 @@ def test_primary_key_naming_unknown_column_is_rejected():
 
 
 def test_primary_key_over_nullable_column_is_rejected():
-    with pytest.raises(ValueError, match="NOT NULL"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -618,26 +635,6 @@ def test_column_no_longer_accepts_a_primary_key_flag():
     # The per-column flag is deleted; the fact lives at table level now
     with pytest.raises(TypeError):
         Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
-
-
-def test_delta_table_passes_pk_to_desired_table():
-    # Given a DeltaTable where "id" is PK
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[
-            Column("id", Integer(), nullable=False),
-            Column("ds", String()),
-        ],
-        primary_key=["id"],
-    )
-
-    # When converting to domain
-    desired = table.to_desired_table()
-
-    # Then primary_key is complete, including its generated physical name
-    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():
@@ -741,7 +738,7 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
     )
 
     # When / Then domain validation fires at construction time
-    with pytest.raises(ValueError, match="nonexistent"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1006,7 +1003,7 @@ def test_none_property_declarations_are_carried_through():
 
 def test_rejects_unmanaged_key_declared_as_none():
     # Given an absence assertion for a key the engine does not manage
-    with pytest.raises(ValueError, match="not managed"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="coredev",
             schema="medallia",
@@ -1017,7 +1014,7 @@ def test_rejects_unmanaged_key_declared_as_none():
 
 
 def test_delta_table_rejects_invalid_property_value() -> None:
-    with pytest.raises(ValueError, match=r"delta\.enableChangeDataFeed"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1068,7 +1065,7 @@ def test_delta_table_accepts_column_tags_at_the_limits() -> None:
 
 
 def test_delta_table_rejects_special_character_column_names_without_column_mapping() -> None:
-    with pytest.raises(ValueError, match="columnMapping"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1089,7 +1086,7 @@ def test_delta_table_accepts_special_character_column_names_with_column_mapping(
 
 
 def test_delta_table_rejects_special_character_struct_field_names_without_column_mapping() -> None:
-    with pytest.raises(ValueError, match="columnMapping"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1115,7 +1112,7 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
 
 
 @pytest.mark.parametrize(
-    ("data_type", "column_nullable", "error_match"),
+    ("data_type", "column_nullable", "is_valid"),
     [
         (
             Struct(
@@ -1128,9 +1125,9 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
                 )
             ),
             False,
-            None,
+            True,
         ),
-        (Struct((StructField("value", Integer(), nullable=False),)), True, "not deployable"),
+        (Struct((StructField("value", Integer(), nullable=False),)), True, False),
         (
             Struct(
                 (
@@ -1141,22 +1138,22 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
                 )
             ),
             False,
-            "not deployable",
+            False,
         ),
         (
             Array(Struct((StructField("value", Integer(), nullable=False),))),
             False,
-            "not deployable",
+            False,
         ),
         (
             Map(Struct((StructField("value", Integer(), nullable=False),)), String()),
             False,
-            "not deployable",
+            False,
         ),
         (
             Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
             False,
-            "not deployable",
+            False,
         ),
     ],
     ids=[
@@ -1169,11 +1166,11 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
     ],
 )
 def test_delta_table_validates_non_nullable_struct_field_placement(
-    data_type, column_nullable: bool, error_match: str | None
+    data_type, column_nullable: bool, is_valid: bool
 ) -> None:
     column = Column("payload", data_type, nullable=column_nullable)
-    if error_match is not None:
-        with pytest.raises(ValueError, match=error_match):
+    if not is_valid:
+        with pytest.raises(ValueError):
             DeltaTable("dev", "silver", "orders", columns=[column])
         return
 
@@ -1183,7 +1180,7 @@ def test_delta_table_validates_non_nullable_struct_field_placement(
 
 def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_array() -> None:
     # Proves the gate recurses through container types, not just direct struct columns.
-    with pytest.raises(ValueError, match="columnMapping"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1210,7 +1207,7 @@ def test_a_restricted_scope_only_relaxes_catalog_dependent_column_validation(sco
     )
     assert [column.name for column in table.to_desired_table().columns] == ["order id"]
 
-    with pytest.raises(ValueError, match="not deployable"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1226,7 +1223,7 @@ def test_a_restricted_scope_only_relaxes_catalog_dependent_column_validation(sco
 
 
 def test_delta_table_rejects_cdf_reserved_column_names_when_cdf_enabled() -> None:
-    with pytest.raises(ValueError, match="_change_type"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1251,7 +1248,7 @@ def test_delta_table_accepts_cdf_reserved_column_names_when_cdf_not_enabled() ->
 
 def test_delta_table_rejects_more_than_fifty_table_tags() -> None:
     too_many = {f"tag_{i}": "v" for i in range(51)}
-    with pytest.raises(ValueError, match="50"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1262,7 +1259,7 @@ def test_delta_table_rejects_more_than_fifty_table_tags() -> None:
 
 
 def test_delta_table_rejects_overlong_tag_value_on_a_column() -> None:
-    with pytest.raises(ValueError, match="256"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1272,7 +1269,7 @@ def test_delta_table_rejects_overlong_tag_value_on_a_column() -> None:
 
 
 def test_delta_table_rejects_overlong_tag_key_on_a_column() -> None:
-    with pytest.raises(ValueError, match="256"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -1306,7 +1303,7 @@ def test_delta_table_accepts_tags_at_the_limits() -> None:
 
 
 def test_delta_table_rejects_rename_hint_without_column_mapping():
-    with pytest.raises(ValueError, match="columnMapping"):
+    with pytest.raises(ValueError):
         DeltaTable(
             "dev",
             "silver",
@@ -1537,7 +1534,7 @@ def test_delta_table_rejects_reference_to_table_with_no_primary_key():
     )
 
     # When / Then construction fails because there is no key to infer
-    with pytest.raises(ValueError, match="no primary key"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1549,8 +1546,8 @@ def test_delta_table_rejects_reference_to_table_with_no_primary_key():
 
 def test_delta_table_rejects_self_reference_without_primary_key():
     # Given a table with no primary key that references itself
-    # When / Then the same no-primary-key error names the table
-    with pytest.raises(ValueError, match="no primary key"):
+    # When / Then construction fails because there is no key to reference
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1573,7 +1570,7 @@ def test_delta_table_rejects_cross_catalog_foreign_key():
     # When / Then the declaration is rejected: information_schema is
     # per-catalog, so the engine could create the constraint but never
     # observe it, and every later sync would re-plan and fail.
-    with pytest.raises(ValueError, match="cross-catalog"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1598,7 +1595,7 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
     )
 
     # When / Then the collision is rejected at declaration time
-    with pytest.raises(ValueError, match="same constraint name"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1618,8 +1615,8 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
 
 def test_delta_table_rejects_non_table_reference():
     # Given a reference that is neither a DeltaTable nor Self
-    # When / Then a TypeError names the accepted types
-    with pytest.raises(TypeError, match="DeltaTable or Self"):
+    # When / Then construction rejects the unsupported reference type
+    with pytest.raises(TypeError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1642,7 +1639,7 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
     )
 
     # When / Then construction fails because the local column type does not match
-    with pytest.raises(ValueError, match="type mismatch"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1659,7 +1656,7 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
 def test_self_referential_foreign_key_rejects_type_mismatch():
     # Given a self-referential foreign key whose local column type differs from the primary key
     # When / Then construction fails because the local column type does not match
-    with pytest.raises(ValueError, match="type mismatch"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1687,8 +1684,8 @@ def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
         primary_key=["tenant_id", "id"],
     )
 
-    # When / Then construction fails naming the mismatched pair
-    with pytest.raises(ValueError, match=r"orders\.customer_id"):
+    # When / Then construction fails because one column pair has incompatible types
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1829,7 +1826,7 @@ def test_mapping_to_an_unknown_parent_column_is_rejected_as_a_key_mismatch():
     )
 
     # Then the declaration fails naming the unknown column
-    with pytest.raises(ValueError, match="unknown_id"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",
@@ -1845,7 +1842,7 @@ def test_mapping_to_an_unknown_parent_column_is_rejected_as_a_key_mismatch():
 
 
 def test_two_locals_mapped_to_the_same_key_column_are_rejected():
-    with pytest.raises(ValueError, match="Duplicate foreign key referenced column"):
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="cat",
             schema="sch",

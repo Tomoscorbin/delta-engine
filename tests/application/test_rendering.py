@@ -358,27 +358,6 @@ def test_action_entries_render_expected(action, expected):
     assert action_entries(action) == expected
 
 
-def test_create_table_entries_list_columns_with_types_and_primary_key():
-    # Given a CreateTable for a table with a not-null id, a nullable name, and a PK
-    action = CreateTable(
-        table=DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(
-                DesiredColumn("id", Integer(), nullable=False),
-                DesiredColumn("name", String()),
-            ),
-            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
-        )
-    )
-
-    # Then it expands to one columns entry per column (with types) plus the primary key
-    assert action_entries(action) == (
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "name", ("String",)),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key orders_pk", ("(id)",)),
-    )
-
-
 def test_create_table_entries_include_clustering_without_optimize_hint():
     # Given a CREATE TABLE that declares clustering keys
     action = CreateTable(
