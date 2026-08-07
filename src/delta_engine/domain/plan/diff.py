@@ -526,9 +526,7 @@ def _diff_primary_key(
     if observed_key is None:
         return (SetPrimaryKey(primary_key=desired_key),)
 
-    same_name = desired_key.constraint_name == observed_key.constraint_name
-    same_columns = desired_key.signature == observed_key.signature
-    if same_name and same_columns:
+    if desired_key == observed_key:
         return ()
 
     return (
