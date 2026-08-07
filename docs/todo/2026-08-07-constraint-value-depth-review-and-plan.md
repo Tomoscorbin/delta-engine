@@ -252,15 +252,17 @@ After migration, remove:
 
 ### PK acceptance criteria
 
-- Two PK constraints with the same identifier name and column set compare
+- [x] Two PK constraints with the same identifier name and column set compare
   equal across name case, column case, and column order.
-- A different physical name or different column set compares unequal.
-- Declared column spelling and order remain unchanged for rendering.
-- PK diffing uses ordinary equality and preserves all current actions.
-- FK target validation uses `matches_columns` and preserves exact-spelling
+- [x] A different physical name or different column set compares unequal.
+- [x] Declared column spelling and order remain unchanged for rendering.
+- [x] PK diffing uses ordinary equality and preserves all current actions.
+- [ ] FK target validation uses `matches_columns` and preserves exact-spelling
   failure classification.
-- `rg` finds no production use or export of `key_signature`, `.signature`, or
+- [ ] `rg` finds no production use or export of `key_signature`, `.signature`, or
   `referenced_key_signature`.
+
+The completed items are implemented in [PR #342](https://github.com/Tomoscorbin/delta-engine/pull/342).
 
 ## 2. Make constructors establish intrinsic validity
 
@@ -434,21 +436,38 @@ migration are not prerequisites for deepening the constraint values.
 
 ## Implementation plan
 
-Two small PRs keep semantic refactoring separate from invalid-input behaviour.
-They may be combined only if the final diff remains easier to review than the
-two boundaries below.
+Three small PRs keep primary-key equality, the remaining semantic refactoring,
+and invalid-input behaviour independently reviewable.
 
-### PR 1: Make constraint values own semantic operations
+### PR 1: Make primary-key equality semantic
+
+Implemented in [PR #342](https://github.com/Tomoscorbin/delta-engine/pull/342).
+
+#### Primary-key equality scope
+
+- [x] Give `PrimaryKeyConstraint` order-independent, case-insensitive,
+  name-aware equality and a matching hash while preserving stored column
+  order.
+- [x] Add `PrimaryKeyConstraint.matches_columns` for comparisons that
+  deliberately exclude the physical PK name.
+- [x] Change primary-key diffing to use ordinary equality.
+
+#### Primary-key equality validation
+
+```bash
+uv run pytest -q --no-cov tests/domain/model/test_primary_key.py tests/domain/plan/test_diff.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
+uv run pytest -q --no-cov
+```
+
+### PR 2: Complete the remaining semantic operations
 
 #### Semantic-operation scope
 
-- Give `PrimaryKeyConstraint` order-independent, case-insensitive, name-aware
-  equality and a matching hash while preserving stored column order.
-- Add `PrimaryKeyConstraint.matches_columns` for comparisons that deliberately
-  exclude the physical PK name.
 - Make `_ReferencedSide` carry the referenced primary-key value rather than a
   duplicate tuple of its columns.
-- Change primary-key diffing to use ordinary equality.
 - Change public FK lowering and registered relationship checks to call
   `matches_columns`.
 - Remove `KeySignature`, `key_signature`, `PrimaryKeyConstraint.signature`,
@@ -461,22 +480,13 @@ two boundaries below.
 - `src/delta_engine/domain/model/constraints.py`
 - `src/delta_engine/domain/model/__init__.py`
 - `src/delta_engine/api/delta_table.py`
-- `src/delta_engine/domain/plan/diff.py`
 - `src/delta_engine/application/relationships.py`
-- `tests/domain/model/test_primary_key.py`
 - `tests/domain/model/test_foreign_key.py`
-- `tests/domain/plan/test_diff.py`
 - `tests/application/test_relationships.py`
 - `tests/api/test_delta_table.py`
 
 #### Semantic-operation tests
 
-- PK equality includes the physical name and semantic column set.
-- PK equality ignores declared column order and identifier case.
-- PK equality does not change stored/rendered column order or spelling.
-- `matches_columns` ignores only name and order, not differing membership.
-- Reordered desired/observed keys converge without actions.
-- Same-name changed definitions and renamed definitions still drop then set.
 - FK inference, registered-parent key mismatch, and parent case-drift outcomes
   remain unchanged after signature removal.
 - `column_pairs` preserves canonical association across declaration order and
@@ -498,7 +508,7 @@ The PR should make the primary-key and foreign-key diff code equally direct.
 If custom PK equality needs callers to remember another qualifier beyond
 `matches_columns`, stop and reassess rather than adding another identity API.
 
-### PR 2: Harden declaration and domain construction
+### PR 3: Harden declaration and domain construction
 
 #### Construction-hardening scope
 
