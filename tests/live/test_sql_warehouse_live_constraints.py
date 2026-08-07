@@ -195,13 +195,13 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
     assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
 
 
-def test_platform_preserves_custom_constraint_names_and_drops_them_case_insensitively(
+def test_platform_lowercases_custom_constraint_names_and_drops_them_case_insensitively(
     live_connection, live_tables
 ):
-    """Custom key names retain their spelling but resolve case-insensitively when dropped."""
-    # Name spelling is display metadata, not identity. This is the platform
-    # boundary behind treating an explicitly requested name as a case-insensitive
-    # identifier while retaining its spelling for SQL and reports.
+    """Custom key names are stored lowercase and resolve case-insensitively when dropped."""
+    # Constraint name spelling is not identity or retained display metadata.
+    # This is the platform boundary behind normalizing an explicitly requested
+    # name as a case-insensitive identifier.
     parent_name = live_tables("custom_name_parent")
     child_name = live_tables("custom_name_child")
     primary_key_name = f"{parent_name}_CustomPk"
@@ -220,8 +220,8 @@ def test_platform_preserves_custom_constraint_names_and_drops_them_case_insensit
 
     parent = read_live_table(live_connection, parent_name)
     child = read_live_table(live_connection, child_name)
-    assert parent["primary_key_name"] == primary_key_name
-    assert child["foreign_keys"] == ((foreign_key_name, "parent_id", parent_name, "id"),)
+    assert parent["primary_key_name"] == primary_key_name.lower()
+    assert child["foreign_keys"] == ((foreign_key_name.lower(), "parent_id", parent_name, "id"),)
 
     # DROP CONSTRAINT is how the engine removes an observed FK. A different
     # spelling of the same name resolves, while the engine's name-independent
@@ -320,7 +320,7 @@ def test_platform_does_not_offer_a_direct_constraint_rename_clause(live_connecti
             f"RENAME CONSTRAINT `{old_name}` TO `{new_name}`",
         )
 
-    assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name
+    assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name.lower()
 
 
 def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
