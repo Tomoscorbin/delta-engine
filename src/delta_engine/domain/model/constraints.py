@@ -41,9 +41,12 @@ class PrimaryKeyConstraint:
         return key_signature(self.columns)
 
     def __post_init__(self) -> None:
-        columns = tuple(self.columns)
+        columns = tuple(Identifier(column) for column in self.columns)
+        if not columns:
+            raise ValueError("columns must not be empty")
+
         seen: set[str] = set()
-        for column in self.columns:
+        for column in columns:
             if column in seen:
                 raise ValueError(f"Duplicate primary key column: {column}")
             seen.add(column)
@@ -54,10 +57,7 @@ class PrimaryKeyConstraint:
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
 
-        if not self.columns:
-            raise ValueError("columns must not be empty")
-
-        object.__setattr__(self, "columns", tuple(Identifier(column) for column in columns))
+        object.__setattr__(self, "columns", columns)
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
 
@@ -92,18 +92,20 @@ class ForeignKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
+        local_columns = tuple(Identifier(column) for column in self.local_columns)
+        referenced_columns = tuple(Identifier(column) for column in self.referenced_columns)
 
-        if not self.local_columns:
+        if not local_columns:
             raise ValueError("local_columns must not be empty")
 
-        if not self.referenced_columns:
+        if not referenced_columns:
             raise ValueError("referenced_columns must not be empty")
 
-        if len(self.local_columns) != len(self.referenced_columns):
+        if len(local_columns) != len(referenced_columns):
             raise ValueError(
                 "local_columns and referenced_columns must have the same number of entries;"
-                f" got {len(self.local_columns)} local and"
-                f" {len(self.referenced_columns)} referenced"
+                f" got {len(local_columns)} local and"
+                f" {len(referenced_columns)} referenced"
             )
 
         # Pairs are stored sorted by the local column's identity key. Column
@@ -112,22 +114,18 @@ class ForeignKeyConstraint:
         # generated names, and rendered DDL independent of declaration order
         # and case — while both original spellings are retained.
         pairs = sorted(
-            zip(
-                (Identifier(column) for column in self.local_columns),
-                (Identifier(column) for column in self.referenced_columns),
-                strict=True,
-            ),
+            zip(local_columns, referenced_columns, strict=True),
             key=lambda pair: pair[0].lower(),
         )
 
         seen_local: set[str] = set()
-        for column in self.local_columns:
+        for column in local_columns:
             if column in seen_local:
                 raise ValueError(f"Duplicate foreign key local column: {column}")
             seen_local.add(column)
 
         seen_referenced: set[str] = set()
-        for column in self.referenced_columns:
+        for column in referenced_columns:
             if column in seen_referenced:
                 raise ValueError(f"Duplicate foreign key referenced column: {column}")
             seen_referenced.add(column)
@@ -135,8 +133,6 @@ class ForeignKeyConstraint:
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
 
-        object.__setattr__(self, "local_columns", tuple(self.local_columns))
-        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
         object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
