@@ -476,9 +476,10 @@ would drop those constraints implicitly as part of `RENAME COLUMN`; the
 engine states the drops instead of relying on that, so the plan is a
 complete transcript of what executes.
 
-Only three unresolvable differences exist: `ColumnRenameConflict`,
-`PropertyUndeclared`, and `PartitioningChanged`. Each states an ambiguity or
-unsupported transition without deciding its policy outcome. The
+Only four unresolvable differences exist: `ColumnCaseDrift`,
+`ColumnRenameConflict`, `PropertyUndeclared`, and `PartitioningChanged`. Each
+states an ambiguity or unsupported transition without deciding its policy
+outcome. The
 `Unresolvable` union names them, they live structurally apart from the
 actions, and the application default rules decide to reject each one.
 

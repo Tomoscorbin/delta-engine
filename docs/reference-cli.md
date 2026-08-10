@@ -136,9 +136,10 @@ Imported-code output, SDK or connector output, engine logs, configuration
 errors, and tracebacks go to stderr. This keeps the complete human-readable
 plan together on stdout while preserving diagnostics separately.
 
-SQL is compiled before cross-table dependency resolution. A table later
-blocked by a failed dependency can therefore carry table-local planned SQL;
-the report explains why those statements were not eligible to run.
+Cross-table dependency resolution orders the tables first; SQL is then
+compiled per table before anything would execute. A table later blocked by a
+failed dependency can therefore carry table-local planned SQL; the report
+explains why those statements were not eligible to run.
 
 ## Exit codes
 
