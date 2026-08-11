@@ -201,16 +201,13 @@ class DesiredTable:
         Validate shared table structure, then desired-only invariants.
 
         No two foreign keys may govern the same set of local columns. Two FKs
-        over the same local columns are incoherent, and would generate the same
-        constraint name (``{table}_{local_cols}_fk``) and collide at DDL time.
+        over the same local columns are incoherent, and Databricks rejects them.
         Checking the column *set* (order-insensitive) also rejects a reordered
         duplicate.
 
-        No two foreign keys may carry the same constraint name. Generated
-        names join local columns with underscores, so distinct tuples can
-        still collide — ``('a', 'b_c')`` and ``('a_b', 'c')`` both derive
-        ``{table}_a_b_c_fk`` — and the second ``ADD CONSTRAINT`` would fail at
-        execution with an error that points nowhere near the cause.
+        No two explicitly named foreign keys may carry the same constraint
+        name. Unnamed keys leave collision avoidance to Databricks; duplicate
+        explicit names are an incoherent declaration we can reject locally.
 
         A primary key column must be NOT NULL — a nullable primary key is not a
         well-formed desired schema, independent of any migration. Enforcing it

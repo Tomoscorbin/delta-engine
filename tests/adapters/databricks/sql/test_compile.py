@@ -55,7 +55,7 @@ def _observed_column(name: str) -> ObservedColumn:
 
 
 def _primary_key(
-    columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
+    columns: tuple[str, ...] = ("id",), constraint_name: str | None = "tbl_pk"
 ) -> PrimaryKeyConstraint:
     return PrimaryKeyConstraint(columns, constraint_name)
 
@@ -65,7 +65,7 @@ def _foreign_key(
     local_columns: tuple[str, ...] = ("customer_id",),
     referenced_table: QualifiedName = _REFERENCED_TABLE,
     referenced_columns: tuple[str, ...] = ("id",),
-    constraint_name: str = "orders_customer_id_fk",
+    constraint_name: str | None = "orders_customer_id_fk",
 ) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns,
@@ -305,6 +305,19 @@ def test_create_table_inlines_primary_key_constraint():
     )
 
 
+def test_create_table_lets_databricks_name_an_unnamed_primary_key():
+    action = _create_table(
+        DesiredColumn("id", Integer(), nullable=False),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+    )
+
+    statement = _compile_single(action)
+
+    assert statement == (
+        "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT NOT NULL, PRIMARY KEY (`id`)) USING delta"
+    )
+
+
 def test_create_table_without_primary_key_omits_constraint_clause():
     # Given a CREATE TABLE with no primary key
     action = _create_table(DesiredColumn("id", Integer()))
@@ -420,6 +433,12 @@ def test_set_primary_key_renders_composite_primary_key():
     )
 
 
+def test_set_primary_key_lets_databricks_choose_the_constraint_name():
+    action = SetPrimaryKey(primary_key=_primary_key(("id",), None))
+
+    assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` ADD PRIMARY KEY (`id`)"
+
+
 def test_set_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
     action = SetForeignKey(constraint=_foreign_key(constraint_name="tbl_customer_id_fk"))
@@ -432,6 +451,15 @@ def test_set_foreign_key_renders_single_column_fk():
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_customer_id_fk`"
         " FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
+    )
+
+
+def test_set_foreign_key_lets_databricks_choose_the_constraint_name():
+    action = SetForeignKey(constraint=_foreign_key(constraint_name=None))
+
+    assert _compile_single(action) == (
+        "ALTER TABLE `cat`.`sch`.`tbl`"
+        " ADD FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
     )
 
 

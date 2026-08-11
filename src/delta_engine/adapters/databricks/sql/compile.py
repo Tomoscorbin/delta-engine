@@ -106,8 +106,8 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = backtick(table.primary_key.constraint_name)
-        column_defs.append(f"CONSTRAINT {constraint_name} PRIMARY KEY ({pk_cols})")
+        prefix = _constraint_prefix(table.primary_key.constraint_name)
+        column_defs.append(f"{prefix}PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
     table_comment = _table_comment_clause(table.comment)
@@ -250,10 +250,10 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
-    """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
+    """Compile ALTER TABLE ... ADD PRIMARY KEY, with an optional physical name."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
-    constraint = backtick(action.primary_key.constraint_name)
-    return f"{target.alter_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
+    prefix = _constraint_prefix(action.primary_key.constraint_name)
+    return f"{target.alter_clause} ADD {prefix}PRIMARY KEY ({column_clause})"
 
 
 @_compile_action.register
@@ -266,19 +266,26 @@ def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_set_foreign_key(action: SetForeignKey, target: _Target) -> str:
-    """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    constraint = backtick(action.constraint.constraint_name)
+    """Compile ALTER TABLE ... ADD FOREIGN KEY, with an optional physical name."""
+    prefix = _constraint_prefix(action.constraint.constraint_name)
     local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)
     ref_cols = ", ".join(backtick(col) for col in action.constraint.referenced_columns)
     backticked_ref = backtick_qualified_name(action.constraint.referenced_table)
     return (
         f"{target.alter_clause}"
-        f" ADD CONSTRAINT {constraint}"
-        f" FOREIGN KEY ({local_cols}) REFERENCES {backticked_ref} ({ref_cols})"
+        f" ADD {prefix}FOREIGN KEY ({local_cols})"
+        f" REFERENCES {backticked_ref} ({ref_cols})"
     )
 
 
 # ----------- helpers ------------
+
+
+def _constraint_prefix(constraint_name: str | None) -> str:
+    """Render the optional named-constraint portion of Databricks key syntax."""
+    if constraint_name is None:
+        return ""
+    return f"CONSTRAINT {backtick(constraint_name)} "
 
 
 def _column_definition(column: DesiredColumn) -> str:

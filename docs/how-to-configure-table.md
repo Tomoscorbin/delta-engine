@@ -472,9 +472,9 @@ orders = DeltaTable(
 )
 ```
 
-When the engine creates this key, it names the constraint `{table}_pk` —
-`orders_pk` above. The name is generated when the `DeltaTable` is constructed
-and is managed state, just like an explicitly supplied name.
+Because no physical name is supplied above, the engine omits the name from the
+SQL and Databricks generates one. On later syncs, any observed primary key over
+the same columns satisfies this declaration regardless of its physical name.
 
 ### Choose a primary-key name
 
@@ -499,9 +499,10 @@ normalized `orders_business_key` spelling.
 
 Constraint names share one case-insensitive namespace across all tables and
 constraint kinds in a schema. Choose an explicit name that is unique across
-that whole schema. `DeltaTable.primary_key_name` returns the generated or
-explicit name, or `None` when the table has no primary key;
-`DeltaTable.primary_key` continues to return the tuple of key columns.
+that whole schema. `DeltaTable.primary_key_name` returns the explicitly
+declared name, or `None` when the name is left to Databricks (including when a
+primary key exists); `DeltaTable.primary_key` continues to return the tuple of
+key columns.
 
 ### Composite primary keys
 
@@ -543,16 +544,17 @@ engine plan that drops and re-adds the key restores the default `NORELY` form.
 
 ### Drift
 
-The engine compares primary keys by their _column set_ and physical name. An
-omitted public name becomes the managed `{table}_pk` default during
-construction; use `primary_key_name` to adopt a differently named live key.
+The engine compares primary keys by their _column set_. An explicit
+`primary_key_name` additionally manages the physical name; without one, any
+observed name is accepted.
 
-| Change                                   | Actions emitted                       |
-| ---------------------------------------- | ------------------------------------- |
-| Primary key added                        | `SetPrimaryKey`                       |
-| Primary key removed                      | `DropPrimaryKey`                      |
-| Primary key columns changed              | `DropPrimaryKey` then `SetPrimaryKey` |
-| Same columns, physical name changed      | `DropPrimaryKey` then `SetPrimaryKey` |
+| Change                                                | Actions emitted                       |
+| ----------------------------------------------------- | ------------------------------------- |
+| Primary key added                                     | `SetPrimaryKey`                       |
+| Primary key removed                                   | `DropPrimaryKey`                      |
+| Primary key columns changed                           | `DropPrimaryKey` then `SetPrimaryKey` |
+| Same columns, omitted desired name                    | nothing                               |
+| Same columns, explicit desired name differs from live | `DropPrimaryKey` then `SetPrimaryKey` |
 
 Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
 as equal.
@@ -607,21 +609,12 @@ orders = DeltaTable(
 Referencing the target `DeltaTable` object — rather than a dotted table name —
 lets the engine resolve the declaration against that table's primary key,
 validate the resulting column pairs, and capture the target's qualified name.
-Set `name` when you need to adopt or choose the physical constraint name. When
-it is omitted, the owning `DeltaTable` generates
-`{table}_{local_columns}_fk`, joining the local columns in sorted order
-(`orders_customer_id_fk` for the example without its explicit name). The name
-is materialized once when the `DeltaTable` is constructed; downstream planning
-and SQL consume that complete constraint.
-
-Generated names join local columns with underscores, so two foreign keys over
-different columns can derive the same name — `("a", "b_c")` and `("a_b", "c")`
-both derive `orders_a_b_c_fk`. A within-table collision is rejected when the
-`DeltaTable` is constructed; give either `ForeignKey` an explicit, distinct
-name. Databricks scopes constraint names to the schema, so generated or
-explicit names can also collide with a constraint on _another_ table. The
-engine does not yet validate that schema-wide namespace, so such a collision
-fails at execution.
+Set `name` when the physical constraint name is managed state. When it is
+omitted, the engine emits unnamed foreign-key SQL and Databricks allocates a
+schema-unique name. On later syncs, an observed foreign key with the same local
+columns, referenced table, and referenced columns satisfies the unnamed
+declaration. Explicit names must be schema-unique; a collision is reported as
+an execution failure from Databricks.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
@@ -731,20 +724,20 @@ being silently assumed correct.
 
 ### Drift
 
-The engine compares foreign keys by physical name and definition: local
-columns, referenced table, and referenced columns. An omitted public name
-becomes the managed generated name when the `DeltaTable` is constructed. Use
-`name` to adopt a differently named live constraint. Name identity is
-case-insensitive, while the spelling supplied by the declaration is preserved
-for SQL and previews.
+The engine compares foreign keys by definition: local columns, referenced
+table, and referenced columns. An explicit `name` additionally manages the
+physical name; an omitted name accepts the name Databricks assigned. Name
+identity is case-insensitive, while declaration spelling is preserved for SQL
+and previews.
 
-| Change                                      | Actions emitted                       |
-| ------------------------------------------- | ------------------------------------- |
-| Foreign key added                           | `SetForeignKey`                       |
-| Foreign key removed                         | `DropForeignKey`                      |
-| Foreign key definition changed              | `DropForeignKey` then `SetForeignKey` |
-| Same definition, physical name changed      | `DropForeignKey` then `SetForeignKey` |
-| No change                                   | nothing                               |
+| Change                                                | Actions emitted                       |
+| ----------------------------------------------------- | ------------------------------------- |
+| Foreign key added                                     | `SetForeignKey`                       |
+| Foreign key removed                                   | `DropForeignKey`                      |
+| Foreign key definition changed                        | `DropForeignKey` then `SetForeignKey` |
+| Same definition, omitted desired name                 | nothing                               |
+| Same definition, explicit desired name differs live   | `DropForeignKey` then `SetForeignKey` |
+| No change                                             | nothing                               |
 
 ### Constraints are informational
 

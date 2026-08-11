@@ -73,7 +73,7 @@ def _observed(**overrides) -> ObservedTable:
 
 
 def _foreign_key(
-    constraint_name: str = "test_id_fk",
+    constraint_name: str | None = "test_id_fk",
     local_columns: tuple[str, ...] = ("id",),
     referenced_columns: tuple[str, ...] = ("id",),
     referenced_table: QualifiedName = _PARENT_NAME,
@@ -730,6 +730,20 @@ def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
     )
 
 
+def test_unnamed_primary_key_adopts_observed_name_when_columns_match():
+    desired_pk = PrimaryKeyConstraint(columns=("id",))
+    observed_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="databricks_generated_pk")
+    columns = (DesiredColumn("id", Integer(), nullable=False),)
+
+    diff = diff_table(
+        _desired(columns=columns, primary_key=desired_pk),
+        _observed(columns=columns, primary_key=observed_pk),
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == ()
+
+
 # ---------- constraint changes
 
 
@@ -784,6 +798,44 @@ def test_foreign_key_name_drift_replaces_the_constraint():
     assert drift.actions == (
         DropForeignKey(constraint=observed_key),
         SetForeignKey(constraint=desired_key),
+    )
+
+
+def test_unnamed_foreign_key_adopts_observed_name_when_definition_matches():
+    desired_key = _foreign_key(None, local_columns=("customer_id",))
+    observed_key = _foreign_key("databricks_generated_fk", local_columns=("customer_id",))
+    columns = (DesiredColumn("customer_id", String()),)
+
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(desired_key,)),
+        _observed(columns=columns, foreign_keys=(observed_key,)),
+    )
+
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == ()
+
+
+def test_explicit_foreign_key_names_are_reserved_before_unnamed_keys_are_adopted():
+    unnamed_customer = _foreign_key(None, local_columns=("customer_id",))
+    named_billing = _foreign_key("claimed_fk", local_columns=("billing_id",))
+    observed_customer = _foreign_key("claimed_fk", local_columns=("customer_id",))
+    observed_billing = _foreign_key("legacy_billing_fk", local_columns=("billing_id",))
+    columns = (
+        DesiredColumn("customer_id", String()),
+        DesiredColumn("billing_id", String()),
+    )
+
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(unnamed_customer, named_billing)),
+        _observed(columns=columns, foreign_keys=(observed_customer, observed_billing)),
+    )
+
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == (
+        DropForeignKey(constraint=observed_customer),
+        DropForeignKey(constraint=observed_billing),
+        SetForeignKey(constraint=unnamed_customer),
+        SetForeignKey(constraint=named_billing),
     )
 
 

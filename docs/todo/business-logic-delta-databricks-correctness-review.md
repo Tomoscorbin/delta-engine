@@ -48,7 +48,7 @@ path currently produces an incorrect result.
 | 10 ✅ | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
 | 12 | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
-| 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
+| 13 ✅ | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
 | 14 | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
 | 15 | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
 
@@ -646,18 +646,14 @@ and requires a supplied name to be unique within the schema. Unity Catalog
 identifier limits are described in
 [Names and identifiers](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-names).
 
-### Proposed solution
+### Resolved (2026-08-11)
 
-1. Prefer omitting the physical constraint name in create/add DDL and let
-   Databricks allocate it. The reader already observes the resulting name, and
-   constraint equality/diffing should remain content-based.
-2. If explicit names prove necessary, introduce a platform-safe, bounded,
-   unambiguous generator with a stable digest and account for schema-wide
-   collision scope. Simple truncation is not sufficient.
-3. Add cases for a 255-character table name, special characters valid only for
-   columns, and ambiguous table/column concatenations.
-4. Confirm live that generated platform names can be observed and subsequently
-   used for drop/reconciliation.
+Omitted primary- and foreign-key names now remain `None` in desired state. The
+compiler omits `CONSTRAINT name`, Databricks allocates a schema-unique physical
+name, and the reader preserves that concrete name in observed state. An unnamed
+declaration accepts a structurally matching observation; an explicit name is
+managed and a mismatch produces drop-and-recreate actions. This removes the
+unsafe generator rather than trying to make string concatenation safe.
 
 ## 14. Make dependency-cycle detection iterative
 

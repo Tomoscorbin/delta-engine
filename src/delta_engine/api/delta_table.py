@@ -89,21 +89,6 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
-def _foreign_key_constraint_name(
-    *,
-    owner_table_name: str,
-    local_columns: tuple[str, ...],
-) -> str:
-    """
-    Return the physical name used for a generated foreign key.
-
-    Joins the sorted identity keys of the local columns so the generated
-    name is identical across declaration casing and column order.
-    """
-    columns = "_".join(sorted(column.lower() for column in local_columns))
-    return f"{owner_table_name}_{columns}_fk"
-
-
 def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
     """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
     for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
@@ -343,9 +328,9 @@ class ForeignKey:
     ambiguous composite keys require the explicit form. Identifier spelling is
     preserved; identifiers differing only in case name the same column.
 
-    ``name`` optionally chooses the physical constraint name. When omitted,
-    the owning :class:`DeltaTable` generates
-    ``{table}_{local_columns}_fk`` once during construction.
+    ``name`` optionally manages the physical constraint name. When omitted,
+    Databricks chooses the name and the declaration matches an existing
+    constraint by definition.
 
     ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
     for a self-referential key. See the architecture explanation doc for why
@@ -479,14 +464,7 @@ class ForeignKey:
             local_columns=local_columns,
             referenced_table=referenced.table,
             referenced_columns=referenced_columns,
-            constraint_name=(
-                self.name
-                if self.name is not None
-                else _foreign_key_constraint_name(
-                    owner_table_name=owner_name.name,
-                    local_columns=local_columns,
-                )
-            ),
+            constraint_name=self.name,
         )
 
     def _resolve_reference(
@@ -647,11 +625,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     primary_key_constraint = (
         PrimaryKeyConstraint(
             columns=primary_key_columns,
-            constraint_name=(
-                declaration.primary_key_name
-                if declaration.primary_key_name is not None
-                else Identifier(f"{declaration.qualified_name.name}_pk")
-            ),
+            constraint_name=declaration.primary_key_name,
         )
         if primary_key_columns is not None
         else None
@@ -729,10 +703,10 @@ class DeltaTable:
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
             primary_key_name: Optional physical name to manage for the primary
-                key. When omitted, ``{table}_pk`` is generated and managed.
+                key. When omitted, Databricks chooses the physical name.
             foreign_keys: Foreign key relationships declared on this table.
-                Each may choose a physical constraint ``name``; omitted names
-                use ``{table}_{local_columns}_fk``.
+                Each may choose a physical constraint ``name``; Databricks
+                chooses omitted names.
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
@@ -829,9 +803,11 @@ class DeltaTable:
 
     @property
     def primary_key_name(self) -> str | None:
-        """Generated or explicitly declared primary-key name, if a key exists."""
+        """Explicitly declared primary-key name, if one was supplied."""
         primary_key = self._desired_table.primary_key
-        return str(primary_key.constraint_name) if primary_key is not None else None
+        if primary_key is None or primary_key.constraint_name is None:
+            return None
+        return str(primary_key.constraint_name)
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:

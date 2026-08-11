@@ -85,8 +85,7 @@ class ForeignKeyConstraint:
             preserving spelling and stored sorted by identifier key (pairing
             with ``referenced_columns`` preserved). Column order is not part of
             a foreign key's meaning, mirroring the primary key's set identity,
-            so identity, generated names, and rendered DDL are independent of
-            declaration order.
+            so identity and rendered DDL are independent of declaration order.
         referenced_table: Fully qualified name of the referenced table.
         referenced_columns: Tuple of column names in the referenced table,
             positionally aligned with ``local_columns`` after identity-key sorting.
@@ -126,9 +125,9 @@ class ForeignKeyConstraint:
 
         # Pairs are stored sorted by the local column's identity key. Column
         # order is not part of a foreign key's meaning (mirroring the primary
-        # key's set identity), so one canonical order makes identity,
-        # generated names, and rendered DDL independent of declaration order
-        # and case — while both original spellings are retained.
+        # key's set identity), so one canonical order makes identity and
+        # rendered DDL independent of declaration order and case — while both
+        # original spellings are retained.
         pairs = sorted(
             zip(local_columns, referenced_columns, strict=True),
             key=lambda pair: pair[0].lower(),

@@ -755,22 +755,19 @@ Constraint names remain data on the concrete key objects; the domain does not
 introduce separate definition, desired-specification, or physical-occurrence
 wrappers.
 
-Every `PrimaryKeyConstraint` is complete: it carries its physical name as well
-as its columns. Public `primary_key_name=None` is input shorthand only. When
-the declaration is lowered, the API layer already knows the owning table and
-generates `{table}_pk` once; an explicit name passes through unchanged. The
-reader likewise supplies the catalog name when it constructs an observed key.
-The differ can therefore compare column-set and case-insensitive name identity
-without resolving lifecycle state, and the compiler consumes the same value.
+Desired key constraints carry an optional physical name. `None` means the
+physical name is not desired state: the compiler omits it and Databricks
+allocates one. Observed constraints always carry the catalog name, because
+later drop operations require the concrete platform identity.
 
-Every `ForeignKeyConstraint` is likewise complete: it carries its physical name
-as well as its local-to-referenced definition. Public `ForeignKey.name=None` is
-input shorthand only. When the declaration is attached to a `DeltaTable`, the
-API layer already knows the owner and generates `{table}_{local_columns}_fk`
-once; an explicit name passes through unchanged. Canonicalized column pairs and
-case-insensitive identifiers make normal constraint equality express both
-physical-name and structural identity. The differ and compiler consume that
-same complete value.
+Exact constraint equality still includes the optional name. Reconciliation is
+deliberately asymmetric: a desired constraint is satisfied when its definition
+matches and either its name is omitted or its explicit name matches the
+observation. Primary-key reconciliation applies that rule directly. Foreign-key
+reconciliation reserves explicit desired names first, then lets unnamed
+declarations adopt remaining structurally matching observations. The optional
+SQL grammar stays inside the compiler; other layers do not predict platform
+names.
 
 ## Reporting and failure semantics
 

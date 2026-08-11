@@ -204,7 +204,7 @@ def test_desired_table_defaults_to_no_foreign_keys():
 
 
 def test_desired_table_stores_foreign_keys():
-    # Given a foreign key referencing another table (name generated at the API layer)
+    # Given a foreign key referencing another table under an explicit name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
@@ -217,7 +217,7 @@ def test_desired_table_stores_foreign_keys():
         foreign_keys=(fk,),
     )
 
-    # Then the FK is stored, carrying its engine-generated constraint name
+    # Then the FK is stored with its complete declaration
     assert table.foreign_keys == (
         ForeignKeyConstraint(
             local_columns=("customer_id",),
@@ -362,9 +362,8 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         )
 
 
-def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
-    # Given two FKs over different local columns whose generated names collide:
-    # ('a', 'b_c') and ('a_b', 'c') both derive t_a_b_c_fk
+def test_desired_table_rejects_duplicate_explicit_foreign_key_names():
+    # Given two FKs over different local columns with the same explicit name
     first = ForeignKeyConstraint(
         local_columns=("a", "b_c"),
         referenced_table=QualifiedName("cat", "sch", "p1"),
