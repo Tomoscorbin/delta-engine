@@ -348,20 +348,51 @@ def test_resolve_handles_chain_of_dependencies():
     assert not _failed_resolutions(result)
 
 
-def test_resolve_orders_table_after_all_fk_parents():
-    # Given order_items depends on both orders and products
+def test_resolve_handles_more_than_one_thousand_nested_dependencies():
+    # Given a valid dependency chain deeper than Python's default recursion limit
+    table_count = 1_100
     tables = (
-        _table_with_fks("cat.sch.order_items", "cat.sch.orders", "cat.sch.products"),
-        _table("cat.sch.products"),
-        _table("cat.sch.orders"),
+        *(
+            _table_with_fk(
+                f"cat.sch.table_{index:04}",
+                f"cat.sch.table_{index - 1:04}",
+            )
+            for index in range(table_count - 1, 0, -1)
+        ),
+        _table("cat.sch.table_0000"),
     )
 
     # When resolving dependencies
     result = resolve(tables)
 
-    # Then both parent tables appear before the dependent table
+    # Then every table is returned in dependency-first order without exhausting the call stack
+    assert _names(result) == [f"cat.sch.table_{index:04}" for index in range(table_count)]
+    assert not _failed_resolutions(result)
+
+
+def test_resolve_handles_shared_dependencies_once():
+    # Given order_items depends on orders and products, which both depend on customers
+    tables = (
+        _table_with_fks("cat.sch.order_items", "cat.sch.orders", "cat.sch.products"),
+        _table_with_fk("cat.sch.products", "cat.sch.customers"),
+        _table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _table("cat.sch.customers"),
+    )
+
+    # When resolving the diamond-shaped graph
+    result = resolve(tables)
+
+    # Then every dependency precedes its dependents and every table appears once
+    _assert_before(result, "cat.sch.customers", "cat.sch.orders")
+    _assert_before(result, "cat.sch.customers", "cat.sch.products")
     _assert_before(result, "cat.sch.orders", "cat.sch.order_items")
     _assert_before(result, "cat.sch.products", "cat.sch.order_items")
+    assert sorted(_names(result)) == [
+        "cat.sch.customers",
+        "cat.sch.order_items",
+        "cat.sch.orders",
+        "cat.sch.products",
+    ]
     assert not _failed_resolutions(result)
 
 
@@ -464,6 +495,48 @@ def test_resolve_records_cycle_failure_only_for_fk_inside_the_cycle():
         references="cat.sch.a",
     )
     _sound_resolution(result, "cat.sch.c")
+
+
+def test_resolve_orders_a_cycle_between_its_dependency_and_dependent():
+    # Given dependent -> (a <-> b) -> parent
+    tables = (
+        _table_with_fk("cat.sch.dependent", "cat.sch.a"),
+        _table_with_fks("cat.sch.a", "cat.sch.b", "cat.sch.parent"),
+        _table_with_fk("cat.sch.b", "cat.sch.a"),
+        _table("cat.sch.parent"),
+    )
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the whole cycle component stays between its dependency and dependent
+    _assert_before(result, "cat.sch.parent", "cat.sch.a")
+    _assert_before(result, "cat.sch.parent", "cat.sch.b")
+    _assert_before(result, "cat.sch.a", "cat.sch.dependent")
+    _assert_before(result, "cat.sch.b", "cat.sch.dependent")
+    assert sorted(_names(result)) == [
+        "cat.sch.a",
+        "cat.sch.b",
+        "cat.sch.dependent",
+        "cat.sch.parent",
+    ]
+
+    # And only the edges inside the cycle fail structurally
+    _assert_only_failure(
+        result,
+        "cat.sch.a",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.b",
+        local_columns=("b_id",),
+    )
+    _assert_only_failure(
+        result,
+        "cat.sch.b",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.a",
+    )
+    _sound_resolution(result, "cat.sch.parent")
+    _sound_resolution(result, "cat.sch.dependent")
 
 
 def test_resolve_reports_invalid_fk_target_over_cycle_for_the_same_fk():
@@ -766,6 +839,48 @@ def test_foreign_key_referenced_column_case_must_match_the_registered_declaratio
         "dev.silver.orders",
         reason=ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH,
         references="dev.silver.customers",
+    )
+
+
+def test_resolve_reports_case_mismatch_over_cycle_for_the_same_fk():
+    # Given a <-> b form a cycle, but a spells b's registered primary key differently
+    a = _table_with_fk(
+        "cat.sch.a",
+        "cat.sch.b",
+        referenced_primary_key_columns=("ID",),
+    )
+    b = DeltaTable(
+        "cat",
+        "sch",
+        "b",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("ref_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[
+            ForeignKey(
+                columns={"ref_id": "id"},
+                references=_referenced_table("cat.sch.a"),
+            )
+        ],
+    ).to_desired_table()
+
+    # When resolving dependencies
+    result = resolve((a, b))
+
+    # Then a reports the spelling mismatch rather than the lower-priority cycle
+    _assert_only_failure(
+        result,
+        "cat.sch.a",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH,
+        references="cat.sch.b",
+    )
+    _assert_only_failure(
+        result,
+        "cat.sch.b",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.a",
     )
 
 
