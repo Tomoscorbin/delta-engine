@@ -6,6 +6,26 @@ Declarative, safety-first schema and metadata management for Delta Lake tables o
 
 Define the state your tables should have in Python. Delta Engine reads their current Unity Catalog state, calculates the difference, validates whether each change is safe, and executes only the DDL needed to reconcile them.
 
+## What problem does it solve?
+
+Tables often outlive the notebook, job, or pipeline that first created them.
+Their columns, properties, comments, tags, and constraints can then drift across
+environments or change through unreviewed DDL. Delta Engine gives those catalog
+facts a version-controlled source of truth and makes each proposed change
+reviewable before it reaches Databricks.
+
+Delta Engine is a reconciler, not a data pipeline or a migration ledger. Your
+existing jobs, declarative pipelines, dbt models, or other systems continue to
+produce table data. Delta Engine manages the table schema and catalog metadata
+around that data.
+
+It is most useful when a team wants repeatable governance, drift detection, and
+safe evolution across a continuing table estate. You can use it for a one-off
+change, but a notebook or migration script is usually simpler if you do not
+intend to keep and re-run the declaration. Do not let two tools manage the same
+table aspects; use [scoped ownership](https://tomoscorbin.github.io/delta-engine/how-to-deploy-metadata-only.html)
+when another system owns the schema.
+
 ## What Delta Engine gives you
 
 - **Desired-state reconciliation:** declare the complete table state rather than a sequence of migrations.
@@ -42,6 +62,7 @@ and planned SQL and never applies the generated plan. See the
 ## Quickstart
 
 ```python
+from delta_engine import render_report
 from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
 
@@ -56,8 +77,27 @@ customers = DeltaTable(
 )
 
 engine = build_spark_engine(spark)  # `spark` is provided by your Databricks notebook
-engine.sync(customers)         # creates the table, or no-ops if it already matches
+report = engine.sync(customers)     # creates the table, or no-ops if it already matches
+print(render_report(report))
 ```
+
+A first sync that creates this table renders like this (elapsed time varies):
+
+```text
+SYNC REPORT
+===========
+
+TABLE                 STATUS   STATEMENTS  DETAIL
+dev.silver.customers  SUCCESS  1/1         2 columns
+
+1 table: 1 applied (0.0s)
+```
+
+`sync` returns the structured `SyncReport`; it does not print this text itself.
+Use `render_report` for status, `render_diff` for semantic changes,
+`report.planned_sql_statements` for exact DDL, or `report.to_dict()` for JSON-safe
+automation data. The [getting-started tutorial](https://tomoscorbin.github.io/delta-engine/tutorial-getting-started.html)
+shows all four and explains where declarations fit in a pipeline.
 
 Validation happens before execution. When a table contains an unsafe change, Delta Engine does not execute a partially valid plan for that table.
 
