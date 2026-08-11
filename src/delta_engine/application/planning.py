@@ -22,8 +22,9 @@ class PlanningAccepted:
     The accepted diff and the validated executable plan constructed from it.
 
     The two facts are born together in :func:`plan_changes` and stay together
-    here: construction proves the plan targets the diff it was planned from,
-    so consumers never have to re-associate them.
+    here: construction proves the plan targets the diff it was planned from
+    and that the diff contains no unresolvable differences, so consumers never
+    have to re-establish either invariant.
     """
 
     diff: TableDiff
@@ -32,6 +33,8 @@ class PlanningAccepted:
     def __post_init__(self) -> None:
         if self.plan.target != self.diff.target:
             raise ValueError("Accepted plan must target the diff it was planned from")
+        if isinstance(self.diff, TableDrift) and self.diff.unresolvable:
+            raise ValueError("Accepted plan cannot contain unresolvable differences")
 
 
 @dataclass(frozen=True, slots=True)
