@@ -1,14 +1,14 @@
 # Business logic, Delta, and Databricks correctness review
 
-**Status:** 12 of 15 findings resolved (rechecked against `main`, 2026-08-10);
-items 11, 13, and 14 remain open
+**Status:** 13 of 15 findings resolved (updated against `main`, 2026-08-11);
+items 11 and 13 remain open
 
 **Original review:** 2026-07-14
 
 **Fresh sweep:** 2026-07-20
 
 **Fresh-sweep implementation:** landed piecemeal — see each finding's
-resolution note; items 11, 13, and 14 have no complete implementation PR yet
+resolution note; items 11 and 13 have no complete implementation PR yet
 
 This began as the second phase of the codebase review. All eight original
 findings have since been implemented, as recorded in their resolution
@@ -50,7 +50,7 @@ path currently produces an incorrect result.
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
 | 12 ✅ | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
 | 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
-| 14 | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
+| 14 ✅ | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
 | 15 ✅ | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
 
 ## 1. Reject views and non-Delta tables at the read boundary
@@ -229,8 +229,8 @@ their types.
 
 Relevant code:
 
-- `src/delta_engine/api/delta_table.py` (`_validate_foreign_keys`)
-- `src/delta_engine/application/dependency_resolution.py`
+- `src/delta_engine/api/delta_table.py` (`ForeignKey._to_constraint`)
+- `src/delta_engine/application/relationships.py` (`resolve`)
 
 It is therefore possible to construct a foreign key using one parent object,
 register a different parent declaration under the same qualified name, and
@@ -684,10 +684,10 @@ raised `RecursionError: maximum recursion depth exceeded`.
 
 Relevant code:
 
-- `src/delta_engine/application/dependency_resolution.py`
+- `src/delta_engine/application/relationships.py`
   (`_strongly_connected_components`)
-- `src/delta_engine/application/engine.py` (`resolve`)
-- `tests/application/test_dependency_resolution.py`
+- `src/delta_engine/application/engine.py` (`Engine.sync`)
+- `tests/application/test_relationships.py`
 
 ### Proposed solution
 
@@ -697,6 +697,16 @@ Relevant code:
 3. Add a regression graph comfortably above the interpreter recursion limit,
    covering both a deep acyclic chain and a deep graph containing a cycle.
 4. Do not raise the process recursion limit as a library side effect.
+
+### Resolved (2026-08-11)
+
+Fixed in [PR #349](https://github.com/Tomoscorbin/delta-engine/pull/349).
+Relationship resolution now uses iterative Kosaraju traversal behind the
+existing private strongly-connected-components boundary. It retains
+dependency-first ordering and deterministic neighbour traversal without
+consuming the Python call stack. Regression coverage includes both a
+1,100-table acyclic chain and a 1,100-table single strongly connected
+component, exercising both traversal passes above the former recursion limit.
 
 ## 15. Require integer `Decimal` precision and scale
 
@@ -824,7 +834,7 @@ Before an implementation PR is ready for merge, run:
 - [ ] API identifiers will be canonicalized before validation, and physical
       constraint names will be delegated to Databricks unless a safe generator
       is demonstrated.
-- [ ] Dependency traversal will be iterative and `Decimal` will enforce runtime
+- [x] Dependency traversal will be iterative and `Decimal` will enforce runtime
       integer inputs.
 - [ ] The concurrency contract and success postcondition will be documented
       explicitly.

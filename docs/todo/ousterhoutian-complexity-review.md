@@ -24,6 +24,10 @@ below, and the remaining findings await agreement and implementation
 
 **Consolidated recheck:** `7db823b1` (`main`, 2026-08-10)
 
+**Post-consolidation update:** `241b0f43` (`main`, 2026-08-11) — findings 11
+and 15 and the recursive graph-traversal improvement were updated through
+PRs #346, #347, and #349
+
 **Source PRs:** [#312](https://github.com/Tomoscorbin/delta-engine/pull/312),
 [#337](https://github.com/Tomoscorbin/delta-engine/pull/337), and
 [#341](https://github.com/Tomoscorbin/delta-engine/pull/341). The stale-guide
@@ -100,11 +104,11 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 8 ✅ | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
 | 9 ✅ | High | The machine report reuses lossy display rendering | Structured diagnostics are truncated and wire names follow Python symbols |
 | 10 ◐ | High | The closed data-type vocabulary is operationally open | Invalid types fail late or bypass feature policy |
-| 11 | Medium | Unresolvable differences are not classified exhaustively | A new blocker can be silently omitted from a successful plan |
+| 11 ✅ | Medium | Accepted plans could omit unresolvable differences | A new blocker could be silently omitted from a successful plan |
 | 12 | Medium | Other error translators also catch beyond their boundary | Adapter and import defects become expected operational failures |
 | 13 | Medium | Declaration loading leaks process-wide import state | One invocation can affect backend imports and later invocations |
 | 14 ✅ | High | Planning outcomes do not retain the diff they judged | Reports carry planning and diff as unrelated values that can disagree |
-| 15 ◐ | High | Change interpretation is partial and repeated | Added-column comments still disappear from reports |
+| 15 ✅ | High | Change interpretation is partial and repeated | Added-column comments disappear from reports |
 | 16 ◐ | Medium | Consumers reconstruct one-answer semantic facts | Renderers and serializers still know action polarity, plan kind, and wire identity |
 | 17 | Medium | Raw properties leak property-dependent capabilities | Several callers interpret the same property strings independently |
 
@@ -627,7 +631,7 @@ probe stands — a `TimestampNtz` subclass still renders while evading the
 exact-type feature lookup — and the duplicated tree traversals remain, so
 the extension-policy decision is still open.
 
-## 11. Classify every unresolvable difference exhaustively
+## 11. Prevent accepted plans from omitting unresolvable differences
 
 ### Cause
 
@@ -658,6 +662,16 @@ Add a mandatory exhaustive classification at the planning boundary. A
 guard can reject any unresolvable difference not accounted for by validation.
 Safety rules may continue to own their detailed user messages; successful
 planning must prove that no blocker was silently dropped.
+
+### Resolved (2026-08-11)
+
+[PR #347](https://github.com/Tomoscorbin/delta-engine/pull/347) adopted the
+final invariant rather than adding a second variant interpreter.
+`PlanningAccepted` rejects any `TableDrift` whose `unresolvable` tuple is
+non-empty, so a new variant omitted from validation cannot silently become an
+accepted plan. Eligibility and safety rules continue to own the detailed
+variant-specific failures; the planning outcome proves only the universal
+postcondition it needs.
 
 ## 12. Narrow the remaining error-translation boundaries
 
@@ -829,7 +843,7 @@ Keep `DiffEntry` in the application layer. Moving it or its prose onto domain
 actions would make the domain depend on one report vocabulary even though SQL,
 human text, and machine output are legitimately separate projections.
 
-### Partial update (2026-08-10)
+### Resolved (2026-08-11)
 
 [PR #323](https://github.com/Tomoscorbin/delta-engine/pull/323) and
 [#324](https://github.com/Tomoscorbin/delta-engine/pull/324) made each
@@ -839,9 +853,12 @@ reconstructs whether work was planned, applied, blocked, or partially applied.
 planning own the diff it judged, and rejected table creation is now projected
 through the same action-entry interpretation as other rejected changes.
 
-The `AddColumn` action still emits only its structural entry even when its
-complete `DesiredColumn` carries a comment that the compiler applies. That
-remaining report omission keeps this finding open.
+[PR #346](https://github.com/Tomoscorbin/delta-engine/pull/346) closed the
+remaining omission. `CreateTable` and `AddColumn` now share the same column
+comment interpretation, and an added column with a comment emits both its
+structural and comment entries. Together with the earlier lifecycle-derived
+change state and rejected-creation interpretation, reports no longer decide
+independently which changes exist.
 
 ## 16. Let semantic values answer their own one-answer questions
 
@@ -965,13 +982,17 @@ recommendations do not become parallel sources of truth.
 
 ## Smaller, contained improvements
 
-### Replace recursive graph traversal
+### Replace recursive graph traversal ✅
 
-`_strongly_connected_components` uses recursive Tarjan traversal. Dependency
-depth therefore inherits Python's recursion limit even though the public sync
-API declares no depth limit. The existing TODO identifies this accurately.
-An iterative traversal would keep the graph limit inside the relationship
-module instead of leaking an interpreter implementation detail.
+At the reviewed revision, `_strongly_connected_components` used recursive
+Tarjan traversal. Dependency depth therefore inherited Python's recursion
+limit even though the public sync API declared no depth limit.
+
+Resolved by [PR #349](https://github.com/Tomoscorbin/delta-engine/pull/349):
+the relationship module now uses iterative Kosaraju traversal behind the same
+private strongly-connected-components boundary. Tests cover a 1,100-table
+chain and a 1,100-table single component, so both traversal passes remain
+independent of the interpreter call-stack limit.
 
 ### Validate decimal parameter types ✅
 
@@ -1223,8 +1244,9 @@ Named so the review does not read as a list of debts:
   messages quote drift in the diff's own words.
 - The eligibility/safety split means no rule does scope filtering of its
   own — the special cases are handled once, behind the boundary.
-- `relationships.resolve` hides Tarjan entirely; `blocked_by` is the single
-  rule kernel both execution and accounting fold.
+- `relationships.resolve` hides the strongly-connected-components algorithm
+  entirely; `blocked_by` is the single rule kernel both execution and
+  accounting fold.
 - Tests are classical: recording fakes at the ports, real domain values,
   behaviour-named tests, mocks only at true boundaries.
 - Comments record platform reasoning no code could express — the plain
