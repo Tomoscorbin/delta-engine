@@ -120,6 +120,18 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer", "NOT NULL")),),
         ),
         (
+            AddColumn(DesiredColumn("age", Integer(), comment="Age in years")),
+            (
+                DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer",)),
+                DiffEntry(
+                    DiffCategory.COMMENTS,
+                    DiffOperation.ADD,
+                    "column age",
+                    ("'Age in years'",),
+                ),
+            ),
+        ),
+        (
             DropColumn(column=ObservedColumn("legacy", Integer())),
             (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, "legacy"),),
         ),
