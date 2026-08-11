@@ -25,11 +25,14 @@ The full per-module reference is generated from the source tree; see
 
 Selects what the declaration manages. `"full"` manages the whole table.
 `"metadata"` restricts the sync to catalog metadata: comments, tags, and
-primary/foreign key constraints. `"tags"` restricts it to table and column
-tags. A restricted scope still declares the full table shape; aspects outside
-the scope are never changed, and any unmanaged drift causes validation to
-fail. Properties are the exception: a declaration that does not manage
-properties never compares them at all.
+primary/foreign key constraints. `"annotations"` restricts it to table and
+column comments and tags, and `"tags"` restricts it further to table and
+column tags. The scopes nest: `tags ⊂ annotations ⊂ metadata ⊂ full`.
+Only `"annotations"` and `"tags"` may target streaming tables. A restricted
+scope still declares the full table shape; aspects outside the scope are never
+changed, and any unmanaged drift causes validation to fail. Properties are
+the exception: a declaration that does not manage properties never compares
+them at all.
 
 ### `clustered_by` (read-only accessor)
 

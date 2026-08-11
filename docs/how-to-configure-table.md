@@ -251,12 +251,13 @@ and `Date` to `TimestampNtz`. The engine does not model UniForm, so on such
 a table these widenings fail at execution with the original Databricks
 error.
 
-Type widening requires Databricks Runtime 15.4 LTS or later; delta-engine
-does not preflight runtime versions, so declaring it on an older runtime
-fails at execution with the original Databricks error. Note that enabling
-type widening adds the `typeWidening` protocol feature to the table
-permanently: declaring the property `false` (or `None`) later stops further
-widenings but does not remove the feature — that requires
+Type widening requires Databricks Runtime 15.4 LTS or later for Spark
+workloads. Databricks manages SQL warehouse versions separately. Delta-engine
+does not preflight feature availability, so using it in an environment that
+does not support it fails at execution with the original Databricks error.
+Note that enabling type widening adds the `typeWidening` protocol feature to
+the table permanently: declaring the property `false` (or `None`) later stops
+further widenings but does not remove the feature — that requires
 `ALTER TABLE ... DROP FEATURE`, which is outside this engine's scope.
 
 ## Tags
@@ -294,23 +295,23 @@ The engine owns the complete set of tags on a table. On each sync it:
 
 This means a tag applied outside delta-engine (in the Databricks UI, by another job, or by a tag policy) **will be removed** on the next sync unless you also declare it. This is deliberate — it keeps the table's tags exactly as declared — but declare every tag you want to keep.
 
-> This differs from table properties, which are declared-subset: properties set out-of-band are left untouched.
+> This differs from table properties. A supported property found on the table
+> but omitted from the declaration fails validation; properties outside the
+> engine's supported set are ignored.
 
 ### Requirements
 
-Tags require Unity Catalog on Databricks Runtime 13.3 LTS or later, and the
-`APPLY TAG` privilege on the table (plus `USE SCHEMA` / `USE CATALOG`). Applying
-a governed tag also requires `ASSIGN` on that tag. Tags are not supported by
-the plain-Spark fallback: it observes tag state as empty, but a non-empty tag
-declaration still plans `SET TAGS` SQL and fails at execution where that syntax
-is unavailable. Use tag management only against Unity Catalog.
+Tags require Unity Catalog and either a Databricks SQL warehouse or Databricks
+Runtime 13.3 LTS or later. The principal needs `APPLY TAG` on the table plus
+`USE SCHEMA` and `USE CATALOG`; applying a governed tag also requires `ASSIGN`
+on that tag. Both delta-engine backends require Unity Catalog for reads.
 
 Databricks limits each table to 50 tags, tag keys to 256 characters, and tag
-values to 256 characters. Tag keys cannot contain `. , - = / :` or leading or
-trailing spaces. Delta-engine validates only part of this platform contract at
-declaration time, so keep declarations within the Databricks limits even when
-construction succeeds; the catalog can reject the remaining violations at
-execution.
+values to 256 characters. Tag keys cannot contain `. , - = / :`, and tag keys
+or values cannot have leading or trailing spaces. Delta-engine validates only
+part of this platform contract at declaration time, so keep declarations
+within the Databricks limits even when construction succeeds; the catalog can
+reject the remaining violations at execution.
 
 ### Column tags
 
@@ -407,12 +408,13 @@ the declaration. See
 
 ### Requirements and limits
 
-Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and
-the `APPLY TAG` privilege; governed tags also require `ASSIGN`. Databricks
-limits each column to 50 tags, each table to 1,000 column tags in total, tag
-keys and values to 256 characters, and forbids `. , - = / :` and leading or
-trailing spaces in tag keys. Delta-engine validates only part of this platform
-contract at declaration time, so other violations surface at execution.
+Column tags require Unity Catalog and either a Databricks SQL warehouse or
+Databricks Runtime 13.3 LTS or later, plus the `APPLY TAG` privilege; governed
+tags also require `ASSIGN`. Databricks limits each column to 50 tags, each
+table to 1,000 column tags in total, tag keys and values to 256 characters,
+forbids `. , - = / :` in tag keys, and forbids leading or trailing spaces in
+keys and values. Delta-engine validates only part of this platform contract at
+declaration time, so other violations surface at execution.
 
 ## Comments
 
@@ -796,10 +798,10 @@ fails validation, so declare the nesting order you want up front.
 
 Delta-engine sets partitioning only when it creates a table. Changing one
 partition specification to another requires a data rewrite, which is outside
-the engine's DDL-only remit. Databricks Runtime 18.1 and above also provides
-`REPLACE PARTITIONED BY WITH CLUSTER BY` to convert a partitioned Delta table
-to liquid clustering, but delta-engine does not model that layout-strategy
-conversion.
+the engine's DDL-only remit. Databricks SQL and Databricks Runtime 18.1 and
+above also provide `REPLACE PARTITIONED BY WITH CLUSTER BY` to convert a
+partitioned Delta table to liquid clustering, but delta-engine does not model
+that layout-strategy conversion.
 
 Declaring a different `partitioned_by` for an existing table therefore fails
 validation before any SQL runs. Rewrite the table or perform a supported

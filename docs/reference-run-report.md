@@ -142,6 +142,11 @@ change). It is always empty for a table that planned successfully.
 
 Each entry in `failures`:
 
+Failures follow lifecycle order: structural foreign-key resolution, read,
+planning, then execution. A `BLOCKED_BY_FAILED_DEPENDENCY` foreign-key failure
+appears where execution would have occurred because it records why the table
+was skipped.
+
 | Field     | Type  | Meaning                                                                      |
 | --------- | ----- | ---------------------------------------------------------------------------- |
 | `phase`   | `str` | The phase that produced it: `READ`, `PLANNING`, `FOREIGN_KEY`, `EXECUTION` |

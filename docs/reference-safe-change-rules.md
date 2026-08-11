@@ -27,9 +27,9 @@ validation rule blocking it: Delta reconciles clustering keys with `ALTER TABLE
 ... CLUSTER BY (...)` (or `CLUSTER BY NONE` to remove them), so the engine plans
 this in place. `PartitioningChangeNotSupported` reflects delta-engine's
 create-only partitioning model. Changing one partition specification to another
-requires a data rewrite, and although Databricks Runtime 18.1 and above can
-convert a partitioned table to liquid clustering with `REPLACE PARTITIONED BY
-WITH CLUSTER BY`, the engine does not model that conversion.
+requires a data rewrite. Databricks SQL and Databricks Runtime 18.1 and above
+can convert a partitioned table to liquid clustering with `REPLACE PARTITIONED
+BY WITH CLUSTER BY`, but the engine does not model that conversion.
 
 Re-clustering only affects data written after the change: existing files
 keep their old clustering layout until they are rewritten by a subsequent
