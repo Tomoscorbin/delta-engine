@@ -31,6 +31,12 @@ def test_rejects_duplicate_columns():
         PrimaryKeyConstraint(columns=("id", "id"), constraint_name="t_pk")
 
 
+def test_constraint_name_may_be_omitted():
+    key = PrimaryKeyConstraint(columns=("id",))
+
+    assert key.constraint_name is None
+
+
 @pytest.mark.parametrize(
     ("invalid_name", "expected_error"),
     [
@@ -94,6 +100,39 @@ def test_equality_rejects_different_managed_identity(other: PrimaryKeyConstraint
 
     # Then they are different managed values
     assert not are_equal
+
+
+def test_value_equality_keeps_omitted_and_explicit_names_distinct():
+    unnamed = PrimaryKeyConstraint(columns=("id",))
+    named = PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
+
+    assert unnamed != named
+    assert unnamed == PrimaryKeyConstraint(columns=("ID",))
+    assert hash(unnamed) == hash(PrimaryKeyConstraint(columns=("ID",)))
+
+
+def test_unnamed_key_is_satisfied_by_any_name_on_the_same_definition():
+    desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"))
+    observed = PrimaryKeyConstraint(
+        columns=("orderid", "tenantid"),
+        constraint_name="legacy_business_key",
+    )
+
+    assert desired.is_satisfied_by(observed)
+
+
+def test_explicit_key_name_is_part_of_satisfaction():
+    desired = PrimaryKeyConstraint(columns=("id",), constraint_name="Orders_PK")
+
+    assert desired.is_satisfied_by(
+        PrimaryKeyConstraint(columns=("ID",), constraint_name="orders_pk")
+    )
+    assert not desired.is_satisfied_by(
+        PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+    )
+    assert not desired.is_satisfied_by(
+        PrimaryKeyConstraint(columns=("other_id",), constraint_name="orders_pk")
+    )
 
 
 def test_matches_columns_excludes_the_constraint_name_from_comparison():

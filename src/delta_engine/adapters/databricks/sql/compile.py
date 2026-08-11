@@ -260,7 +260,7 @@ def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
 def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
     # IF EXISTS converges like DropPrimaryKey: already absent is the end state.
-    constraint = backtick(action.constraint.constraint_name)
+    constraint = backtick(action.constraint_name)
     return f"{target.alter_clause} DROP CONSTRAINT IF EXISTS {constraint}"
 
 

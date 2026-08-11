@@ -58,12 +58,13 @@ def _plan(*plan_actions: Action) -> ActionPlan:
     return ActionPlan(target=_TARGET, actions=plan_actions)
 
 
-def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
+def _primary_key(name: str | None = "table_pk", columns: tuple[str, ...] = ("id",)):
     return PrimaryKeyConstraint(columns=columns, constraint_name=name)
 
 
 def _foreign_key(
-    name: str = "table_customer_id_fk", local_columns: tuple[str, ...] = ("customer_id",)
+    name: str | None = "table_customer_id_fk",
+    local_columns: tuple[str, ...] = ("customer_id",),
 ) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns=local_columns,
@@ -168,6 +169,20 @@ def test_plan_ordering_ignores_non_subject_fields():
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
     assert action.subject == expected_subject
+
+
+def test_unnamed_primary_key_action_uses_columns_as_its_subject():
+    action = SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id")))
+
+    assert action.subject == "tenant_id,order_id"
+
+
+def test_drop_foreign_key_requires_and_exposes_an_observed_name():
+    named = DropForeignKey(_foreign_key("orders_customer_fk"))
+
+    assert named.constraint_name == "orders_customer_fk"
+    with pytest.raises(ValueError, match="DropForeignKey requires a named observed constraint"):
+        DropForeignKey(_foreign_key(None))
 
 
 @pytest.mark.parametrize(

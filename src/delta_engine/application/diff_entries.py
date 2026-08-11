@@ -481,7 +481,7 @@ def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.REMOVE,
-            subject=f"foreign key {action.constraint.constraint_name}",
+            subject=f"foreign key {action.constraint_name}",
         ),
     )
 

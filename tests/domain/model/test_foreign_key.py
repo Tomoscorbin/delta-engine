@@ -27,6 +27,82 @@ def test_constraint_identity_includes_the_physical_name():
     assert one != two
 
 
+def test_constraint_name_may_be_omitted():
+    constraint = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+
+    assert constraint.constraint_name is None
+
+
+def test_value_equality_keeps_omitted_and_explicit_names_distinct():
+    unnamed = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+    named = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
+
+    assert unnamed != named
+
+
+def test_unnamed_constraint_is_satisfied_by_any_name_on_the_same_definition():
+    desired = ForeignKeyConstraint(
+        local_columns=("CustomerId", "TenantId"),
+        referenced_table=_customers(),
+        referenced_columns=("Id", "TenantId"),
+    )
+    observed = ForeignKeyConstraint(
+        local_columns=("tenantid", "customerid"),
+        referenced_table=_customers(),
+        referenced_columns=("tenantid", "id"),
+        constraint_name="legacy_customer_fk",
+    )
+
+    assert desired.is_satisfied_by(observed)
+
+
+def test_explicit_constraint_name_is_part_of_satisfaction():
+    desired = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+        constraint_name="Orders_Customer_FK",
+    )
+
+    assert desired.is_satisfied_by(
+        ForeignKeyConstraint(
+            local_columns=("CUSTOMER_ID",),
+            referenced_table=_customers(),
+            referenced_columns=("ID",),
+            constraint_name="orders_customer_fk",
+        )
+    )
+    assert not desired.is_satisfied_by(
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=_customers(),
+            referenced_columns=("id",),
+            constraint_name="legacy_customer_fk",
+        )
+    )
+    assert not desired.is_satisfied_by(
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=QualifiedName("main", "sales", "accounts"),
+            referenced_columns=("id",),
+            constraint_name="orders_customer_fk",
+        )
+    )
+
+
 def test_constraint_identity_includes_the_referenced_table():
     # Given two FKs that differ only in the referenced table
     to_old = ForeignKeyConstraint(

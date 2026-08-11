@@ -229,6 +229,51 @@ def test_desired_table_stores_foreign_keys():
     assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 
+def test_desired_table_accepts_multiple_unnamed_foreign_keys():
+    customer = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+    )
+    account = ForeignKeyConstraint(
+        local_columns=("account_id",),
+        referenced_table=QualifiedName("cat", "sch", "accounts"),
+        referenced_columns=("id",),
+    )
+
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(DesiredColumn("customer_id", Integer()), DesiredColumn("account_id", Integer())),
+        foreign_keys=(customer, account),
+    )
+
+    assert table.foreign_keys == (customer, account)
+
+
+def test_observed_table_rejects_an_unnamed_primary_key():
+    with pytest.raises(ValueError, match="Observed primary key must have a constraint name"):
+        ObservedTable(
+            qualified_name=_QN,
+            columns=(_OBSERVED_COL,),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
+        )
+
+
+def test_observed_table_rejects_an_unnamed_foreign_key():
+    foreign_key = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+    )
+
+    with pytest.raises(ValueError, match="Observed foreign key must have a constraint name"):
+        ObservedTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(ObservedColumn("customer_id", Integer()),),
+            foreign_keys=(foreign_key,),
+        )
+
+
 @_EACH_TABLE_AND_COLUMN_TYPE
 def test_foreign_key_local_reference_must_use_the_column_spelling(table_type, column_type):
     # Given a local reference that matches a column only case-insensitively

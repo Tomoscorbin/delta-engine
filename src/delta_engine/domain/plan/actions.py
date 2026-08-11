@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, auto
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
@@ -362,7 +362,9 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        return self.primary_key.constraint_name
+        if self.primary_key.constraint_name is not None:
+            return self.primary_key.constraint_name
+        return ",".join(self.primary_key.columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,9 +376,18 @@ class DropForeignKey(Action):
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
+    def __post_init__(self) -> None:
+        if self.constraint.constraint_name is None:
+            raise ValueError("DropForeignKey requires a named observed constraint")
+
+    @property
+    def constraint_name(self) -> Identifier:
+        """Concrete observed name checked when the drop was constructed."""
+        return cast(Identifier, self.constraint.constraint_name)
+
     @property
     def subject(self) -> str:
-        return self.constraint.constraint_name
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)
