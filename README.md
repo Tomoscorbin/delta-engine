@@ -62,17 +62,6 @@ engine = build_spark_engine(spark)  # `spark` is provided by your Databricks not
 engine.sync(customers)         # creates the table, or no-ops if it already matches
 ```
 
-Every sync follows the same process:
-
-```
-read live state
-    → compare with the declaration
-    → validate the differences
-    → build a deterministic plan
-    → resolve table dependencies
-    → execute
-```
-
 Validation happens before execution. When a table contains an unsafe change, Delta Engine does not execute a partially valid plan for that table.
 
 ## Documentation
