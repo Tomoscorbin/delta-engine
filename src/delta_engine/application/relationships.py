@@ -30,8 +30,8 @@ failure depends on how the run goes, so the caller supplies the tables that
 will not converge and each resolution names its own blocked edges — folded
 over the tables in that same order, the block propagates along FK chains.
 
-All graph-traversal implementation details (adjacency map, Tarjan's
-strongly-connected-components algorithm) are hidden behind that interface.
+All graph-traversal implementation details, including the adjacency map and
+strongly-connected-components algorithm, are hidden behind that interface.
 """
 
 from collections.abc import Mapping, Sequence, Set
@@ -50,11 +50,6 @@ from delta_engine.domain.model import (
     QualifiedName,
     TableAspect,
 )
-
-# TODO: Replace the recursive SCC traversal with an iterative implementation.
-# Its call depth follows dependency depth, so a chain near Python's recursion
-# limit raises RecursionError even though the public API declares no table-count
-# or dependency-depth limit. Preserve deterministic dependency-first ordering.
 
 logger = logging.getLogger(__name__)
 
@@ -214,64 +209,70 @@ def _strongly_connected_components(
     """
     Return the graph's strongly-connected components in dependency-first order.
 
-    Uses Tarjan's algorithm, which emits each component only after every
-    component it depends on has been emitted — so a referenced table's component
-    always precedes its dependents'. Dependencies are visited in sorted order
-    and nodes in graph insertion order, making the result deterministic
-    regardless of set-iteration order or hash seed.
+    Uses iterative Kosaraju traversal so dependency depth does not consume the
+    Python call stack. Dependencies are visited in sorted order and roots in
+    graph insertion order, making the result deterministic regardless of set
+    iteration order or hash seed.
 
     A component of more than one node is a true dependency cycle. (Self-loops are
     excluded from the graph, so a single node is never cyclic.)
-
-    Reference:
-    https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
-    The implementation matches the reference pseudocode, with one deliberate
-    divergence: the sorted dependency visits described above.
     """
-    # Tarjan's bookkeeping: `indices` numbers nodes in DFS visit order, and
-    # `low_links[node]` tracks the smallest index reachable from the node's
-    # DFS subtree without leaving the stack. A node whose low-link stays equal
-    # to its own index is the root of a strongly-connected component.
-    index_counter = 0
-    indices: dict[QualifiedName, int] = {}
-    low_links: dict[QualifiedName, int] = {}
-    on_stack: set[QualifiedName] = set()
-    stack: list[QualifiedName] = []
+    visited: set[QualifiedName] = set()
+    finishing_order: list[QualifiedName] = []
+
+    # Record DFS finishing order without recursive calls. The boolean stack
+    # entry is the iterative equivalent of returning from a DFS call.
+    for root in dependencies_by_table:
+        if root in visited:
+            continue
+
+        pending_visits: list[tuple[QualifiedName, bool]] = [(root, False)]
+        while pending_visits:
+            node, exiting = pending_visits.pop()
+            if exiting:
+                finishing_order.append(node)
+                continue
+            if node in visited:
+                continue
+
+            visited.add(node)
+            pending_visits.append((node, True))
+            pending_visits.extend(
+                (dependency, False)
+                for dependency in reversed(sorted(dependencies_by_table[node], key=str))
+            )
+
+    # Reverse table -> dependency edges into dependency -> dependent edges for
+    # Kosaraju's component-collection pass.
+    dependents_by_table: dict[QualifiedName, set[QualifiedName]] = {
+        name: set() for name in dependencies_by_table
+    }
+    for table, dependencies in dependencies_by_table.items():
+        for dependency in dependencies:
+            dependents_by_table[dependency].add(table)
+
+    visited.clear()
     components: list[list[QualifiedName]] = []
+    for root in reversed(finishing_order):
+        if root in visited:
+            continue
 
-    def strong_connect(node: QualifiedName) -> None:
-        nonlocal index_counter
-        indices[node] = index_counter
-        low_links[node] = index_counter
-        index_counter += 1
-        stack.append(node)
-        on_stack.add(node)
+        component: list[QualifiedName] = []
+        pending_tables = [root]
+        visited.add(root)
+        while pending_tables:
+            node = pending_tables.pop()
+            component.append(node)
+            for dependent in reversed(sorted(dependents_by_table[node], key=str)):
+                if dependent not in visited:
+                    visited.add(dependent)
+                    pending_tables.append(dependent)
 
-        for dependency in sorted(dependencies_by_table[node], key=str):
-            if dependency not in indices:
-                strong_connect(dependency)
-                low_links[node] = min(low_links[node], low_links[dependency])
-            elif dependency in on_stack:
-                # A dependency still on the stack is a back-edge into the
-                # component being built; one already popped belongs to a
-                # completed component and cannot lower this low-link.
-                low_links[node] = min(low_links[node], indices[dependency])
+        components.append(component)
 
-        if low_links[node] == indices[node]:
-            # This node roots a component: pop the stack down to it to collect its members.
-            component: list[QualifiedName] = []
-            while True:
-                member = stack.pop()
-                on_stack.discard(member)
-                component.append(member)
-                if member == node:
-                    break
-            components.append(component)
-
-    for node in dependencies_by_table:
-        if node not in indices:
-            strong_connect(node)
-
+    # With table -> dependency edges, the second pass discovers dependents
+    # first. Reverse the components so dependencies precede their consumers.
+    components.reverse()
     return components
 
 
@@ -306,7 +307,7 @@ def _order_tables(
     """
     Flatten the SCC components into tables in dependency-first sync order.
 
-    Tarjan emits components dependency-first, so concatenating their members
+    Components are already dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
     Tables that cannot execute (FK failures) appear too — the engine gates
     them out by their recorded failures.
