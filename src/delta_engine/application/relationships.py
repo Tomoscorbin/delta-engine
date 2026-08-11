@@ -30,8 +30,8 @@ failure depends on how the run goes, so the caller supplies the tables that
 will not converge and each resolution names its own blocked edges — folded
 over the tables in that same order, the block propagates along FK chains.
 
-All graph-traversal implementation details (adjacency map, Tarjan's
-strongly-connected-components algorithm) are hidden behind that interface.
+All graph-traversal implementation details, including the adjacency map and
+strongly-connected-components algorithm, are hidden behind that interface.
 """
 
 from collections.abc import Mapping, Sequence, Set
@@ -220,8 +220,8 @@ def _strongly_connected_components(
     visited: set[QualifiedName] = set()
     finishing_order: list[QualifiedName] = []
 
-    # Record each table after every dependency reachable from it. The boolean
-    # stack entry is the iterative equivalent of returning from a DFS call.
+    # Record DFS finishing order without recursive calls. The boolean stack
+    # entry is the iterative equivalent of returning from a DFS call.
     for root in dependencies_by_table:
         if root in visited:
             continue
@@ -307,7 +307,7 @@ def _order_tables(
     """
     Flatten the SCC components into tables in dependency-first sync order.
 
-    Tarjan emits components dependency-first, so concatenating their members
+    Components are already dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
     Tables that cannot execute (FK failures) appear too — the engine gates
     them out by their recorded failures.

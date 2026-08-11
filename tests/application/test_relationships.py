@@ -264,17 +264,18 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
     assert not _failed_resolutions(result)
 
 
-def test_resolve_does_not_order_by_unmanaged_foreign_keys():
-    # Given a tag-scoped declaration listed before the table it references
+def test_resolve_ignores_unmanaged_foreign_keys_entirely():
+    # Given a tag-scoped declaration listed before a referenced table whose key
+    # has an incompatible type
     tables = (
         _tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),
-        _table("cat.sch.customers"),
+        _long_id_table("cat.sch.customers"),
     )
 
     # When resolving dependencies
     result = resolve(tables)
 
-    # Then the unmanaged FK does not impose parent-before-child ordering
+    # Then the unmanaged FK imposes neither ordering nor a structural verdict
     assert _names(result) == ["cat.sch.orders", "cat.sch.customers"]
     assert not _failed_resolutions(result)
     assert _sound_resolution(result, "cat.sch.orders").dependencies == ()
@@ -368,6 +369,29 @@ def test_resolve_handles_more_than_one_thousand_nested_dependencies():
     # Then every table is returned in dependency-first order without exhausting the call stack
     assert _names(result) == [f"cat.sch.table_{index:04}" for index in range(table_count)]
     assert not _failed_resolutions(result)
+
+
+def test_resolve_handles_more_than_one_thousand_tables_in_one_cycle():
+    # Given one strongly-connected component deeper than Python's default recursion limit
+    table_count = 1_100
+    tables = tuple(
+        _table_with_fk(
+            f"cat.sch.table_{index:04}",
+            f"cat.sch.table_{(index - 1) % table_count:04}",
+        )
+        for index in range(table_count)
+    )
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then every member is returned and classified without exhausting the call stack
+    assert sorted(_names(result)) == [f"cat.sch.table_{index:04}" for index in range(table_count)]
+    assert all(
+        len(resolution.structural_failures) == 1
+        and resolution.structural_failures[0].reason == ForeignKeyFailureReason.CYCLE
+        for resolution in result
+    )
 
 
 def test_resolve_handles_shared_dependencies_once():
