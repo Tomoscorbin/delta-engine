@@ -16,9 +16,9 @@ from delta_engine.adapters.databricks.sql import (
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import (
-    ForeignKeyConstraint,
     Integer,
-    PrimaryKeyConstraint,
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
     QualifiedName,
     String,
     TableFeature,
@@ -128,9 +128,9 @@ def test_primary_and_foreign_keys_attached_from_info_schema():
     # Then both constraints attach as value objects
     assert isinstance(state, TablePresent)
     observed = state.table
-    assert observed.primary_key == PrimaryKeyConstraint(columns=("id",), name="tbl_pk")
+    assert observed.primary_key == ObservedPrimaryKeyConstraint(columns=("id",), name="tbl_pk")
     assert observed.foreign_keys == (
-        ForeignKeyConstraint(
+        ObservedForeignKeyConstraint(
             local_columns=("id",),
             referenced_table=QualifiedName("cat", "sch", "other"),
             referenced_columns=("other_id",),

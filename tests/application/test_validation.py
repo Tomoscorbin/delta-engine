@@ -54,7 +54,7 @@ from delta_engine.domain.plan.unresolvable import (
     ColumnRenameConflict,
     PartitioningChanged,
 )
-from tests.builders import as_observed_columns
+from tests.builders import as_observed_columns, as_observed_primary_key
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
@@ -98,7 +98,7 @@ def _observed_table(
         clustered_by=clustered_by,
         kind=kind,
         referencing_foreign_keys=referencing_foreign_keys,
-        primary_key=primary_key,
+        primary_key=as_observed_primary_key(primary_key),
     )
 
 

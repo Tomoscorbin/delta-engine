@@ -328,9 +328,9 @@ class ForeignKey:
     ambiguous composite keys require the explicit form. Identifier spelling is
     preserved; identifiers differing only in case name the same column.
 
-    ``name`` optionally manages the physical constraint name. When omitted,
-    Databricks chooses the name and the declaration matches an existing
-    constraint by definition.
+    ``name`` optionally requests the physical name when the constraint is
+    created. When omitted, Databricks chooses the name. Existing constraints
+    match by definition regardless of their physical name.
 
     ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
     for a self-referential key. See the architecture explanation doc for why
@@ -702,8 +702,8 @@ class DeltaTable:
                 ``partitioned_by``.
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
-            primary_key_name: Optional physical name to manage for the primary
-                key. When omitted, Databricks chooses the physical name.
+            primary_key_name: Optional physical name to request when creating
+                the primary key. When omitted, Databricks chooses the name.
             foreign_keys: Foreign key relationships declared on this table.
                 Each may choose a physical constraint ``name``; Databricks
                 chooses omitted names.

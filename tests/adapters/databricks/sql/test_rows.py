@@ -25,7 +25,11 @@ from delta_engine.adapters.databricks.sql import (
     schema_exists_query,
     table_tags_query,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import (
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
+    QualifiedName,
+)
 from tests.adapters.databricks.sql.strategies import (
     CANONICAL_IDENTIFIERS,
     TAG_KEYS,
@@ -68,6 +72,7 @@ def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
     result = read_primary_key(_runner(primary_key_query(QN), rows), QN)
 
     assert result is not None
+    assert isinstance(result, ObservedPrimaryKeyConstraint)
     assert tuple(str(column) for column in result.columns) == ("Order_Id", "Line_No")
     assert str(result.name) == "Orders_PK"
 
@@ -95,6 +100,7 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
     # Then constraint and column spellings carry verbatim
+    assert isinstance(fk, ObservedForeignKeyConstraint)
     assert str(fk.name) == "Orders_Customer_FK"
     assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
     assert fk.referenced_table == QualifiedName("dev", "silver", "customer")

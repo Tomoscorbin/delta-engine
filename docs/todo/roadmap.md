@@ -180,9 +180,9 @@ observed state into a typed model — already exists in the reader.
 - A helper that introspects a table (or a whole schema) and emits
   `DeltaTable(...)` declaration source using public import paths. Terraform's
   `import`, but generating code.
-- Explicit PK/FK names are available when generated source should manage a
-  physical name. A simpler generated declaration can omit names and adopt any
-  structurally matching catalog constraints.
+- Explicit PK/FK names are available when generated source should request that
+  name for future creation. Existing constraints are adopted by structural
+  definition regardless of their catalog names.
 - FK declarations reference `DeltaTable` objects, so whole-schema generation
   must emit tables in dependency order and wire the references; single-table
   generation can emit a commented placeholder.

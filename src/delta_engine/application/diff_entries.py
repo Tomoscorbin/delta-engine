@@ -206,7 +206,7 @@ def _columns_detail(columns: Sequence[str]) -> tuple[str, ...]:
 
 
 def _key_subject(kind: str, name: str | None, columns: Sequence[str]) -> str:
-    """Identify a key by its managed name, or by columns when Databricks names it."""
+    """Identify a key by its requested name, or by columns when Databricks names it."""
     identity = name if name is not None else f"({', '.join(columns)})"
     return f"{kind} {identity}"
 

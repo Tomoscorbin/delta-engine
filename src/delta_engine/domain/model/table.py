@@ -11,6 +11,8 @@ from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.identifier import Identifier
@@ -36,8 +38,8 @@ def _validate_table_structure(
     tags: Mapping[str, str],
     partitioned_by: Sequence[str],
     clustered_by: Sequence[str],
-    primary_key: PrimaryKeyConstraint | None,
-    foreign_keys: Sequence[ForeignKeyConstraint],
+    primary_key: PrimaryKeyConstraint | ObservedPrimaryKeyConstraint | None,
+    foreign_keys: Sequence[ForeignKeyConstraint | ObservedForeignKeyConstraint],
 ) -> None:
     """
     Validate the structural invariants shared by desired and observed tables.
@@ -337,8 +339,8 @@ class ObservedTable:
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: ListOrTuple[str] = ()
     clustered_by: ListOrTuple[str] = ()
-    primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
+    primary_key: ObservedPrimaryKeyConstraint | None = None
+    foreign_keys: ListOrTuple[ObservedForeignKeyConstraint] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     supported_features: Set[TableFeature] = frozenset()
     referencing_foreign_keys: ListOrTuple[ForeignKeyReference] = ()
@@ -356,10 +358,21 @@ class ObservedTable:
         clustered_by = tuple(self.clustered_by)
         object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
+
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(self, "supported_features", frozenset(self.supported_features))
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
+
+        if self.primary_key is not None and not isinstance(
+            self.primary_key, ObservedPrimaryKeyConstraint
+        ):
+            raise TypeError("ObservedTable primary_key must be an observed primary key")
+        if not all(
+            isinstance(foreign_key, ObservedForeignKeyConstraint)
+            for foreign_key in self.foreign_keys
+        ):
+            raise TypeError("ObservedTable foreign_keys must be observed foreign keys")
 
         _validate_table_structure(
             columns=self.columns,
@@ -369,8 +382,3 @@ class ObservedTable:
             primary_key=self.primary_key,
             foreign_keys=self.foreign_keys,
         )
-
-        if self.primary_key is not None and self.primary_key.name is None:
-            raise ValueError("Observed primary key must have a constraint name")
-        if any(foreign_key.name is None for foreign_key in self.foreign_keys):
-            raise ValueError("Observed foreign key must have a constraint name")

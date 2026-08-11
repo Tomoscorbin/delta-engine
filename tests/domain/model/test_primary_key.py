@@ -1,6 +1,9 @@
 import pytest
 
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ObservedPrimaryKeyConstraint,
+    PrimaryKeyConstraint,
+)
 
 
 def test_rejects_empty_columns():
@@ -56,6 +59,11 @@ def test_rejects_invalid_constraint_name(
         )
 
 
+def test_observed_constraint_requires_a_name():
+    with pytest.raises(TypeError, match="string"):
+        ObservedPrimaryKeyConstraint(columns=("id",), name=None)  # type: ignore[arg-type]
+
+
 def test_mixed_case_columns_and_name_are_preserved():
     # Given a constraint with mixed-case display spelling
     pk = PrimaryKeyConstraint(columns=("OrderId",), name="Orders_PK")
@@ -65,70 +73,37 @@ def test_mixed_case_columns_and_name_are_preserved():
     assert str(pk.name) == "Orders_PK"
 
 
-def test_equality_uses_constraint_name_and_column_set_identity():
-    # Given equivalent constraints with different identifier casing and column order
+def test_equality_uses_structural_column_set_identity():
+    # Given equivalent constraints with different names, casing, and column order
     desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), name="Orders_PK")
-    observed = PrimaryKeyConstraint(columns=("orderid", "tenantid"), name="orders_pk")
+    observed = ObservedPrimaryKeyConstraint(
+        columns=("orderid", "tenantid"),
+        name="legacy_pk",
+    )
 
     # When comparing the constraints
     are_equal = desired == observed
 
-    # Then their physical name and semantic column set make them the same value
+    # Then only their semantic column set determines equality
     assert are_equal
     assert hash(desired) == hash(observed)
 
 
-@pytest.mark.parametrize(
-    "other",
-    [
-        pytest.param(
-            PrimaryKeyConstraint(columns=("id",), name="legacy_pk"),
-            id="different-name",
-        ),
-        pytest.param(
-            PrimaryKeyConstraint(columns=("other_id",), name="orders_pk"),
-            id="different-columns",
-        ),
-    ],
-)
-def test_equality_rejects_different_managed_identity(other: PrimaryKeyConstraint):
-    # Given a primary key with either a different name or column set
+def test_equality_rejects_a_different_column_set():
     key = PrimaryKeyConstraint(columns=("id",), name="orders_pk")
+    other = PrimaryKeyConstraint(columns=("other_id",), name="orders_pk")
 
-    # When comparing the constraints
-    are_equal = key == other
-
-    # Then they are different managed values
-    assert not are_equal
+    assert key != other
 
 
-def test_value_equality_keeps_omitted_and_explicit_names_distinct():
+def test_name_is_a_creation_preference_not_structural_identity():
     unnamed = PrimaryKeyConstraint(columns=("id",))
     named = PrimaryKeyConstraint(columns=("id",), name="orders_pk")
 
-    assert unnamed != named
+    assert unnamed == named
+    assert hash(unnamed) == hash(named)
     assert unnamed == PrimaryKeyConstraint(columns=("ID",))
     assert hash(unnamed) == hash(PrimaryKeyConstraint(columns=("ID",)))
-
-
-def test_unnamed_key_is_satisfied_by_any_name_on_the_same_definition():
-    desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"))
-    observed = PrimaryKeyConstraint(
-        columns=("orderid", "tenantid"),
-        name="legacy_business_key",
-    )
-
-    assert desired.is_satisfied_by(observed)
-
-
-def test_explicit_key_name_is_part_of_satisfaction():
-    desired = PrimaryKeyConstraint(columns=("id",), name="Orders_PK")
-
-    assert desired.is_satisfied_by(PrimaryKeyConstraint(columns=("ID",), name="orders_pk"))
-    assert not desired.is_satisfied_by(PrimaryKeyConstraint(columns=("id",), name="legacy_pk"))
-    assert not desired.is_satisfied_by(
-        PrimaryKeyConstraint(columns=("other_id",), name="orders_pk")
-    )
 
 
 def test_matches_columns_excludes_the_constraint_name_from_comparison():

@@ -6,17 +6,16 @@ Stop synthesizing primary- and foreign-key constraint names. When a user omits
 the name, preserve that omission through desired state and SQL so Databricks
 allocates the physical name.
 
-The governing rule is:
+The governing rule for existing constraints is:
 
 ```text
 same definition
-and (desired name is absent or desired name equals observed name)
 ```
 
-This gives the public options precise meanings:
+This gives names one narrow meaning:
 
-- no name: the physical name is not desired state;
-- explicit name: the physical name is managed state.
+- no name: Databricks chooses the physical name when creating the constraint;
+- explicit name: request that physical name when creating the constraint.
 
 Databricks-generated names are opaque. The engine observes them so it can drop
 the corresponding physical constraint later, but it never predicts, persists,
@@ -26,15 +25,14 @@ or reproduces them.
 
 ### Desired and observed state
 
-`PrimaryKeyConstraint` and `ForeignKeyConstraint` carry `name: str | None`.
+`PrimaryKeyConstraint` and `ForeignKeyConstraint` are declarations. Their
+optional `name` is a creation preference and is excluded from equality and
+hashing; constraint identity is its relational definition.
 
-- Desired constraints may omit the name.
-- Observed constraints must have a name because catalog constraints always have
-  a physical identity.
-- Exact equality includes the optional name.
-- `is_satisfied_by` implements the asymmetric desired-to-observed rule.
-
-This keeps one compact constraint model without weakening exact value equality.
+`ObservedPrimaryKeyConstraint` and `ObservedForeignKeyConstraint` refine that
+model with a required catalog name. The information-schema reader constructs
+those concrete types, so planning can use observed names for drops without
+casts, assertions, or repeated `None` checks.
 
 ### Declaration lowering
 
@@ -49,22 +47,14 @@ explicitly declared name and therefore returns `None` for an unnamed key.
 
 ### Reconciliation
 
-Primary keys apply `is_satisfied_by` directly. A structurally matching observed
-key satisfies an unnamed declaration. An explicit name mismatch, or any
-definition mismatch, becomes a drop followed by a set.
+Primary keys use ordinary equality. Any matching column set is already
+converged, regardless of the requested and observed names. A definition change
+becomes a drop followed by a set.
 
-Foreign keys reconcile in two stages:
-
-1. Match and reserve explicitly named declarations by physical name.
-2. Match unnamed declarations against the remaining observations by definition.
-
-Unmatched observations are dropped and unmatched declarations are added, with
-all drops ordered before additions. Reserving explicit names first prevents an
-unnamed declaration from adopting an observed constraint whose physical name a
-different declaration explicitly requests.
-
-No generic matching framework is introduced; this policy remains inside the
-foreign-key differ.
+Foreign keys likewise match by ordinary structural equality. Each declaration
+claims one matching observation; unmatched observations are dropped and
+unmatched declarations are added, with all drops ordered before additions.
+There is no name reservation or asymmetric comparison protocol.
 
 ### SQL compilation
 
@@ -90,15 +80,14 @@ Existing tables created with the old `{table}_pk` and
 `{table}_{local_columns}_fk` conventions do not churn when declarations omit
 names: their structural definitions satisfy the unnamed desired constraints.
 
-Fresh unnamed constraints receive Databricks-generated names. Code that needs
-a stable physical name must supply `primary_key_name` or `ForeignKey(name=...)`.
-An explicit name collision remains a Databricks execution error because the
-namespace spans the schema, including constraints the engine may not manage.
+Fresh unnamed constraints receive Databricks-generated names. Supplying
+`primary_key_name` or `ForeignKey(name=...)` requests a predictable name when
+the constraint is first created or later recreated because its definition
+changed. Changing only that preference does not rename an existing constraint.
 
-Databricks has no direct constraint rename. Changing an explicit name therefore
-requires dropping and recreating the constraint. Existing primary-key reference
-safety validation continues to block that replacement while foreign keys depend
-on the key.
+An explicit name collision during creation remains a Databricks execution error
+because the namespace spans the schema, including constraints the engine may
+not manage.
 
 ## Verification
 
@@ -106,9 +95,9 @@ Unit coverage must prove:
 
 - API omission and explicit-name preservation;
 - unnamed and named SQL for create/add operations;
-- unnamed adoption for matching primary and foreign keys;
-- explicit name mismatch produces drop-and-recreate;
-- explicit FK names are reserved before unnamed adoption;
+- desired and observed constraints compare by definition;
+- name-only differences produce no actions;
+- multiple foreign keys are matched one-to-one by definition;
 - observed constraints reject missing physical names;
 - reporting identifies unnamed keys without displaying `None`;
 - existing dependency and primary-key safety behavior remains unchanged.
@@ -117,8 +106,8 @@ Live coverage must prove:
 
 - Databricks assigns non-empty names to engine-created unnamed keys;
 - a second sync produces no changes;
-- legacy explicitly named constraints are adopted by unnamed declarations;
-- explicitly managed name changes still replace the constraint.
+- legacy explicitly named constraints are adopted by matching declarations;
+- changing only a requested name leaves an existing constraint untouched.
 
 Validation order:
 

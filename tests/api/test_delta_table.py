@@ -1704,7 +1704,7 @@ def test_explicit_foreign_key_name_is_independent_of_unnamed_foreign_keys():
 
     orders = _table_with_distinct_foreign_keys((None, "orders_parts_two_fk"))
 
-    # Then only the explicitly supplied name becomes desired state
+    # Then only the explicitly supplied creation preference is retained
     assert tuple(constraint.name for constraint in orders.to_desired_table().foreign_keys) == (
         None,
         "orders_parts_two_fk",
@@ -1884,7 +1884,7 @@ def test_mapping_insertion_order_is_irrelevant():
     one = orders_with({"tenant_id": "tenant_id", "customer_id": "id"})
     two = orders_with({"customer_id": "id", "tenant_id": "tenant_id"})
 
-    # Then the constraints are identical, including the omitted name
+    # Then the structurally identical constraints compare equal
     assert one == two
     assert one.name == two.name
 
@@ -1995,7 +1995,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     # Then the lowered constraints are identical
     assert before.foreign_keys == after.foreign_keys
 
-    from delta_engine.domain.model import ForeignKeyConstraint, ObservedTable
+    from delta_engine.domain.model import ObservedForeignKeyConstraint, ObservedTable
     from tests.builders import as_observed_columns
 
     # And the reorder produces no drift against the original observed state
@@ -2003,7 +2003,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
         qualified_name=before.qualified_name,
         columns=as_observed_columns(before.columns),
         foreign_keys=(
-            ForeignKeyConstraint(
+            ObservedForeignKeyConstraint(
                 local_columns=before.foreign_keys[0].local_columns,
                 referenced_table=before.foreign_keys[0].referenced_table,
                 referenced_columns=before.foreign_keys[0].referenced_columns,

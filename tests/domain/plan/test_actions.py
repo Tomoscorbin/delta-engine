@@ -160,7 +160,7 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
         (_drop_primary_key(), "table_pk"),
-        (SetPrimaryKey(_primary_key()), "table_pk"),
+        (SetPrimaryKey(_primary_key()), "id"),
         (DropForeignKey("table_customer_id_fk"), "table_customer_id_fk"),
         (SetForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),

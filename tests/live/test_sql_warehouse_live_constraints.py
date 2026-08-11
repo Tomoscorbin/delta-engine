@@ -211,8 +211,10 @@ def test_unnamed_declarations_adopt_existing_constraint_names(live_connection, l
     assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
 
 
-def test_explicit_primary_key_name_drift_replaces_the_constraint(live_connection, live_tables):
-    table_name = live_tables("managed_pk_name")
+def test_explicit_primary_key_name_is_only_used_when_creating_the_constraint(
+    live_connection, live_tables
+):
+    table_name = live_tables("creation_only_pk_name")
     old_name = f"{table_name}_old_pk"
     new_name = f"{table_name}_business_key"
     execute_sql(
@@ -232,9 +234,8 @@ def test_explicit_primary_key_name_drift_replaces_the_constraint(live_connection
     report = build_sql_engine(live_connection).sync(declaration)
 
     assert report.has_failures is False
-    assert report.has_changes is True
-    assert read_live_table(live_connection, table_name)["primary_key_name"] == new_name.lower()
-    assert build_sql_engine(live_connection).sync(declaration).has_changes is False
+    assert report.has_changes is False
+    assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name.lower()
 
 
 def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_named_drop(

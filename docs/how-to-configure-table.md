@@ -478,7 +478,7 @@ the same columns satisfies this declaration regardless of its physical name.
 
 ### Choose a primary-key name
 
-Pass `primary_key_name` when the physical name is managed state:
+Pass `primary_key_name` to request a physical name when the key is created:
 
 ```python
 orders = DeltaTable(
@@ -491,11 +491,10 @@ orders = DeltaTable(
 )
 ```
 
-An explicit name must accompany `primary_key`. If the live key has the same
-columns under another name, the engine drops and recreates it because
-Databricks has no direct constraint-rename operation. Name identity is
-case-insensitive, so a declared `Orders_Business_Key` matches the catalog's
-normalized `orders_business_key` spelling.
+An explicit name must accompany `primary_key`. It is a creation preference,
+not ongoing managed state: if the live key already has the same columns under
+another name, the engine accepts it. Changing only `primary_key_name` therefore
+does not rename or recreate an existing key.
 
 Constraint names share one case-insensitive namespace across all tables and
 constraint kinds in a schema. Choose an explicit name that is unique across
@@ -544,17 +543,15 @@ engine plan that drops and re-adds the key restores the default `NORELY` form.
 
 ### Drift
 
-The engine compares primary keys by their _column set_. An explicit
-`primary_key_name` additionally manages the physical name; without one, any
-observed name is accepted.
+The engine compares primary keys by their _column set_. The physical name is
+not part of drift; `primary_key_name` is used only when creating the key.
 
 | Change                                                | Actions emitted                       |
 | ----------------------------------------------------- | ------------------------------------- |
 | Primary key added                                     | `SetPrimaryKey`                       |
 | Primary key removed                                   | `DropPrimaryKey`                      |
 | Primary key columns changed                           | `DropPrimaryKey` then `SetPrimaryKey` |
-| Same columns, omitted desired name                    | nothing                               |
-| Same columns, explicit desired name differs from live | `DropPrimaryKey` then `SetPrimaryKey` |
+| Same columns, any requested or observed name          | nothing                               |
 
 Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
 as equal.
@@ -609,12 +606,12 @@ orders = DeltaTable(
 Referencing the target `DeltaTable` object — rather than a dotted table name —
 lets the engine resolve the declaration against that table's primary key,
 validate the resulting column pairs, and capture the target's qualified name.
-Set `name` when the physical constraint name is managed state. When it is
-omitted, the engine emits unnamed foreign-key SQL and Databricks allocates a
-schema-unique name. On later syncs, an observed foreign key with the same local
-columns, referenced table, and referenced columns satisfies the unnamed
-declaration. Explicit names must be schema-unique; a collision is reported as
-an execution failure from Databricks.
+Set `name` to request a physical name when the constraint is created. When it
+is omitted, the engine emits unnamed foreign-key SQL and Databricks allocates a
+schema-unique name. On later syncs, any observed foreign key with the same local
+columns, referenced table, and referenced columns satisfies the declaration,
+regardless of its physical name. Explicit names must be schema-unique at
+creation; a collision is reported as an execution failure from Databricks.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
@@ -725,18 +722,15 @@ being silently assumed correct.
 ### Drift
 
 The engine compares foreign keys by definition: local columns, referenced
-table, and referenced columns. An explicit `name` additionally manages the
-physical name; an omitted name accepts the name Databricks assigned. Name
-identity is case-insensitive, while declaration spelling is preserved for SQL
-and previews.
+table, and referenced columns. The physical name is not part of drift; `name`
+is a creation preference whose spelling is preserved for SQL and previews.
 
 | Change                                                | Actions emitted                       |
 | ----------------------------------------------------- | ------------------------------------- |
 | Foreign key added                                     | `SetForeignKey`                       |
 | Foreign key removed                                   | `DropForeignKey`                      |
 | Foreign key definition changed                        | `DropForeignKey` then `SetForeignKey` |
-| Same definition, omitted desired name                 | nothing                               |
-| Same definition, explicit desired name differs live   | `DropForeignKey` then `SetForeignKey` |
+| Same definition, any requested or observed name       | nothing                               |
 | No change                                             | nothing                               |
 
 ### Constraints are informational

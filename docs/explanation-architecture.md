@@ -751,23 +751,24 @@ declaration shape.
 
 ## Constraint names
 
-Constraint names remain data on the concrete key objects; the domain does not
-introduce separate definition, desired-specification, or physical-occurrence
-wrappers.
+Constraint identity is structural. Primary keys compare by their column set;
+foreign keys compare by their local columns, referenced table, and referenced
+columns. Their physical name is deliberately excluded from equality and
+hashing.
 
-Desired key constraints carry an optional physical name. `None` means the
-physical name is not desired state: the compiler omits it and Databricks
-allocates one. Observed constraints always carry the catalog name, because
-later drop operations require the concrete platform identity.
+Desired constraints carry an optional creation preference. `None` makes the
+compiler omit the name so Databricks allocates one; an explicit value requests
+that name when the constraint is created. Once the constraint exists,
+Databricks owns its physical name. Changing only the preference is therefore a
+no-op rather than an implicit drop and recreate.
 
-Exact constraint equality still includes the optional name. Reconciliation is
-deliberately asymmetric: a desired constraint is satisfied when its definition
-matches and either its name is omitted or its explicit name matches the
-observation. Primary-key reconciliation applies that rule directly. Foreign-key
-reconciliation reserves explicit desired names first, then lets unnamed
-declarations adopt remaining structurally matching observations. The optional
-SQL grammar stays inside the compiler; other layers do not predict platform
-names.
+Catalog reads produce `ObservedPrimaryKeyConstraint` and
+`ObservedForeignKeyConstraint`, whose names are required. This keeps physical
+identity available for drop operations without making every constraint
+consumer handle `None`. Reconciliation itself stays ordinary: desired and
+observed constraints compare with `==`, unmatched observations are dropped,
+and unmatched declarations are created. Optional SQL grammar remains inside
+the compiler; other layers neither predict nor reconcile platform names.
 
 ## Reporting and failure semantics
 

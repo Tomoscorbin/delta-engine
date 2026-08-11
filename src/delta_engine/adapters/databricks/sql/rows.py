@@ -28,10 +28,10 @@ from delta_engine.adapters.databricks.sql.queries import (
     table_tags_query,
 )
 from delta_engine.domain.model import (
-    ForeignKeyConstraint,
     ForeignKeyReference,
     Identifier,
-    PrimaryKeyConstraint,
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
     QualifiedName,
 )
 
@@ -54,7 +54,7 @@ def schema_exists(run_query: RunQuery, qualified_name: QualifiedName) -> bool:
 def read_primary_key(
     run_query: RunQuery,
     qualified_name: QualifiedName,
-) -> PrimaryKeyConstraint | None:
+) -> ObservedPrimaryKeyConstraint | None:
     """
     Read this table's primary key, or ``None`` when it has none.
 
@@ -64,7 +64,7 @@ def read_primary_key(
     ordered = list(run_query(primary_key_query(qualified_name)))
     if not ordered:
         return None
-    return PrimaryKeyConstraint(
+    return ObservedPrimaryKeyConstraint(
         columns=[row.column_name for row in ordered],
         name=ordered[0].constraint_name,
     )
@@ -73,7 +73,7 @@ def read_primary_key(
 def read_foreign_keys(
     run_query: RunQuery,
     qualified_name: QualifiedName,
-) -> tuple[ForeignKeyConstraint, ...]:
+) -> tuple[ObservedForeignKeyConstraint, ...]:
     """
     Read the foreign keys this table owns.
 
@@ -85,7 +85,7 @@ def read_foreign_keys(
     for row in run_query(foreign_keys_query(qualified_name)):
         grouped.setdefault(row.constraint_name, []).append(row)
     return tuple(
-        ForeignKeyConstraint(
+        ObservedForeignKeyConstraint(
             local_columns=[row.local_column for row in group],
             referenced_table=QualifiedName(
                 group[0].referenced_catalog,

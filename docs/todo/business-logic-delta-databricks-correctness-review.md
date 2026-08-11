@@ -650,10 +650,10 @@ identifier limits are described in
 
 Omitted primary- and foreign-key names now remain `None` in desired state. The
 compiler omits `CONSTRAINT name`, Databricks allocates a schema-unique physical
-name, and the reader preserves that concrete name in observed state. An unnamed
-declaration accepts a structurally matching observation; an explicit name is
-managed and a mismatch produces drop-and-recreate actions. This removes the
-unsafe generator rather than trying to make string concatenation safe.
+name, and the reader preserves that concrete name in observed state. Constraint
+equality is structural: an explicit name is a creation preference, so any
+matching observation is accepted regardless of its catalog name. This removes
+both the unsafe generator and ongoing physical-name reconciliation.
 
 ## 14. Make dependency-cycle detection iterative
 

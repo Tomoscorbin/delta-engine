@@ -1,14 +1,18 @@
 import pytest
 
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, ForeignKeyReference
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    ObservedForeignKeyConstraint,
+)
 
 
 def _customers() -> QualifiedName:
     return QualifiedName("main", "sales", "customers")
 
 
-def test_constraint_identity_includes_the_physical_name():
+def test_constraint_identity_excludes_the_creation_name():
     # Given two FKs with identical content but different names
     one = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -23,8 +27,9 @@ def test_constraint_identity_includes_the_physical_name():
         name="chosen_elsewhere",
     )
 
-    # Then they are different managed constraints
-    assert one != two
+    # Then they are the same structural constraint
+    assert one == two
+    assert hash(one) == hash(two)
 
 
 def test_constraint_name_may_be_omitted():
@@ -37,7 +42,7 @@ def test_constraint_name_may_be_omitted():
     assert constraint.name is None
 
 
-def test_value_equality_keeps_omitted_and_explicit_names_distinct():
+def test_value_equality_treats_omitted_and_explicit_names_as_the_same_definition():
     unnamed = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=_customers(),
@@ -50,57 +55,26 @@ def test_value_equality_keeps_omitted_and_explicit_names_distinct():
         name="orders_customer_id_fk",
     )
 
-    assert unnamed != named
+    assert unnamed == named
+    assert hash(unnamed) == hash(named)
 
 
-def test_unnamed_constraint_is_satisfied_by_any_name_on_the_same_definition():
+def test_desired_and_observed_constraints_compare_by_definition():
     desired = ForeignKeyConstraint(
         local_columns=("CustomerId", "TenantId"),
         referenced_table=_customers(),
         referenced_columns=("Id", "TenantId"),
+        name="requested_name",
     )
-    observed = ForeignKeyConstraint(
+    observed = ObservedForeignKeyConstraint(
         local_columns=("tenantid", "customerid"),
         referenced_table=_customers(),
         referenced_columns=("tenantid", "id"),
         name="legacy_customer_fk",
     )
 
-    assert desired.is_satisfied_by(observed)
-
-
-def test_explicit_constraint_name_is_part_of_satisfaction():
-    desired = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=_customers(),
-        referenced_columns=("id",),
-        name="Orders_Customer_FK",
-    )
-
-    assert desired.is_satisfied_by(
-        ForeignKeyConstraint(
-            local_columns=("CUSTOMER_ID",),
-            referenced_table=_customers(),
-            referenced_columns=("ID",),
-            name="orders_customer_fk",
-        )
-    )
-    assert not desired.is_satisfied_by(
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            referenced_table=_customers(),
-            referenced_columns=("id",),
-            name="legacy_customer_fk",
-        )
-    )
-    assert not desired.is_satisfied_by(
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            referenced_table=QualifiedName("main", "sales", "accounts"),
-            referenced_columns=("id",),
-            name="orders_customer_fk",
-        )
-    )
+    assert desired == observed
+    assert hash(desired) == hash(observed)
 
 
 def test_constraint_identity_includes_the_referenced_table():
@@ -219,6 +193,16 @@ def test_rejects_invalid_constraint_name(
             referenced_table=_customers(),
             referenced_columns=("id",),
             name=constraint_name,  # type: ignore[arg-type]
+        )
+
+
+def test_observed_constraint_requires_a_name():
+    with pytest.raises(TypeError, match="string"):
+        ObservedForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=_customers(),
+            referenced_columns=("id",),
+            name=None,  # type: ignore[arg-type]
         )
 
 

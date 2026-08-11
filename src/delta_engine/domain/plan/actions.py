@@ -362,8 +362,6 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        if self.primary_key.name is not None:
-            return self.primary_key.name
         return ",".join(self.primary_key.columns)
 
 
