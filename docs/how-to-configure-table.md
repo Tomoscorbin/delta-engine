@@ -628,9 +628,10 @@ type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
 before any sync runs. That check uses the exact parent object passed to
 `ForeignKey(references=...)`. If the same sync registers a different
 `DeltaTable` instance with the same qualified name but different key types, the
-resolver does not currently repeat the type check against that registered
-instance; Databricks can reject the resulting DDL at execution. Register the
-same parent object used by the foreign-key declaration.
+resolver repeats the type check against that registered instance and fails the
+table with `REFERENCED_COLUMN_TYPE_MISMATCH`, blocking its dependents.
+Register the same parent object used by the foreign-key declaration so the
+mismatch surfaces at construction rather than at resolution.
 
 ### Self-referential foreign keys
 
