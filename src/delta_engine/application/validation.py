@@ -698,6 +698,7 @@ class StreamingTableAnnotationsOnly:
 # before the two it can co-fire with, then StreamingTableAnnotationsOnly before
 # UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
 # TableCreation, so it never co-fires.
+# TODO: fix order issue
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     MissingTableUnmanaged(),
