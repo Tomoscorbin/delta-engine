@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, auto
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
@@ -338,17 +338,17 @@ class SetColumnNullability(Action):
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
-    constraint_name: str
+    name: str
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        object.__setattr__(self, "name", Identifier(self.name))
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,32 +362,26 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        if self.primary_key.constraint_name is not None:
-            return self.primary_key.constraint_name
+        if self.primary_key.name is not None:
+            return self.primary_key.name
         return ",".join(self.primary_key.columns)
 
 
 @dataclass(frozen=True, slots=True)
 class DropForeignKey(Action):
-    """Drop a complete observed foreign key constraint."""
+    """Drop an observed foreign key by its concrete catalog name."""
 
-    constraint: ForeignKeyConstraint
+    name: str
 
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
     def __post_init__(self) -> None:
-        if self.constraint.constraint_name is None:
-            raise ValueError("DropForeignKey requires a named observed constraint")
-
-    @property
-    def constraint_name(self) -> Identifier:
-        """Concrete observed name checked when the drop was constructed."""
-        return cast(Identifier, self.constraint.constraint_name)
+        object.__setattr__(self, "name", Identifier(self.name))
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.name
 
 
 @dataclass(frozen=True, slots=True)

@@ -520,17 +520,17 @@ def _diff_primary_key(
     if observed_key is None:
         return () if desired_key is None else (SetPrimaryKey(primary_key=desired_key),)
 
-    observed_name = observed_key.constraint_name
+    observed_name = observed_key.name
     assert observed_name is not None  # ObservedTable guarantees catalog identity.
 
     if desired_key is None:
-        return (DropPrimaryKey(constraint_name=observed_name),)
+        return (DropPrimaryKey(name=observed_name),)
 
     if desired_key.is_satisfied_by(observed_key):
         return ()
 
     return (
-        DropPrimaryKey(constraint_name=observed_name),
+        DropPrimaryKey(name=observed_name),
         SetPrimaryKey(primary_key=desired_key),
     )
 
@@ -554,14 +554,14 @@ def _diff_foreign_keys(
     reserved_observed: set[int] = set()
 
     for desired_index, desired_constraint in enumerate(desired.foreign_keys):
-        desired_name = desired_constraint.constraint_name
+        desired_name = desired_constraint.name
         if desired_name is None:
             continue
         observed_index = next(
             (
                 index
                 for index, candidate in enumerate(observed.foreign_keys)
-                if candidate.constraint_name == desired_name
+                if candidate.name == desired_name
             ),
             None,
         )
@@ -573,7 +573,7 @@ def _diff_foreign_keys(
             matched_observed.add(observed_index)
 
     for desired_index, desired_constraint in enumerate(desired.foreign_keys):
-        if desired_constraint.constraint_name is not None:
+        if desired_constraint.name is not None:
             continue
         observed_index = next(
             (
@@ -589,11 +589,13 @@ def _diff_foreign_keys(
             matched_desired.add(desired_index)
             matched_observed.add(observed_index)
 
-    drops = (
-        DropForeignKey(constraint=constraint)
-        for index, constraint in enumerate(observed.foreign_keys)
-        if index not in matched_observed
-    )
+    drops: list[DropForeignKey] = []
+    for index, constraint in enumerate(observed.foreign_keys):
+        if index in matched_observed:
+            continue
+        if constraint.name is None:
+            raise AssertionError("ObservedTable admitted an unnamed foreign key")
+        drops.append(DropForeignKey(name=constraint.name))
     sets = (
         SetForeignKey(constraint=constraint)
         for index, constraint in enumerate(desired.foreign_keys)

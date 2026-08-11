@@ -62,13 +62,13 @@ def _foreign_key(
     local_columns: tuple[str, ...],
     referenced_table: QualifiedName,
     referenced_columns: tuple[str, ...],
-    constraint_name: str,
+    name: str,
 ) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns=local_columns,
         referenced_table=referenced_table,
         referenced_columns=referenced_columns,
-        constraint_name=constraint_name,
+        name=name,
     )
 
 
@@ -201,7 +201,7 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
         referenced_columns=("id",),
-        constraint_name="test_id_fk",
+        name="test_id_fk",
     )
     desired = _desired(
         columns=(DesiredColumn("id", Integer(), tags={"pii": "false"}),),
@@ -282,7 +282,7 @@ def test_plan_changes_replaces_a_primary_key_explicitly_across_a_rename():
 def test_plan_changes_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
     # Given an inbound reference to the primary key being renamed
     reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
@@ -314,13 +314,13 @@ def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
         local_columns=("parent_id",),
         referenced_table=parent,
         referenced_columns=("id",),
-        constraint_name="test_parent_id_fk",
+        name="test_parent_id_fk",
     )
     observed_key = _foreign_key(
         local_columns=("parent",),
         referenced_table=parent,
         referenced_columns=("id",),
-        constraint_name="legacy_fk",
+        name="legacy_fk",
     )
     desired = _desired(
         columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
@@ -336,7 +336,7 @@ def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
-        DropForeignKey(constraint=observed_key),
+        DropForeignKey(name="legacy_fk"),
         RenameColumn("parent", "parent_id"),
         SetForeignKey(constraint=desired_key),
     )
@@ -348,13 +348,13 @@ def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_
         local_columns=("manager_id",),
         referenced_table=_NAME,
         referenced_columns=("employee_id",),
-        constraint_name="test_manager_id_fk",
+        name="test_manager_id_fk",
     )
     observed_key = _foreign_key(
         local_columns=("manager_id",),
         referenced_table=_NAME,
         referenced_columns=("id",),
-        constraint_name="legacy_fk",
+        name="legacy_fk",
     )
     desired = _desired(
         columns=(
@@ -374,7 +374,7 @@ def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
-        DropForeignKey(constraint=observed_key),
+        DropForeignKey(name="legacy_fk"),
         RenameColumn("id", "employee_id"),
         SetForeignKey(constraint=desired_key),
     )
@@ -386,7 +386,7 @@ def test_plan_changes_drops_an_observed_only_foreign_key_alongside_a_rename():
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
         referenced_columns=("id",),
-        constraint_name="legacy_fk",
+        name="legacy_fk",
     )
     desired = _desired(
         columns=(
@@ -405,7 +405,7 @@ def test_plan_changes_drops_an_observed_only_foreign_key_alongside_a_rename():
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
-        DropForeignKey(constraint=unrelated_key),
+        DropForeignKey(name="legacy_fk"),
         RenameColumn("customer_nm", "customer_name"),
     )
 
@@ -461,7 +461,7 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "unregistered_parent"),
         referenced_columns=("parent_id",),
-        constraint_name="test_id_fk",
+        name="test_id_fk",
     )
     desired = DesiredTable(
         qualified_name=_NAME,
@@ -481,7 +481,7 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     # Given a mixed-case table to create with key and layout references
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="test_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), name="test_pk"),
         clustered_by=("requestId",),
     )
 
@@ -505,7 +505,7 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        constraint_name="orders_customers_fk",
+        name="orders_customers_fk",
     )
     # When planning
     result = plan_changes(
@@ -527,14 +527,14 @@ def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
     # Given a drift dropping its PK while this table's own FK references it,
     # with that FK dropped in the same diff
     reference = ForeignKeyReference(
-        constraint_name="test_parent_id_fk",
+        name="test_parent_id_fk",
         referencing_table=_NAME,
     )
     own_fk = _foreign_key(
         local_columns=("parent_id",),
         referenced_table=_NAME,
         referenced_columns=("id",),
-        constraint_name="test_parent_id_fk",
+        name="test_parent_id_fk",
     )
     # When planning
     result = plan_changes(
@@ -561,7 +561,7 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        constraint_name="orders_customers_fk",
+        name="orders_customers_fk",
     )
     # When planning
     result = plan_changes(
@@ -586,7 +586,7 @@ def test_missing_table_plan_contains_the_declared_foreign_keys():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        constraint_name="orders_customers_fk",
+        name="orders_customers_fk",
     )
     desired = _desired(
         columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),

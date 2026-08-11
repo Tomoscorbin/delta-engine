@@ -239,7 +239,7 @@ class DesiredTable:
         )
 
         seen: set[frozenset[str]] = set()
-        local_columns_by_constraint_name: dict[str, Sequence[str]] = {}
+        local_columns_by_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -248,18 +248,18 @@ class DesiredTable:
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
-            constraint_name = foreign_key.constraint_name
-            if constraint_name is None:
+            name = foreign_key.name
+            if name is None:
                 continue
-            collided = local_columns_by_constraint_name.get(constraint_name)
+            collided = local_columns_by_name.get(name)
             if collided is not None:
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
-                    f" '{constraint_name}': local columns {collided}"
+                    f" '{name}': local columns {collided}"
                     f" and {foreign_key.local_columns}. Every foreign key on a"
                     " table must have a distinct constraint name."
                 )
-            local_columns_by_constraint_name[constraint_name] = foreign_key.local_columns
+            local_columns_by_name[name] = foreign_key.local_columns
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)
@@ -370,7 +370,7 @@ class ObservedTable:
             foreign_keys=self.foreign_keys,
         )
 
-        if self.primary_key is not None and self.primary_key.constraint_name is None:
+        if self.primary_key is not None and self.primary_key.name is None:
             raise ValueError("Observed primary key must have a constraint name")
-        if any(foreign_key.constraint_name is None for foreign_key in self.foreign_keys):
+        if any(foreign_key.name is None for foreign_key in self.foreign_keys):
             raise ValueError("Observed foreign key must have a constraint name")

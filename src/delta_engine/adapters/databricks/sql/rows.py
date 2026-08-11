@@ -66,7 +66,7 @@ def read_primary_key(
         return None
     return PrimaryKeyConstraint(
         columns=[row.column_name for row in ordered],
-        constraint_name=ordered[0].constraint_name,
+        name=ordered[0].constraint_name,
     )
 
 
@@ -93,7 +93,7 @@ def read_foreign_keys(
                 group[0].referenced_table,
             ),
             referenced_columns=[row.referenced_column for row in group],
-            constraint_name=constraint_name,
+            name=constraint_name,
         )
         for constraint_name, group in grouped.items()
     )
@@ -106,7 +106,7 @@ def read_referencing_foreign_keys(
     """Read the inbound foreign keys owned by other tables that reference this one."""
     return tuple(
         ForeignKeyReference(
-            constraint_name=row.constraint_name,
+            name=row.constraint_name,
             referencing_table=QualifiedName(
                 row.referencing_catalog,
                 row.referencing_schema,

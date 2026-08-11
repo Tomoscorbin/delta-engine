@@ -155,7 +155,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), nullable=False),),
-            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{table_name}_pk"),
+            primary_key=PrimaryKeyConstraint(columns=("id",), name=f"{table_name}_pk"),
         )
     )
 
@@ -172,14 +172,14 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
             columns=as_observed_columns(desired.columns),
             primary_key=PrimaryKeyConstraint(
                 columns=desired.primary_key.columns,
-                constraint_name="databricks_generated_pk",
+                name="databricks_generated_pk",
             ),
             foreign_keys=(
                 ForeignKeyConstraint(
                     local_columns=desired_foreign_key.local_columns,
                     referenced_table=desired_foreign_key.referenced_table,
                     referenced_columns=desired_foreign_key.referenced_columns,
-                    constraint_name="databricks_generated_fk",
+                    name="databricks_generated_fk",
                 ),
             ),
         )

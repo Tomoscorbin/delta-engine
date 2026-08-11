@@ -55,9 +55,9 @@ def _observed_column(name: str) -> ObservedColumn:
 
 
 def _primary_key(
-    columns: tuple[str, ...] = ("id",), constraint_name: str | None = "tbl_pk"
+    columns: tuple[str, ...] = ("id",), name: str | None = "tbl_pk"
 ) -> PrimaryKeyConstraint:
-    return PrimaryKeyConstraint(columns, constraint_name)
+    return PrimaryKeyConstraint(columns, name)
 
 
 def _foreign_key(
@@ -65,13 +65,13 @@ def _foreign_key(
     local_columns: tuple[str, ...] = ("customer_id",),
     referenced_table: QualifiedName = _REFERENCED_TABLE,
     referenced_columns: tuple[str, ...] = ("id",),
-    constraint_name: str | None = "orders_customer_id_fk",
+    name: str | None = "orders_customer_id_fk",
 ) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns,
         referenced_table,
         referenced_columns,
-        constraint_name,
+        name,
     )
 
 
@@ -291,7 +291,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="tbl_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("id",), name="tbl_pk"),
     )
 
     # When compiling
@@ -392,7 +392,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
-            DropForeignKey(constraint=_foreign_key()),
+            DropForeignKey(name="orders_customer_id_fk"),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`",
         ),
         (
@@ -441,7 +441,7 @@ def test_set_primary_key_lets_databricks_choose_the_constraint_name():
 
 def test_set_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
-    action = SetForeignKey(constraint=_foreign_key(constraint_name="tbl_customer_id_fk"))
+    action = SetForeignKey(constraint=_foreign_key(name="tbl_customer_id_fk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -455,7 +455,7 @@ def test_set_foreign_key_renders_single_column_fk():
 
 
 def test_set_foreign_key_lets_databricks_choose_the_constraint_name():
-    action = SetForeignKey(constraint=_foreign_key(constraint_name=None))
+    action = SetForeignKey(constraint=_foreign_key(name=None))
 
     assert _compile_single(action) == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
@@ -469,7 +469,7 @@ def test_set_foreign_key_renders_composite_fk():
         constraint=_foreign_key(
             local_columns=("tenant_id", "customer_id"),
             referenced_columns=("tenant_id", "id"),
-            constraint_name="tbl_tenant_id_customer_id_fk",
+            name="tbl_tenant_id_customer_id_fk",
         )
     )
 
@@ -564,7 +564,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     AlterColumnType: AlterColumnType("id", Long(), Integer()),
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
-    DropForeignKey: DropForeignKey(constraint=_foreign_key()),
+    DropForeignKey: DropForeignKey(name="orders_customer_id_fk"),
     DropPrimaryKey: DropPrimaryKey("tbl_pk"),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
@@ -685,9 +685,7 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
 
 
 def test_set_primary_key_emits_the_exact_bound_spelling():
-    action = SetPrimaryKey(
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk")
-    )
+    action = SetPrimaryKey(primary_key=PrimaryKeyConstraint(columns=("requestId",), name="tbl_pk"))
     plan = ActionPlan(target=_TARGET, actions=(action,))
 
     [statement] = compile_plan(plan).statements
@@ -701,7 +699,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), name="tbl_pk"),
         clustered_by=("requestId",),
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
@@ -719,7 +717,7 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
         local_columns=("orderRef",),
         referenced_table=_REFERENCED_TABLE,
         referenced_columns=("OrderId",),
-        constraint_name="tbl_orderref_fk",
+        name="tbl_orderref_fk",
     )
     plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
 
@@ -731,13 +729,7 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
 
 
 def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
-    constraint = ForeignKeyConstraint(
-        local_columns=("a",),
-        referenced_table=_REFERENCED_TABLE,
-        referenced_columns=("b",),
-        constraint_name="Legacy_FK_Name",
-    )
-    plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(constraint=constraint),))
+    plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(name="Legacy_FK_Name"),))
 
     [statement] = compile_plan(plan).statements
 

@@ -508,7 +508,7 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
     # Then omission remains explicit so Databricks can choose the physical name
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
-    assert desired.primary_key.constraint_name is None
+    assert desired.primary_key.name is None
     assert table.primary_key_name is None
 
 
@@ -528,7 +528,7 @@ def test_primary_key_name_is_preserved_as_explicit_managed_state():
 
     # Then both the public API and lowered state preserve its spelling
     assert desired.primary_key is not None
-    assert desired.primary_key.constraint_name == "Accounts_Business_Key"
+    assert desired.primary_key.name == "Accounts_Business_Key"
     assert table.primary_key_name == "Accounts_Business_Key"
 
 
@@ -679,7 +679,7 @@ def test_delta_table_accepts_foreign_keys_parameter():
     assert foreign_key.local_columns == ("customer_id",)
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.constraint_name is None
+    assert foreign_key.name is None
 
 
 def test_foreign_key_name_is_preserved_as_explicit_managed_state():
@@ -703,7 +703,7 @@ def test_foreign_key_name_is_preserved_as_explicit_managed_state():
     # Then the public declaration and domain constraint preserve its spelling
     assert declaration.name == "Orders_Customer_Relationship"
     [constraint] = orders.to_desired_table().foreign_keys
-    assert str(constraint.constraint_name) == "Orders_Customer_Relationship"
+    assert str(constraint.name) == "Orders_Customer_Relationship"
 
 
 @pytest.mark.parametrize(
@@ -794,7 +794,7 @@ def test_delta_table_foreign_keys_round_trip_as_declarations():
     # Then the public declarations round-trip without acquiring an owner-derived name
     assert copy.foreign_keys == original.foreign_keys
     [constraint] = copy.to_desired_table().foreign_keys
-    assert constraint.constraint_name is None
+    assert constraint.name is None
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
@@ -1693,9 +1693,10 @@ def test_unnamed_foreign_keys_need_no_engine_name_collision_handling():
     orders = _table_with_distinct_foreign_keys()
 
     # Then both remain unnamed and Databricks owns their schema-unique names
-    assert tuple(
-        constraint.constraint_name for constraint in orders.to_desired_table().foreign_keys
-    ) == (None, None)
+    assert tuple(constraint.name for constraint in orders.to_desired_table().foreign_keys) == (
+        None,
+        None,
+    )
 
 
 def test_explicit_foreign_key_name_is_independent_of_unnamed_foreign_keys():
@@ -1704,9 +1705,10 @@ def test_explicit_foreign_key_name_is_independent_of_unnamed_foreign_keys():
     orders = _table_with_distinct_foreign_keys((None, "orders_parts_two_fk"))
 
     # Then only the explicitly supplied name becomes desired state
-    assert tuple(
-        constraint.constraint_name for constraint in orders.to_desired_table().foreign_keys
-    ) == (None, "orders_parts_two_fk")
+    assert tuple(constraint.name for constraint in orders.to_desired_table().foreign_keys) == (
+        None,
+        "orders_parts_two_fk",
+    )
 
 
 def test_foreign_key_rejects_non_table_reference_during_its_construction():
@@ -1884,7 +1886,7 @@ def test_mapping_insertion_order_is_irrelevant():
 
     # Then the constraints are identical, including the omitted name
     assert one == two
-    assert one.constraint_name == two.constraint_name
+    assert one.name == two.name
 
 
 def test_mapping_not_covering_the_key_is_rejected():
@@ -2005,7 +2007,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
                 local_columns=before.foreign_keys[0].local_columns,
                 referenced_table=before.foreign_keys[0].referenced_table,
                 referenced_columns=before.foreign_keys[0].referenced_columns,
-                constraint_name="databricks_generated_fk",
+                name="databricks_generated_fk",
             ),
         ),
     )

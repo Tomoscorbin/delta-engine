@@ -26,8 +26,7 @@ or reproduces them.
 
 ### Desired and observed state
 
-`PrimaryKeyConstraint` and `ForeignKeyConstraint` carry `constraint_name:
-str | None`.
+`PrimaryKeyConstraint` and `ForeignKeyConstraint` carry `name: str | None`.
 
 - Desired constraints may omit the name.
 - Observed constraints must have a name because catalog constraints always have
@@ -69,14 +68,15 @@ foreign-key differ.
 
 ### SQL compilation
 
-The compiler owns the optional Databricks grammar. One private helper renders
-either `CONSTRAINT <name> ` or an empty prefix. It is used by:
+The compiler owns the optional Databricks grammar. Private PK and FK renderers
+each produce a complete constraint definition, containing the optional name,
+identifier quoting, columns, and references. They are used by:
 
 - inline primary keys in `CREATE TABLE`;
 - `ALTER TABLE ... ADD PRIMARY KEY`;
 - `ALTER TABLE ... ADD FOREIGN KEY`.
 
-Drop actions always use the concrete observed name.
+Drop actions carry only the concrete observed name they need.
 
 ### Reporting
 

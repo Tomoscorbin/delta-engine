@@ -38,14 +38,14 @@ class PrimaryKeyConstraint:
     Attributes:
         columns: Ordered tuple of column names, preserving their supplied
             spelling. Identity and duplicates are judged by identifier key.
-        constraint_name: Optional managed physical name, preserving its
+        name: Optional managed physical name, preserving its
             spelling. ``None`` means the physical name is not part of desired
             state. Catalog-observed constraints always supply a name.
 
     """
 
     columns: ListOrTuple[str]
-    constraint_name: str | None = None
+    name: str | None = None
 
     def matches_columns(self, columns: Iterable[str]) -> bool:
         """Return whether columns identify this key, ignoring order and case."""
@@ -54,25 +54,23 @@ class PrimaryKeyConstraint:
     def is_satisfied_by(self, observed: Self) -> bool:
         """Return whether one physical occurrence satisfies this desired key."""
         return self.matches_columns(observed.columns) and (
-            self.constraint_name is None or self.constraint_name == observed.constraint_name
+            self.name is None or self.name == observed.name
         )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PrimaryKeyConstraint):
             return NotImplemented
-        return self.constraint_name == other.constraint_name and self.matches_columns(other.columns)
+        return self.name == other.name and self.matches_columns(other.columns)
 
     def __hash__(self) -> int:
-        return hash((self.constraint_name, frozenset(self.columns)))
+        return hash((self.name, frozenset(self.columns)))
 
     def __post_init__(self) -> None:
         columns = _constraint_columns(self.columns, kind="primary key")
-        constraint_name = (
-            Identifier(self.constraint_name) if self.constraint_name is not None else None
-        )
+        name = Identifier(self.name) if self.name is not None else None
 
         object.__setattr__(self, "columns", columns)
-        object.__setattr__(self, "constraint_name", constraint_name)
+        object.__setattr__(self, "name", name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +87,7 @@ class ForeignKeyConstraint:
         referenced_table: Fully qualified name of the referenced table.
         referenced_columns: Tuple of column names in the referenced table,
             positionally aligned with ``local_columns`` after identity-key sorting.
-        constraint_name: Optional managed physical name, preserving its
+        name: Optional managed physical name, preserving its
             spelling. ``None`` means the physical name is not part of desired
             state. Catalog-observed constraints always supply a name.
 
@@ -98,7 +96,7 @@ class ForeignKeyConstraint:
     local_columns: ListOrTuple[str]
     referenced_table: QualifiedName
     referenced_columns: ListOrTuple[str]
-    constraint_name: str | None = None
+    name: str | None = None
 
     def is_satisfied_by(self, observed: Self) -> bool:
         """Return whether one physical occurrence satisfies this desired key."""
@@ -106,7 +104,7 @@ class ForeignKeyConstraint:
             self.local_columns == observed.local_columns
             and self.referenced_table == observed.referenced_table
             and self.referenced_columns == observed.referenced_columns
-            and (self.constraint_name is None or self.constraint_name == observed.constraint_name)
+            and (self.name is None or self.name == observed.name)
         )
 
     def __post_init__(self) -> None:
@@ -133,13 +131,11 @@ class ForeignKeyConstraint:
             key=lambda pair: pair[0].lower(),
         )
 
-        constraint_name = (
-            Identifier(self.constraint_name) if self.constraint_name is not None else None
-        )
+        name = Identifier(self.name) if self.name is not None else None
 
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
-        object.__setattr__(self, "constraint_name", constraint_name)
+        object.__setattr__(self, "name", name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,15 +148,15 @@ class ForeignKeyReference:
     enough for validation to name what blocks a primary-key change.
 
     Attributes:
-        constraint_name: The referencing constraint's name, as read from the
+        name: The referencing constraint's name, as read from the
             catalog.
         referencing_table: Fully qualified name of the table that owns the
             referencing constraint.
 
     """
 
-    constraint_name: str
+    name: str
     referencing_table: QualifiedName
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        object.__setattr__(self, "name", Identifier(self.name))

@@ -18,7 +18,6 @@ from delta_engine.domain.model import (
     DesiredTable,
     Double,
     Float,
-    ForeignKeyConstraint,
     ForeignKeyReference,
     Integer,
     Long,
@@ -921,7 +920,7 @@ def test_multiple_column_drops_produce_one_column_mapping_failure():
 def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
     # Given a PK removal while the observed table is referenced by another table's FK
     reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
     change = DropPrimaryKey("test_pk")
@@ -949,18 +948,12 @@ def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
 def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_this_table():
     # Given a self-referential FK dropped in the same sync as the PK
     # (DROP_FOREIGN_KEY phases before DROP_PRIMARY_KEY, so execution succeeds)
-    own_fk = ForeignKeyConstraint(
-        local_columns=("parent_id",),
-        referenced_table=_QUALIFIED_NAME,
-        referenced_columns=("id",),
-        constraint_name="test_parent_id_fk",
-    )
     reference = ForeignKeyReference(
-        constraint_name="test_parent_id_fk",
+        name="test_parent_id_fk",
         referencing_table=_QUALIFIED_NAME,
     )
     pk_change = DropPrimaryKey("test_pk")
-    fk_change = DropForeignKey(constraint=own_fk)
+    fk_change = DropForeignKey(name="test_parent_id_fk")
 
     observed = _observed_table(referencing_foreign_keys=(reference,))
     failures = validate_diff(_drift(pk_change, fk_change, observed=observed))

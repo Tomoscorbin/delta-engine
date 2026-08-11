@@ -14,13 +14,13 @@ def test_constraint_identity_includes_the_physical_name():
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
     )
     two = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        constraint_name="chosen_elsewhere",
+        name="chosen_elsewhere",
     )
 
     # Then they are different managed constraints
@@ -34,7 +34,7 @@ def test_constraint_name_may_be_omitted():
         referenced_columns=("id",),
     )
 
-    assert constraint.constraint_name is None
+    assert constraint.name is None
 
 
 def test_value_equality_keeps_omitted_and_explicit_names_distinct():
@@ -47,7 +47,7 @@ def test_value_equality_keeps_omitted_and_explicit_names_distinct():
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
     )
 
     assert unnamed != named
@@ -63,7 +63,7 @@ def test_unnamed_constraint_is_satisfied_by_any_name_on_the_same_definition():
         local_columns=("tenantid", "customerid"),
         referenced_table=_customers(),
         referenced_columns=("tenantid", "id"),
-        constraint_name="legacy_customer_fk",
+        name="legacy_customer_fk",
     )
 
     assert desired.is_satisfied_by(observed)
@@ -74,7 +74,7 @@ def test_explicit_constraint_name_is_part_of_satisfaction():
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        constraint_name="Orders_Customer_FK",
+        name="Orders_Customer_FK",
     )
 
     assert desired.is_satisfied_by(
@@ -82,7 +82,7 @@ def test_explicit_constraint_name_is_part_of_satisfaction():
             local_columns=("CUSTOMER_ID",),
             referenced_table=_customers(),
             referenced_columns=("ID",),
-            constraint_name="orders_customer_fk",
+            name="orders_customer_fk",
         )
     )
     assert not desired.is_satisfied_by(
@@ -90,7 +90,7 @@ def test_explicit_constraint_name_is_part_of_satisfaction():
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            constraint_name="legacy_customer_fk",
+            name="legacy_customer_fk",
         )
     )
     assert not desired.is_satisfied_by(
@@ -98,7 +98,7 @@ def test_explicit_constraint_name_is_part_of_satisfaction():
             local_columns=("customer_id",),
             referenced_table=QualifiedName("main", "sales", "accounts"),
             referenced_columns=("id",),
-            constraint_name="orders_customer_fk",
+            name="orders_customer_fk",
         )
     )
 
@@ -109,13 +109,13 @@ def test_constraint_identity_includes_the_referenced_table():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "old_customers"),
         referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
     )
     to_new = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "new_customers"),
         referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
+        name="orders_customer_id_fk",
     )
 
     # Then they are different managed constraints
@@ -129,7 +129,7 @@ def test_rejects_empty_local_columns():
             local_columns=(),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -140,7 +140,7 @@ def test_rejects_empty_referenced_columns():
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=(),
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -163,7 +163,7 @@ def test_rejects_invalid_column_collections(
             local_columns=local_columns,  # type: ignore[arg-type]
             referenced_table=_customers(),
             referenced_columns=referenced_columns,  # type: ignore[arg-type]
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -175,7 +175,7 @@ def test_rejects_mismatched_column_counts():
             local_columns=("a", "b"),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -186,7 +186,7 @@ def test_rejects_duplicate_local_columns():
             local_columns=("customer_id", "customer_id"),
             referenced_table=_customers(),
             referenced_columns=("tenant_id", "id"),
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -197,7 +197,7 @@ def test_rejects_duplicate_referenced_columns():
             local_columns=("customer_id", "tenant_id"),
             referenced_table=_customers(),
             referenced_columns=("id", "id"),
-            constraint_name="x_fk",
+            name="x_fk",
         )
 
 
@@ -218,7 +218,7 @@ def test_rejects_invalid_constraint_name(
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            constraint_name=constraint_name,  # type: ignore[arg-type]
+            name=constraint_name,  # type: ignore[arg-type]
         )
 
 
@@ -226,7 +226,7 @@ def test_foreign_key_reference_rejects_non_string_constraint_name() -> None:
     # When the physical name is not a string, then construction fails deliberately
     with pytest.raises(TypeError):
         ForeignKeyReference(
-            constraint_name=42,  # type: ignore[arg-type]
+            name=42,  # type: ignore[arg-type]
             referencing_table=_customers(),
         )
 
@@ -237,7 +237,7 @@ def test_construction_canonicalizes_pair_order_by_local_column():
         local_columns=("b", "a"),
         referenced_table=_customers(),
         referenced_columns=("y", "x"),
-        constraint_name="orders_fk",
+        name="orders_fk",
     )
 
     # Then storage is sorted by local column with the pairing preserved
@@ -251,13 +251,13 @@ def test_constraint_identity_ignores_declared_pair_order():
         local_columns=("a", "b"),
         referenced_table=_customers(),
         referenced_columns=("x", "y"),
-        constraint_name="orders_fk",
+        name="orders_fk",
     )
     two = ForeignKeyConstraint(
         local_columns=("b", "a"),
         referenced_table=_customers(),
         referenced_columns=("y", "x"),
-        constraint_name="orders_fk",
+        name="orders_fk",
     )
 
     # Then they are the same constraint — order is not part of identity
@@ -269,7 +269,7 @@ def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
         local_columns=("Zebra", "Apple"),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("z_id", "a_id"),
-        constraint_name="t_fk",
+        name="t_fk",
     )
     assert tuple(str(column) for column in constraint.local_columns) == ("Apple", "Zebra")
     assert tuple(str(column) for column in constraint.referenced_columns) == ("a_id", "z_id")
@@ -281,7 +281,7 @@ def test_rejects_local_columns_differing_only_by_case_as_duplicates():
             local_columns=("id", "ID"),
             referenced_table=QualifiedName("cat", "sch", "parent"),
             referenced_columns=("a", "b"),
-            constraint_name="t_fk",
+            name="t_fk",
         )
 
 
@@ -291,13 +291,13 @@ def test_constraints_match_across_case_variant_spellings() -> None:
         local_columns=("orderref",),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("orderid",),
-        constraint_name="child_orderref_fk",
+        name="child_orderref_fk",
     )
     observed = ForeignKeyConstraint(
         local_columns=("OrderRef",),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("OrderId",),
-        constraint_name="CHILD_ORDERREF_FK",
+        name="CHILD_ORDERREF_FK",
     )
 
     # Then identity is case-insensitive while each spelling is preserved
@@ -317,13 +317,13 @@ def test_constraint_identity_matches_when_case_flips_raw_pair_sort_order() -> No
         local_columns=("Zeta", "alpha"),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("z_id", "a_id"),
-        constraint_name="t_fk",
+        name="t_fk",
     )
     observed = ForeignKeyConstraint(
         local_columns=("ZETA", "ALPHA"),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("Z_ID", "A_ID"),
-        constraint_name="T_FK",
+        name="T_FK",
     )
 
     # Then they are recognized as the same constraint — canonicalization is
