@@ -6,8 +6,6 @@ Declarative, safety-first schema and metadata management for Delta Lake tables o
 
 Define the state your tables should have in Python. Delta Engine reads their current Unity Catalog state, calculates the difference, validates whether each change is safe, and executes only the DDL needed to reconcile them.
 
-There are no migration scripts to maintain and no DDL statements to hand-order. Your declarations remain the source of truth across the lifetime of the table.
-
 ## What Delta Engine gives you
 
 - **Desired-state reconciliation:** declare the complete table state rather than a sequence of migrations.
