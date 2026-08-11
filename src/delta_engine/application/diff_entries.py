@@ -169,6 +169,16 @@ def _column_add_entry(column: DesiredColumn) -> DiffEntry:
     return DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, subject=column.name, detail=detail)
 
 
+def _column_comment_entry(column: DesiredColumn) -> DiffEntry:
+    """Build a '+' comments entry for a created column."""
+    return DiffEntry(
+        DiffCategory.COMMENTS,
+        DiffOperation.ADD,
+        subject=f"column {column.name}",
+        detail=(f"'{column.comment}'",),
+    )
+
+
 def _named_value_entry(
     category: DiffCategory, subject: str, desired_value: str, observed_value: str | None
 ) -> DiffEntry:
@@ -272,14 +282,7 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     )
 
     entries.extend(
-        DiffEntry(
-            DiffCategory.COMMENTS,
-            DiffOperation.ADD,
-            subject=f"column {column.name}",
-            detail=(f"'{column.comment}'",),
-        )
-        for column in action.table.columns
-        if column.comment
+        _column_comment_entry(column) for column in action.table.columns if column.comment
     )
     if action.table.comment:
         entries.append(
@@ -296,7 +299,10 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: AddColumn) -> tuple[DiffEntry, ...]:
-    return (_column_add_entry(action.column),)
+    entries = [_column_add_entry(action.column)]
+    if action.column.comment:
+        entries.append(_column_comment_entry(action.column))
+    return tuple(entries)
 
 
 @action_entries.register
