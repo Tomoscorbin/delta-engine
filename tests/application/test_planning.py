@@ -25,6 +25,7 @@ from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
     AlterColumnType,
+    ColumnRenameConflict,
     CreateTable,
     DropForeignKey,
     DropPrimaryKey,
@@ -33,6 +34,7 @@ from delta_engine.domain.plan import (
     SetForeignKey,
     SetPrimaryKey,
     SetTableTag,
+    TableDrift,
     diff_table,
 )
 
@@ -172,6 +174,17 @@ def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
     # Then the outcome refuses to pair them
     with pytest.raises(ValueError):
         PlanningAccepted(diff=diff, plan=other_plan)
+
+
+def test_an_accepted_outcome_rejects_unresolvable_differences():
+    diff = TableDrift(
+        desired=_desired(),
+        observed=_observed(),
+        unresolvable=(ColumnRenameConflict(old_name="old", new_name="new"),),
+    )
+
+    with pytest.raises(ValueError):
+        PlanningAccepted(diff=diff, plan=ActionPlan(target=_NAME))
 
 
 def test_plan_changes_accepts_no_op_as_an_empty_plan():
