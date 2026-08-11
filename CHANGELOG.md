@@ -1,3 +1,62 @@
+## v0.8.0 (2026-08-11)
+
+### BREAKING CHANGE
+
+- PlanningSucceeded and PlanningFailed are renamed to
+PlanningAccepted and PlanningRejected. The to_dict() wire format is
+unchanged; schema_version stays 2.
+- domain.plan.TableMissing is renamed to TableCreation.
+Nothing serialized changes; schema_version stays 2.
+- ExecutionSummary is renamed/reshaped to
+ExecutionResult; ExecutionSucceeded and the per-statement result union
+are removed; TableRun.execution now carries applied_count and failure
+instead of a results tuple. The to_dict() wire format is unchanged;
+schema_version stays 2.
+- PlanningSucceeded and PlanningFailed require a diff
+argument, and TableRunReport no longer accepts a diff keyword (the value
+is derived). The schema_version 2 JSON payload is unchanged.
+- TableRunReport is renamed to TableRun,
+SyncReport.table_reports to table_runs, and TableRun's field order
+changed (keyword construction is unaffected by the reorder). The
+schema_version 2 JSON payload is unchanged.
+
+### Feat
+
+- allow named foreign keys (#340)
+- allow named primary keys (#339)
+- retain lossless failure diagnostics in the machine report (#329)
+- render table change outcomes (#324)
+- let a rejected table say what drifted (#316)
+- improve rendering (#313)
+
+### Fix
+
+- report comments on added columns (#346)
+- support streaming table annotations safely (#333)
+- raise on unmanaged property transition checks (#332)
+- move duplicated logging
+- validate data type model boundaries (#325)
+- make sync failure messages actionable (#322)
+- fail closed on unsupported string collations (#319)
+- decimal rejects non integer precision and scale (#317)
+- a nested data type closes its own delimiters (#315)
+- Decimal rejects non integer precision and scale (#314)
+
+### Refactor
+
+- harden constraint construction (#344)
+- remove key signature projections (#343)
+- make primary key equality semantic (#342)
+- replace stringified type annotations (#336)
+- model table scopes explicitly (#335)
+- trust validated column additions (#334)
+- unify outcome vocabulary (#331)
+- rename TableRunReport to TableRun and build it per table (#328)
+- model table change outcomes (#323)
+- use explicit list-or-tuple inputs (#321)
+- harden sequence inputs in frozen models (#320)
+- retain compiled plans through execution (#318)
+
 ## v0.7.0 (2026-07-31)
 
 ### BREAKING CHANGE
