@@ -33,12 +33,10 @@ contracts as part of the release:
 
 ```mermaid
 flowchart LR
-    PR[Pull request] --> Plan[Read-only Delta Engine plan]
-    Plan --> Review[Review semantic changes and DDL]
+    PR[Pull request] --> Review[Plan and review changes]
     Review --> Merge[Merge]
-    Merge --> Deploy[Deploy application bundle]
-    Deploy --> Sync[Run table-reconciliation job]
-    Sync --> Data[Release or run data workloads]
+    Merge --> Release[Deploy and reconcile tables]
+    Release --> Data[Run data workloads]
 ```
 
 The declarations, pipeline code, and deployment configuration are versioned and
@@ -70,37 +68,6 @@ ALL_TABLES = (
 )
 ```
 
-Prefer an explicit registry to automatically crawling packages for every
-`DeltaTable` object. The registry makes the deployment unit visible in code
-review and avoids importing arbitrary modules merely to discover declarations.
-Adding a table to the registry is an intentional decision to include it in the
-release.
-
-Larger projects can expose one registry per domain:
-
-```python
-# myproject/customers/table_registry.py
-CUSTOMER_TABLES = (
-    customers,
-    customer_preferences,
-)
-
-# myproject/orders/table_registry.py
-ORDER_TABLES = (
-    orders,
-    order_items,
-)
-```
-
-A release can then compose only the domains it owns:
-
-```python
-ALL_TABLES = (
-    *CUSTOMER_TABLES,
-    *ORDER_TABLES,
-)
-```
-
 ### Add a reconciliation entry point
 
 Package the reconciliation logic with the application:
@@ -114,24 +81,12 @@ from pyspark.sql import SparkSession
 from myproject.table_registry import ALL_TABLES
 
 
-def main() -> None:
+def main(spark: SparkSession) -> None:
     """Reconcile every table owned by this release."""
-    spark = SparkSession.getActiveSession()
-
-    if spark is None:
-        spark = SparkSession.builder.getOrCreate()
-
     engine = build_spark_engine(spark)
     report = engine.sync(*ALL_TABLES)
 
     print(render_report(report))
-```
-
-Expose the function as a wheel entry point:
-
-```toml
-[project.scripts]
-sync-tables = "myproject.sync_tables:main"
 ```
 
 The job succeeds only when the sync succeeds. If reading, planning, dependency
