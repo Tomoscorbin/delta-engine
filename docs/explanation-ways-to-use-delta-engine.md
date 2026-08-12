@@ -98,26 +98,6 @@ job should fail rather than allowing the release to continue silently.
 A Declarative Automation Bundle can deploy the project wheel and define a
 dedicated Python wheel task.
 
-The resource below is intentionally abridged; add the compute, libraries,
-permissions, and environment-specific settings required by your workspace:
-
-```yaml
-resources:
-  jobs:
-    reconcile_tables:
-      name: ${bundle.target}-reconcile-tables
-
-      tasks:
-        - task_key: reconcile_tables
-
-          python_wheel_task:
-            package_name: myproject
-            entry_point: sync-tables
-
-          libraries:
-            - whl: ../dist/*.whl
-```
-
 The release pipeline can then validate the bundle, deploy it, and run the
 reconciliation job:
 
@@ -147,15 +127,6 @@ delta-engine plan myproject.table_registry:ALL_TABLES
 
 This reads live Unity Catalog state, validates the declarations, and prints the
 semantic differences and exact planned DDL without applying them.
-
-Use separate identities for planning and application:
-
-* a read-only identity for pull-request planning;
-* a write-capable job identity for the deployment sync;
-* a deployment identity responsible for publishing the bundle.
-
-A bundle's `run_as` configuration can separate the identity that deploys the
-workflow from the service principal under which the reconciliation job runs.
 
 A real sync does not replay the dry-run output as a saved plan. It reads the
 catalog again and derives a fresh plan from the state present at deployment
