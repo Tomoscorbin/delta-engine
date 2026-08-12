@@ -89,16 +89,14 @@ Start with a dry run. It reads live catalog state, validates the change, and
 compiles exact SQL without executing it:
 
 ```python
-from delta_engine import render_diff, render_report
-
 preview = engine.sync(*all_tables, dry_run=True)
 
-print(render_diff(preview))
-print(render_report(preview))
+print(preview.render_diff())
+print(preview.render())
 ```
 
-For a missing `dev.silver.customers` table, `render_diff` shows the semantic
-change rather than SQL:
+For a missing `dev.silver.customers` table, `preview.render_diff()` shows the
+semantic change rather than SQL:
 
 ```text
 DIFF
@@ -110,8 +108,8 @@ dev.silver.customers  (CREATE)
     + name  String
 ```
 
-`render_report` shows the plan status and statement count. The `PLAN` banner is
-the visible assurance that no planned SQL ran:
+`preview.render()` shows the plan status and statement count. The `PLAN` banner
+is the visible assurance that no planned SQL ran:
 
 ```text
 SYNC REPORT
@@ -130,8 +128,8 @@ either rendering. The object supports four complementary views:
 
 | View | Use |
 | --- | --- |
-| `render_diff(preview)` | Human-readable semantic changes |
-| `render_report(preview)` | Per-table status, failures, and statement counts |
+| `preview.render_diff()` | Human-readable semantic changes |
+| `preview.render()` | Per-table status, failures, and statement counts |
 | `preview.planned_sql_statements` | Exact DDL grouped by table |
 | `preview.to_dict()` | Versioned, JSON-safe data for CI and logging |
 
@@ -154,7 +152,7 @@ preview:
 
 ```python
 report = engine.sync(*all_tables)
-print(render_report(report))
+print(report.render())
 ```
 
 The first successful application renders:
@@ -199,8 +197,9 @@ configure_logging()
 engine.sync(*all_tables)
 ```
 
-Logging is operational progress; `render_report`, `render_diff`, and
-`to_dict()` remain the stable ways to inspect the outcome.
+Logging is operational progress; `SyncReport.render()`,
+`SyncReport.render_diff()`, and `SyncReport.to_dict()` remain the stable ways to
+inspect the outcome.
 
 ## What to do when sync fails
 

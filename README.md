@@ -73,7 +73,6 @@ and planned SQL and never applies the generated plan. See the
 ## Quickstart
 
 ```python
-from delta_engine import render_report
 from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
 
@@ -89,7 +88,7 @@ customers = DeltaTable(
 
 engine = build_spark_engine(spark)
 report = engine.sync(customers)     # creates the table, or no-ops if it already matches
-print(render_report(report))
+print(report.render())
 ```
 
 A first sync that creates this table renders like this:
@@ -105,7 +104,7 @@ dev.silver.customers  SUCCESS  1/1         2 columns
 ```
 
 `sync` returns the structured `SyncReport`; it does not print this text itself.
-Use `render_report` for status, `render_diff` for semantic changes,
+Use `report.render()` for status, `report.render_diff()` for semantic changes,
 `report.planned_sql_statements` for exact DDL, or `report.to_dict()` for JSON-safe
 automation data. The [getting-started tutorial](https://tomoscorbin.github.io/delta-engine/tutorial-getting-started.html)
 shows all four and explains where declarations fit in a pipeline.

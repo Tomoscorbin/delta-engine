@@ -500,6 +500,20 @@ class SyncReport:
         """Mapping of qualified table name to its failures (if any)."""
         return {run.qualified_name: run.failures for run in self.table_runs if run.has_failures}
 
+    def render(self) -> str:
+        """Render the run's status, failures, and summary as human-readable text."""
+        # rendering imports these report types, so defer the reverse dependency
+        # until callers ask for the convenience view.
+        from delta_engine.application.rendering import render_report
+
+        return render_report(self)
+
+    def render_diff(self) -> str:
+        """Render every table's planned changes as human-readable text."""
+        from delta_engine.application.rendering import render_diff
+
+        return render_diff(self)
+
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
