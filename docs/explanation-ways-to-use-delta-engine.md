@@ -314,38 +314,6 @@ Do not declare the same comment or tag in both the pipeline definition and
 Delta Engine. A pipeline refresh can reassert its own declaration, creating
 recurring drift between two competing owners.
 
-## Combine the patterns
-
-A larger project can use all three patterns:
-
-```mermaid
-flowchart TB
-    PR[Pull request] --> Plan[Read-only CI plan]
-    Plan --> Merge[Merge]
-    Merge --> Bundle[Deploy application bundle]
-    Bundle --> Reconcile[Run dedicated reconciliation job]
-    Reconcile --> ETL[Run data workflows]
-
-    GovernancePR[Governance change] --> GovernanceSync[Restricted-scope sync]
-    GovernanceSync --> Catalog[Comments and tags]
-
-    ETL --> Catalog
-```
-
-For example:
-
-1. Table declarations live in a shared Python package beside the data-product
-   code.
-2. Pull requests plan the explicit registry through a SQL warehouse using a
-   read-only identity.
-3. A merged release deploys a bundle and runs a dedicated write-capable
-   reconciliation job.
-4. Data workflows are triggered only after reconciliation succeeds.
-5. A separate governance deployment manages annotations on tables owned by
-   other pipelines.
-
-The common principle is that each table aspect has one clear owner.
-
 ## Operational boundaries
 
 Whichever pattern you use:
