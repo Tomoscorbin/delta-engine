@@ -139,97 +139,41 @@ a complete read-only workflow.
 
 ## Require table readiness before ETL
 
-A batch data product can make reconciliation the first task in its Lakeflow
-Job:
+The release-time pattern reconciles table contracts when the application is
+deployed. For batch data products that need to verify table state at the
+beginning of every run, make reconciliation the first task in the Lakeflow Jobs
+workflow:
 
-```mermaid
-flowchart LR
-    Sync[Reconcile tables] --> Transform[Transform data]
-    Transform --> Write[Write target tables]
-    Write --> Publish[Publish outputs]
+```text
+reconcile_tables
+        ↓
+data-producing tasks
 ```
 
-Every data-producing task depends on the reconciliation task succeeding. The
-workflow itself therefore enforces the precondition:
+Configure each ETL task to depend on `reconcile_tables`. The workflow then
+enforces the precondition:
 
 > The declared tables must be readable, valid, and successfully reconciled
 > before this run writes any rows.
 
-An abridged bundle definition might look like this:
-
-```yaml
-resources:
-  jobs:
-    customer_data_product:
-      name: ${bundle.target}-customer-data-product
-
-      tasks:
-        - task_key: reconcile_tables
-
-          python_wheel_task:
-            package_name: myproject
-            entry_point: sync-tables
-
-          libraries:
-            - whl: ../dist/*.whl
-
-        - task_key: build_customers
-
-          depends_on:
-            - task_key: reconcile_tables
-
-          python_wheel_task:
-            package_name: myproject
-            entry_point: build-customers
-
-          libraries:
-            - whl: ../dist/*.whl
-
-        - task_key: build_orders
-
-          depends_on:
-            - task_key: reconcile_tables
-
-          python_wheel_task:
-            package_name: myproject
-            entry_point: build-orders
-
-          libraries:
-            - whl: ../dist/*.whl
-```
-
-The default successful path is:
-
-```text
-reconcile_tables succeeds
-        ↓
-dependent ETL tasks start
-```
-
-If reconciliation fails, the dependent tasks do not run.
+If reading, planning, dependency resolution, or execution fails, the
+reconciliation task fails and the dependent ETL tasks do not run. When the
+tables already match their declarations, the sync completes without applying
+DDL and the workflow continues normally.
 
 ### When this pattern works well
 
 Use an upstream reconciliation task when:
 
 * the workflow and its target tables form one data product;
-* the job must be able to start in an environment where a table may be absent;
-* table readiness should be checked every time the workflow begins;
-* the workflow is batch-oriented or runs at a moderate frequency;
-* the cost of reading catalog state on each workflow run is acceptable.
+* the job may run in a new environment where its tables do not yet exist;
+* table state should be checked before every batch run;
+* the workflow runs at a moderate frequency and the additional catalog reads
+  are acceptable.
 
-It is also useful for an explicit release workflow:
-
-```text
-reconcile tables
-        ↓
-run deployment smoke tests
-        ↓
-trigger the production data job
-```
-
-The production data job can remain a separate resource while the release
-workflow preserves the ordering.
+This creates a strong runtime boundary between table management and data
+production: the ETL logic does not need to create tables or evolve their schema
+as a side effect of writing rows.
 
 ### When not to use it
 
@@ -237,8 +181,8 @@ Do not call `sync()` for every streaming micro-batch. Re-reading and replanning
 a stable table contract hundreds of times per hour adds work without improving
 the contract.
 
-For continuous or high-frequency pipelines, reconcile at release time before
-the pipeline is started or updated:
+For continuous or high-frequency pipelines, prefer release-time
+reconciliation:
 
 ```text
 deploy release
@@ -248,10 +192,10 @@ reconcile table contracts
 start or update continuous pipeline
 ```
 
-Also avoid enabling writer-driven schema evolution for table aspects that
-Delta Engine owns. The workflow should not simultaneously ask Delta Engine to
-enforce one column structure while allowing the writer to evolve that same
-structure independently.
+Do not also enable writer-driven schema evolution for table aspects that Delta
+Engine owns. The workflow should not ask Delta Engine to enforce one column
+structure while allowing the writer to evolve that same structure
+independently.
 
 ## Add governance without taking over the pipeline
 
