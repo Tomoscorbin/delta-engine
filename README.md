@@ -20,9 +20,9 @@ Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing 
 
 3. **Safe, controlled schema evolution**
 
-   Delta Engine protects the table at two stages. Construction-time guards reject declarations that are internally invalid regardless of catalog state—for example, a primary key containing a nullable column—so these mistakes can be caught during development or unit testing without connecting to Databricks.
+   Delta Engine protects the table at two stages. Construction-time guards reject declarations that are internally invalid regardless of catalog state (e.g., a primary key containing a nullable column) so these mistakes can be caught during development or unit testing without connecting to Databricks.
 
-   For valid declarations, Delta Engine then compares the desired state with the live table and validates the complete proposed transition before the first DDL statement runs. If any part of the plan is unsafe, unsupported, or structurally invalid, the table is blocked rather than applying only the statements that happen to be valid or submitting DDL that the engine already knows will fail.
+   For valid declarations, Delta Engine then compares the desired state with the live table and validates the complete proposed transition before the first DDL statement runs. If any part of the plan is unsafe, unsupported, or structurally invalid, the table is blocked rather than applying only the statements that happen to be valid or executing DDL that will fail.
 
 4. **Preview and gate table changes in CI**
 
