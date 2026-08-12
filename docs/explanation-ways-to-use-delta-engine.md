@@ -113,8 +113,6 @@ databricks bundle deploy --target production
 databricks bundle run --target production reconcile_tables
 ```
 
-Do not trigger the new data workload unless reconciliation succeeds.
-
 Bundle deployment and table reconciliation are separate operations. If the
 bundle is deployed but the reconciliation job fails, the new job definitions
 and application artifacts may already exist in the workspace. The release
