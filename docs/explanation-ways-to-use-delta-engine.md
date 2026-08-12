@@ -228,27 +228,6 @@ Use this pattern when:
 It is particularly straightforward for batch applications because the table
 check becomes part of the application's normal startup sequence.
 
-### When not to use it
-
-Do not call `sync()` inside transformation functions, write helpers,
-`foreachBatch`, or individual streaming micro-batches. Reconcile the table once
-before the ETL or streaming query begins.
-
-For continuous or very high-frequency workloads, release-time reconciliation
-may be a better fit:
-
-```text
-deploy release
-        ↓
-reconcile target table
-        ↓
-start or update continuous pipeline
-```
-
-Do not also enable writer-driven schema evolution for aspects that Delta Engine
-owns. For example, a writer should not use `mergeSchema` to evolve columns while
-Delta Engine is responsible for maintaining the declared column structure.
-
 ## Pattern 3: Add governance without taking over the pipeline
 
 Table ownership is not always all-or-nothing. A data-product team may own the
