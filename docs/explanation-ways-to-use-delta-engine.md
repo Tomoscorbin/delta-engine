@@ -31,6 +31,14 @@ deployment for centrally managed annotations.
 For most production applications, the clearest pattern is to treat table
 contracts as part of the release.
 
+```mermaid
+flowchart LR
+    PR[Pull request] --> Review[Plan and review changes]
+    Review --> Merge[Merge]
+    Merge --> Release[Deploy and reconcile tables]
+    Release --> Data[Run data workloads]
+```
+
 The declarations, pipeline code, and deployment configuration are versioned and
 released together. The deployment creates or updates the Databricks resources,
 then runs a dedicated job that reconciles the table declarations before the new
