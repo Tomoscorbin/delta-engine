@@ -29,15 +29,7 @@ deployment for centrally managed annotations.
 ## Release table contracts with the application
 
 For most production applications, the clearest pattern is to treat table
-contracts as part of the release:
-
-```mermaid
-flowchart LR
-    PR[Pull request] --> Review[Plan and review changes]
-    Review --> Merge[Merge]
-    Merge --> Release[Deploy and reconcile tables]
-    Release --> Data[Run data workloads]
-```
+contracts as part of the release.
 
 The declarations, pipeline code, and deployment configuration are versioned and
 released together. The deployment creates or updates the Databricks resources,
@@ -68,6 +60,10 @@ ALL_TABLES = (
 )
 ```
 
+An explicit registry makes the release boundary visible in code review: adding
+a table to the collection is an intentional decision to include it in the
+deployment.
+
 ### Add a reconciliation entry point
 
 Package the reconciliation logic with the application:
@@ -81,8 +77,10 @@ from pyspark.sql import SparkSession
 from myproject.table_registry import ALL_TABLES
 
 
-def main(spark: SparkSession) -> None:
+def main() -> None:
     """Reconcile every table owned by this release."""
+    spark = SparkSession.builder.getOrCreate()
+
     engine = build_spark_engine(spark)
     report = engine.sync(*ALL_TABLES)
 
@@ -90,13 +88,13 @@ def main(spark: SparkSession) -> None:
 ```
 
 The job succeeds only when the sync succeeds. If reading, planning, dependency
-resolution, or execution fails, Delta Engine raises `SyncFailedError` and the
+resolution, or execution fails, Delta Engine raises `SyncFailedError`, and the
 job should fail rather than allowing the release to continue silently.
 
 ### Deploy and run it through a bundle
 
-A Declarative Automation Bundle can deploy the project wheel and define a
-dedicated Python wheel task.
+A Declarative Automation Bundle can deploy the application wheel and configure
+the reconciliation entry point as a dedicated Python wheel task.
 
 The release pipeline can then validate the bundle, deploy it, and run the
 reconciliation job:
