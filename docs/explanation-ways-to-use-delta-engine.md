@@ -22,11 +22,11 @@ deployment for centrally managed annotations.
 
 | Pattern                                                                                             | Best suited to                                                       | Where Delta Engine runs                                  |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
-| [Release table contracts with the application](#release-table-contracts-with-the-application)       | Controlled production releases and continuing table estates          | A dedicated job after the application bundle is deployed |
-| [Require table readiness before ETL](#require-table-readiness-before-etl)                           | Batch data products that must establish their tables before writing  | The first task in the data workflow                      |
-| [Add governance without taking over the pipeline](#add-governance-without-taking-over-the-pipeline) | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
+| [Pattern 1: Release table contracts](#pattern-1-release-table-contracts-with-the-application)       | Controlled production releases and continuing table estates          | A dedicated job after the application bundle is deployed |
+| [Pattern 2: Require table readiness](#pattern-2-require-table-readiness-before-etl)                 | Batch data products that must establish their tables before writing  | The first task in the data workflow                      |
+| [Pattern 3: Add governance](#pattern-3-add-governance-without-taking-over-the-pipeline)             | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
 
-## Release table contracts with the application
+## Pattern 1: Release table contracts with the application
 
 For most production applications, the clearest pattern is to treat table
 contracts as part of the release.
@@ -137,7 +137,7 @@ catalog again and derives a fresh plan from the state present at deployment
 time. See [How to report schema plans in CI](how-to-gate-changes-in-ci.md) for
 a complete read-only workflow.
 
-## Require table readiness before ETL
+## Pattern 2: Require table readiness before ETL
 
 The release-time pattern reconciles table contracts when the application is
 deployed. For batch data products that need to verify table state at the
@@ -197,7 +197,7 @@ Engine owns. The workflow should not ask Delta Engine to enforce one column
 structure while allowing the writer to evolve that same structure
 independently.
 
-## Add governance without taking over the pipeline
+## Pattern 3: Add governance without taking over the pipeline
 
 Table ownership is not always all-or-nothing. A data-product team may own the
 schema and row production while a platform or governance team owns comments,
