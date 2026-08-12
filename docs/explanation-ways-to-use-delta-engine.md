@@ -23,7 +23,7 @@ deployment for centrally managed annotations.
 | Pattern                                                                                             | Best suited to                                                       | Where Delta Engine runs                                  |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
 | [Pattern 1: Release table contracts](#pattern-1-release-table-contracts-with-the-application)       | Controlled production releases and continuing table estates          | A dedicated job after the application bundle is deployed |
-| [Pattern 2: Require table readiness](#pattern-2-require-table-readiness-before-etl)                 | Batch data products that must establish their tables before writing  | The first task in the data workflow                      |
+| [Pattern 2: Reconcile a target table](#pattern-2-reconcile-a-target-table-before-its-etl-runs)      | ETL applications that own a single target table                      | Application startup before transformations or writes     |
 | [Pattern 3: Add governance](#pattern-3-add-governance-without-taking-over-the-pipeline)             | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
 
 ## Pattern 1: Release table contracts with the application
@@ -137,65 +137,117 @@ catalog again and derives a fresh plan from the state present at deployment
 time. See [How to report schema plans in CI](how-to-gate-changes-in-ci.md) for
 a complete read-only workflow.
 
-## Pattern 2: Require table readiness before ETL
+## Pattern 2: Reconcile a target table before its ETL runs
 
-The release-time pattern reconciles table contracts when the application is
-deployed. For batch data products that need to verify table state at the
-beginning of every run, make reconciliation the first task in the Lakeflow Jobs
-workflow:
+When an ETL application owns a single target table, it can reconcile that table
+once at startup before performing transformations or writing any rows:
 
 ```text
-reconcile_tables
+ETL job starts
         ↓
-data-producing tasks
+reconcile target table
+        ↓
+run transformations
+        ↓
+write rows
 ```
 
-Configure each ETL task to depend on `reconcile_tables`. The workflow then
-enforces the precondition:
+Keep the table declaration alongside the ETL code and import it into the
+application entry point:
 
-> The declared tables must be readable, valid, and successfully reconciled
-> before this run writes any rows.
+```python
+# myproject/main.py
+from delta_engine.databricks import build_spark_engine
+from pyspark.sql import SparkSession
 
-If reading, planning, dependency resolution, or execution fails, the
-reconciliation task fails and the dependent ETL tasks do not run. When the
-tables already match their declarations, the sync completes without applying
-DDL and the workflow continues normally.
+from myproject.pipeline import run_pipeline
+from myproject.tables.customers import customers
+
+
+def main() -> None:
+    """Reconcile the target table, then run the ETL pipeline."""
+    spark = SparkSession.builder.getOrCreate()
+
+    engine = build_spark_engine(spark)
+    engine.sync(customers)
+
+    run_pipeline(spark)
+```
+
+If the table is missing, Delta Engine creates it. If it has safe, supported
+drift, Delta Engine reconciles it. If it already matches the declaration, the
+sync applies no DDL and the ETL continues normally.
+
+If the declaration is invalid, the live table cannot be read, the proposed
+transition is unsafe, or execution fails, `SyncFailedError` propagates and the
+ETL stops before `run_pipeline()` begins.
+
+This pattern gives the ETL application a clear startup precondition:
+
+> The target table must exist and match its declared contract before the
+> application writes any data.
+
+### Synchronize dependencies together
+
+An ETL that owns one independent target normally needs to synchronize only that
+table:
+
+```python
+engine.sync(customers)
+```
+
+Pass multiple declarations when the target has cross-table dependencies that
+Delta Engine must validate and order. For example, if `orders` declares a
+foreign key to `customers`, synchronize both declarations in the same run:
+
+```python
+engine.sync(customers, orders)
+```
+
+Delta Engine validates the relationship, places the parent before the dependent,
+and prevents `orders` from executing if `customers` cannot reach its desired
+state.
+
+There is no need to synchronize unrelated tables together merely because they
+belong to the same repository. Each ETL can reconcile its own target, while
+related tables are grouped only where their declarations depend on one another.
 
 ### When this pattern works well
 
-Use an upstream reconciliation task when:
+Use this pattern when:
 
-* the workflow and its target tables form one data product;
-* the job may run in a new environment where its tables do not yet exist;
-* table state should be checked before every batch run;
-* the workflow runs at a moderate frequency and the additional catalog reads
-  are acceptable.
+* one ETL application clearly owns one target table;
+* the application should be able to start in a new environment where the table
+  does not yet exist;
+* table validity should be checked before every ETL run;
+* the job runs at a frequency where the additional catalog read and planning
+  step are acceptable;
+* the runtime identity is permitted both to reconcile the table and write its
+  data.
 
-This creates a strong runtime boundary between table management and data
-production: the ETL logic does not need to create tables or evolve their schema
-as a side effect of writing rows.
+It is particularly straightforward for batch applications because the table
+check becomes part of the application's normal startup sequence.
 
 ### When not to use it
 
-Do not call `sync()` for every streaming micro-batch. Re-reading and replanning
-a stable table contract hundreds of times per hour adds work without improving
-the contract.
+Do not call `sync()` inside transformation functions, write helpers,
+`foreachBatch`, or individual streaming micro-batches. Reconcile the table once
+before the ETL or streaming query begins.
 
-For continuous or high-frequency pipelines, prefer release-time
-reconciliation:
+For continuous or very high-frequency workloads, release-time reconciliation
+may be a better fit:
 
 ```text
 deploy release
         ↓
-reconcile table contracts
+reconcile target table
         ↓
 start or update continuous pipeline
 ```
 
-Do not also enable writer-driven schema evolution for table aspects that Delta
-Engine owns. The workflow should not ask Delta Engine to enforce one column
-structure while allowing the writer to evolve that same structure
-independently.
+Do not also enable writer-driven schema evolution for aspects that Delta Engine
+owns. For example, a writer should not use `mergeSchema` to evolve columns while
+Delta Engine is responsible for maintaining the declared column structure.
 
 ## Pattern 3: Add governance without taking over the pipeline
 
