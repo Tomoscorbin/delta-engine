@@ -15,14 +15,14 @@ this document supersedes their prioritisation but not their detail.
 | 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped        |
 | 5   | Delta-format / view guard in the reader           | 2    | S      | shipped        |
 | 6   | Identity columns                                  | 2    | M      | not tracked    |
-| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly tracked |
+| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | names shipped  |
 | 8   | CHECK constraints                                 | 2    | M      | not tracked    |
 | 9   | `RELY` on PK/FK constraints                       | 2    | S      | tracked        |
-| 10  | External-table (LOCATION) policy                  | 3    | S–M    | not tracked    |
+| 10  | External-table (LOCATION) policy                  | 3    | S–M    | tracked        |
 | 11  | Schema-level orphan detection                     | 3    | M      | not tracked    |
 | 12  | `ignored_properties` escape hatch                 | 3    | S      | tracked        |
 | 13  | Column defaults and generated columns             | 3    | M      | not tracked    |
-| 14  | Declaration-time limit checks                     | 3    | S      | not tracked    |
+| 14  | Declaration-time limit checks                     | 3    | S      | partly shipped |
 | 15  | Multi-environment deployment pattern (docs)       | 3    | S      | not tracked    |
 | 16  | Transient-failure retry                           | 3    | S      | not tracked    |
 | 17  | Metadata read batching                            | 4    | M      | partly tracked |
@@ -54,10 +54,10 @@ operation.
 
 **Shape.** Already scoped in `todo.md`:
 
-- Add `delta.enableTypeWidening` to the property policy. Permit
-  `false -> true` only — disabling requires `ALTER TABLE ... DROP FEATURE`
-  with history truncation, so `true -> false` is blocked by the same
-  `permitted_transitions` mechanism as column mapping.
+- Add `delta.enableTypeWidening` to the property policy. The property may be
+  enabled, disabled, or removed; disabling or removing it stops future
+  widenings but does not remove the table's protocol feature. Removing that
+  feature still requires `ALTER TABLE ... DROP FEATURE`, outside the engine.
 - New `AlterColumnType` action plus `ALTER TABLE ... ALTER COLUMN ... TYPE`
   SQL compilation.
 - Validation rules that permit an `AlterColumnType` action only when the
@@ -97,9 +97,10 @@ plan. The same mechanism can extend to table renames later.
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
 
 **Status.** Shipped 2026-07-13, with the shape refined during design: the SQL
-preview flows through a new `PlanExecutor.compile` port method onto
-`TableRunReport.planned_sql_statements` (no `databricks.py` helper — the
-engine compiles once and `execute` runs exactly the previewed statements);
+preview flows through `PlanExecutor.compile` onto each `TableRun`'s compiled
+plan and the report's `planned_sql_statements` projection (no `databricks.py`
+helper — the engine compiles once and `execute` runs exactly the previewed
+statements);
 `to_dict()` only, under `schema_version: 2` (no `to_rows`, no Spark lift);
 `has_changes` and the `any_failures` → `has_failures` rename shipped
 together. See `reference-run-report.md` and `how-to-gate-changes-in-ci.md`.
@@ -171,6 +172,9 @@ without abandoning the tool for that table.
 
 ### 7. Adoption tooling: declaration codegen and explicit constraint names
 
+**Status.** Explicit primary- and foreign-key names shipped in 2026-08.
+Declaration code generation remains unimplemented.
+
 **Why.** The biggest barrier to adopting the tool is an existing estate of
 hundreds of tables nobody wants to hand-transcribe. The hard half — parsing
 observed state into a typed model — already exists in the reader.
@@ -180,11 +184,9 @@ observed state into a typed model — already exists in the reader.
 - A helper that introspects a table (or a whole schema) and emits
   `DeltaTable(...)` declaration source using public import paths. Terraform's
   `import`, but generating code.
-- Prerequisite: explicit PK/FK constraint names on `DeltaTable` (parked in
-  `todo.md`) — adopted tables carry pre-existing names the generator must be
-  able to reproduce, and it is also the escape hatch for generated-name
-  collisions. Remember the `how-to-configure-table.md` doc follow-up recorded
-  when this was parked.
+- Explicit PK/FK constraint names on `DeltaTable` are already available, so a
+  generator can reproduce pre-existing names and avoid generated-name
+  collisions.
 - FK declarations reference `DeltaTable` objects, so whole-schema generation
   must emit tables in dependency order and wire the references; single-table
   generation can emit a commented placeholder.
@@ -197,10 +199,11 @@ declared table contracts.
 
 **Shape (M).** Named constraints; add/drop reconciliation; full-state
 semantics like tags (an observed-only CHECK is drift). Delta stores them as
-`delta.constraints.<name>` table properties, so observation rides the
-existing `DESCRIBE DETAIL` path — but they must be modelled as constraints,
-not properties. Known design risk: expression normalisation (the catalog may
-rewrite the stored expression), which would churn drift; resolve by comparing
+`delta.constraints.<name>` table properties, so observation can use the
+existing `DESCRIBE TABLE EXTENDED … AS JSON` property document — but they must
+be modelled as constraints, not properties. Known design risk: expression
+normalisation (the catalog may rewrite the stored expression), which would
+churn drift; resolve by comparing
 normalised forms, and verify actual storage behaviour on a live workspace
 before building.
 
@@ -223,13 +226,13 @@ the user's call, consistent with the runtime-version policy.
 
 ### 10. External-table (LOCATION) policy
 
-Nothing models `LOCATION` today: an external Delta table is managed as if the
-distinction did not exist, and a `CREATE` from a declaration always produces a
-managed table even where the user expected external. Minimum (S): document
-the managed-only stance in `reference-limitations.md` and observe
-`DESCRIBE DETAIL.location` enough to warn on surprises. Full (M): a
-`location` parameter — external creates, location drift blocked. Decide
-explicitly; today the scope decision is implicit, and implicit ones bite.
+**Status.** The managed-only creation stance is documented in
+`reference-limitations.md`; a declarable location remains unimplemented.
+
+Nothing models `LOCATION` today: an existing external Delta table is managed
+like any other supported table, while `CREATE` from a declaration always
+produces a managed table. The remaining full design (M) is a `location`
+parameter for external creates with blocked location drift.
 
 ### 11. Schema-level orphan detection
 
@@ -258,10 +261,10 @@ column-metadata plumbing.
 ### 14. Declaration-time limit checks
 
 The declaration already validates tag counts, clustering limits, decimal
-precision, CDF reserved names, and column-mapping characters. Comment length
-and identifier length/character rules are the same class. Verify the actual
-Unity Catalog limits against current docs before implementing — do not guess
-them (documentation rule).
+precision, CDF reserved names, column-mapping characters, and catalog/schema/
+table identifier limits. Comment length, the table-wide column-tag total, and
+the remaining tag character rules are the same class. Verify the actual Unity
+Catalog limits against current docs before implementing — do not guess them.
 
 ### 15. Multi-environment deployment pattern (docs)
 
@@ -284,12 +287,12 @@ the adapter, never in application code.
 
 ### 17. Metadata read batching
 
-**Update (2026-07-15).** The per-table read now costs 4 round trips, not ~8:
-both backends read one `DESCRIBE TABLE EXTENDED … AS JSON` (columns, comment,
-partitioning, clustering, properties, primary key, and outbound foreign keys in
-one document) plus three `information_schema` queries for tags and inbound
-foreign keys. The remaining idea below — per-schema/per-catalog batching across
-tables — is still deferred behind latency evidence.
+**Update (2026-08).** A present-table read costs six round trips: one
+`DESCRIBE TABLE EXTENDED … AS JSON` for table shape, properties, and features,
+plus five `information_schema` queries for table tags, column tags, the primary
+key, outbound foreign keys, and inbound foreign keys. The remaining idea below
+— per-schema/per-catalog batching across tables — is still deferred behind
+latency evidence.
 
 Each present table previously cost ~8 metadata round trips (existence, columns,
 detail, comment, table tags, column tags, PK, FKs, inbound FKs); a 500-table

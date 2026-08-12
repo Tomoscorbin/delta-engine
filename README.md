@@ -4,18 +4,38 @@
 
 Declarative, safety-first schema and metadata management for Delta Lake tables on Databricks.
 
-Define the state your tables should have in Python. Delta Engine reads their current Unity Catalog state, calculates the difference, validates whether each change is safe, and executes only the DDL needed to reconcile them.
+Delta Engine gives each table an explicit, version-controlled definition of its intended schema, metadata, layout, and constraints. The declaration captures the table as it should exist today, making the contract readable, reviewable, and machine-usable. Delta Engine reads the table's current Unity Catalog state, calculates the semantic difference, validates whether the transition is safe, and derives only the DDL required to reconcile the two.
 
-## What Delta Engine gives you
+Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing PySpark jobs, Databricks Declarative Pipelines, dbt models, and other systems continue to produce and write table data. Delta Engine manages the schema and catalog metadata around that data, with scoped ownership available when another team or system remains responsible for part of the table.
 
-- **Desired-state reconciliation:** declare the complete table state rather than a sequence of migrations.
-- **Safe in-place evolution:** unsafe changes, such as type narrowing, repartitioning or destructive schema changes, are rejected before any SQL runs.
-- **Reviewable plans:** preview semantic changes and compiled DDL with a dry run before applying them.
-- **Drift detection:** compare version-controlled declarations against the live Unity Catalog state in local workflows or CI.
-- **Scoped ownership:** manage governance metadata without taking ownership of a table’s schema or data lifecycle.
-- **Dependency-aware execution:** synchronise groups of tables in the correct order when primary-key and foreign-key relationships exist.
+## Why use Delta Engine?
 
-Delta Engine does not need to own how a table’s data is produced. It can manage the catalog state around tables populated by PySpark jobs, declarative pipelines, dbt models or other systems.
+1. **Declarative table management**
+Define what your table should look like, not the sequence of operations required to get it there. Delta Engine reads the table’s current Unity Catalog state, compares it with the declared desired state, validates the differences, and derives the DDL required to reconcile them. The same declaration works whether the table does not exist, has drifted, needs updating, or already matches and requires no changes.
+
+2. **A single table definition in Python**
+Define the schema, metadata, layout and constraints a table should have today in one version-controlled declaration. The declaration is a self-documenting, machine-usable contract: engineers can read it directly, changes are visible in code review, and the same definition can be imported by pipeline code, tests and other tooling. The intended table state is therefore explicit in one place rather than having to be reconstructed from historical DDL, deployment scripts or pipeline behaviour.
+
+3. **Safe, controlled schema evolution**
+Delta Engine compares the declaration with the table’s live state and validates the complete proposed transition before the first DDL statement runs. If any part of the plan is unsafe, unsupported, or structurally invalid, the whole table is blocked rather than applying the statements that happen to be valid and leaving a predictably incomplete result. This moves many failures that would otherwise occur during DDL execution, such as invalid type changes, unsupported partition changes, or unsatisfied Delta prerequisites, into a clear planning failure before the table is modified.
+
+4. **Preview and gate table changes in CI**
+Run a complete dry run against live Unity Catalog state as part of a pull request or deployment pipeline. Delta Engine reads the table, calculates the semantic differences, applies its safety rules, resolves dependencies, and compiles the exact DDL without executing it. Reviewers can see both what will change and the SQL that would apply it, while unreadable or unsafe plans can fail the CI check before they reach production.
+
+5. **Manage only what you own**
+A declaration does not have to take responsibility for the entire table. Delta Engine lets you manage the full table, governance metadata, annotations, or tags alone, and enforces that boundary during reconciliation. This makes it possible for one team or tool to manage comments, tags, or constraints around a table whose schema and data lifecycle are owned elsewhere, without risking unintended changes outside that responsibility.
+
+6. **Built for Delta and Unity Catalog**
+Delta Engine models Databricks table-management concepts directly instead of treating changes as arbitrary SQL strings. Column mapping, explicit renames, safe type widening, Delta table-feature requirements, partitioning, liquid clustering, properties, comments, tags, and key constraints all participate in the same diff, validation, planning, and reporting model. These features are therefore planned and validated together as part of the table’s desired state, rather than being managed as unrelated pieces of DDL.
+
+7. **Reconcile related tables together**
+Delta Engine can synchronize a set of related tables as one operation rather than treating each table independently. Primary- and foreign-key relationships are validated before execution, parent tables are ordered before their dependants, and downstream tables are blocked when a dependency cannot reach its desired state. This lets the engine reason about whether a set of table definitions can converge together, not just whether each individual table has valid DDL.
+
+8. **Run from Databricks or from CI**
+Delta Engine can reconcile tables through the Spark session already available on Databricks compute, or through a Databricks SQL warehouse from a conventional Python environment. That means table management does not have to be coupled to a Spark job or cluster: the same declarations and reconciliation model can be used inside a data pipeline, a deployment job, or a lightweight CI workflow without installing PySpark.
+
+9. **Structured results you can build on**
+Every sync returns a structured SyncReport describing what was observed, what changed, what SQL was planned, what failed, and how far execution progressed. The report has a stable, versioned, JSON-serialisable representation, so the same information can be used for CI gates, structured logging, audit history, dashboards, or other automation rather than existing only as console output.
 
 ## Install
 
@@ -42,6 +62,7 @@ and planned SQL and never applies the generated plan. See the
 ## Quickstart
 
 ```python
+from delta_engine import render_report
 from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
 
@@ -55,9 +76,28 @@ customers = DeltaTable(
     ],
 )
 
-engine = build_spark_engine(spark)  # `spark` is provided by your Databricks notebook
-engine.sync(customers)         # creates the table, or no-ops if it already matches
+engine = build_spark_engine(spark)
+report = engine.sync(customers)     # creates the table, or no-ops if it already matches
+print(render_report(report))
 ```
+
+A first sync that creates this table renders like this:
+
+```text
+SYNC REPORT
+===========
+
+TABLE                 STATUS   STATEMENTS  DETAIL
+dev.silver.customers  SUCCESS  1/1         2 columns
+
+1 table: 1 applied (0.0s)
+```
+
+`sync` returns the structured `SyncReport`; it does not print this text itself.
+Use `render_report` for status, `render_diff` for semantic changes,
+`report.planned_sql_statements` for exact DDL, or `report.to_dict()` for JSON-safe
+automation data. The [getting-started tutorial](https://tomoscorbin.github.io/delta-engine/tutorial-getting-started.html)
+shows all four and explains where declarations fit in a pipeline.
 
 Validation happens before execution. When a table contains an unsafe change, Delta Engine does not execute a partially valid plan for that table.
 

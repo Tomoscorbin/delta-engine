@@ -32,6 +32,35 @@ print(render_diff(report))
 print(render_report(report))
 ```
 
+For example, previewing creation of the `customers` declaration from the
+[getting-started tutorial](tutorial-getting-started.md) produces:
+
+```text
+DIFF
+====
+
+dev.silver.customers  (CREATE)
+  columns
+    + id    Integer  NOT NULL
+    + name  String
+```
+
+```text
+SYNC REPORT
+===========
+
+PLAN — no planned SQL executed
+
+TABLE                 STATUS   STATEMENTS  DETAIL
+dev.silver.customers  SUCCESS  1           2 columns
+
+1 table: 1 changed, 0 unchanged, 0 failed (0.0s)
+```
+
+Elapsed time varies. `sync` returns the report object and neither renderer is
+called automatically. The diff answers *what would change*; the report answers
+*whether the plan succeeded and how much SQL it contains*.
+
 Each table's `plan` records the DDL actions compiled for that observed snapshot.
 The `execution` field stays `None` on every table, because nothing ran.
 
