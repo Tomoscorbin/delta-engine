@@ -42,6 +42,13 @@ returns a structured report rather than printing output. The
 [getting-started tutorial](tutorial-getting-started.md) shows the report, diff,
 and exact planned SQL and explains where to keep the declaration.
 
+## Choose how to run it
+
+Delta Engine runs where your release or data workflow calls it. See
+[Ways to use Delta Engine](explanation-ways-to-use-delta-engine.md) for
+release-time reconciliation, ETL readiness checks, and restricted governance
+deployments.
+
 ## Install
 
 ```bash
@@ -81,6 +88,7 @@ for what is and isn't backend-neutral, and
 | You want to…                                   | Read                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------- |
 | Install the package and sync your first table  | [Installation](installation.md), [Getting started](tutorial-getting-started.md) |
+| Choose a release or workflow pattern           | [Ways to use Delta Engine](explanation-ways-to-use-delta-engine.md)             |
 | Run read-only schema plans in GitHub Actions    | [CLI reference](reference-cli.md)                                              |
 | Understand what a sync does before running one | [How a sync works](explanation-sync-lifecycle.md)                               |
 | Check whether the engine supports something    | [Capabilities and limitations](reference-limitations.md)                        |
@@ -104,6 +112,7 @@ tutorial-getting-started
 explanation-sync-lifecycle
 explanation-safety-model
 explanation-runtime-compatibility
+explanation-ways-to-use-delta-engine
 ```
 
 ```{toctree}

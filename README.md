@@ -48,6 +48,13 @@ Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing 
 
    Every sync returns a structured `SyncReport` describing each table’s semantic changes, rejected changes, planned SQL, failures, and execution progress. The report has a stable, versioned, JSON-serialisable representation, so the same information can drive CI gates, structured logging, audit history, dashboards, and other automation rather than existing only as console output.
 
+## Choose how to run it
+
+Delta Engine runs where your release or data workflow calls it. See
+[Ways to use Delta Engine](https://tomoscorbin.github.io/delta-engine/explanation-ways-to-use-delta-engine.html)
+for release-time reconciliation, ETL readiness checks, and restricted
+governance deployments.
+
 ## Install
 
 ```bash
@@ -123,6 +130,7 @@ for the model, or jump to what you need:
 
 **Concepts**
 
+- [Ways to use Delta Engine](https://tomoscorbin.github.io/delta-engine/explanation-ways-to-use-delta-engine.html) — release, ETL, and governance deployment patterns
 - [How a sync works](https://tomoscorbin.github.io/delta-engine/explanation-sync-lifecycle.html) — the phases between calling `sync` and getting a report
 - [The safety model](https://tomoscorbin.github.io/delta-engine/explanation-safety-model.html) — what the engine blocks, and why
 
