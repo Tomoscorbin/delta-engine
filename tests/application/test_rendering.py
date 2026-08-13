@@ -95,7 +95,7 @@ def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> DesiredForei
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name=constraint_name,
+        desired_name=constraint_name,
     )
 
 

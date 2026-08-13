@@ -250,7 +250,7 @@ class DesiredTable:
         )
 
         seen: set[frozenset[str]] = set()
-        local_columns_by_requested_name: dict[str, Sequence[str]] = {}
+        local_columns_by_desired_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -259,15 +259,15 @@ class DesiredTable:
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
-            collided = local_columns_by_requested_name.get(foreign_key.requested_name)
+            collided = local_columns_by_desired_name.get(foreign_key.desired_name)
             if collided is not None:
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
-                    f" '{foreign_key.requested_name}': local columns {collided}"
+                    f" '{foreign_key.desired_name}': local columns {collided}"
                     f" and {foreign_key.local_columns}. Every foreign key on a"
                     " table must have a distinct constraint name."
                 )
-            local_columns_by_requested_name[foreign_key.requested_name] = foreign_key.local_columns
+            local_columns_by_desired_name[foreign_key.desired_name] = foreign_key.local_columns
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)

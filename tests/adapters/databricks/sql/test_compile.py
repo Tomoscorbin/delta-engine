@@ -69,13 +69,13 @@ def _foreign_key(
     local_columns: tuple[str, ...] = ("customer_id",),
     referenced_table: QualifiedName = _REFERENCED_TABLE,
     referenced_columns: tuple[str, ...] = ("id",),
-    requested_name: str = "orders_customer_id_fk",
+    desired_name: str = "orders_customer_id_fk",
 ) -> DesiredForeignKey:
     return DesiredForeignKey(
         local_columns,
         referenced_table,
         referenced_columns,
-        requested_name,
+        desired_name,
     )
 
 
@@ -310,7 +310,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="tbl_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), desired_name="tbl_pk"),
     )
 
     # When compiling
@@ -441,7 +441,7 @@ def test_set_primary_key_renders_composite_primary_key():
 
 def test_set_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
-    action = SetForeignKey(constraint=_foreign_key(requested_name="tbl_customer_id_fk"))
+    action = SetForeignKey(constraint=_foreign_key(desired_name="tbl_customer_id_fk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -460,7 +460,7 @@ def test_set_foreign_key_renders_composite_fk():
         constraint=_foreign_key(
             local_columns=("tenant_id", "customer_id"),
             referenced_columns=("tenant_id", "id"),
-            requested_name="tbl_tenant_id_customer_id_fk",
+            desired_name="tbl_tenant_id_customer_id_fk",
         )
     )
 
@@ -677,7 +677,7 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
 
 def test_set_primary_key_emits_the_exact_bound_spelling():
     action = SetPrimaryKey(
-        primary_key=DesiredPrimaryKey(columns=("requestId",), requested_name="tbl_pk")
+        primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="tbl_pk")
     )
     plan = ActionPlan(target=_TARGET, actions=(action,))
 
@@ -692,7 +692,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=DesiredPrimaryKey(columns=("requestId",), requested_name="tbl_pk"),
+        primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="tbl_pk"),
         clustered_by=("requestId",),
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
@@ -710,7 +710,7 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
         local_columns=("orderRef",),
         referenced_table=_REFERENCED_TABLE,
         referenced_columns=("OrderId",),
-        requested_name="tbl_orderref_fk",
+        desired_name="tbl_orderref_fk",
     )
     plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
 

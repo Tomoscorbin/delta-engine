@@ -177,14 +177,14 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
             columns=as_observed_columns(desired.columns),
             primary_key=ObservedPrimaryKey(
                 columns=desired.primary_key.columns,
-                catalog_name=desired.primary_key.requested_name,
+                catalog_name=desired.primary_key.desired_name,
             ),
             foreign_keys=tuple(
                 ObservedForeignKey(
                     local_columns=foreign_key.local_columns,
                     referenced_table=foreign_key.referenced_table,
                     referenced_columns=foreign_key.referenced_columns,
-                    catalog_name=foreign_key.requested_name,
+                    catalog_name=foreign_key.desired_name,
                 )
                 for foreign_key in desired.foreign_keys
             ),

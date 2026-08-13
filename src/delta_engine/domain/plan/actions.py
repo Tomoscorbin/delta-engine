@@ -363,7 +363,7 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        return self.primary_key.requested_name
+        return self.primary_key.desired_name
 
 
 @dataclass(frozen=True, slots=True)

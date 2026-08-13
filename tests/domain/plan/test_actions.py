@@ -60,7 +60,7 @@ def _plan(*plan_actions: Action) -> ActionPlan:
 
 
 def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
-    return DesiredPrimaryKey(columns=columns, requested_name=name)
+    return DesiredPrimaryKey(columns=columns, desired_name=name)
 
 
 def _foreign_key(
@@ -70,7 +70,7 @@ def _foreign_key(
         local_columns=local_columns,
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name=name,
+        desired_name=name,
     )
 
 

@@ -508,7 +508,7 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
     # Then the physical name is generated once the owning table is known
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
-    assert desired.primary_key.requested_name == "accounts_pk"
+    assert desired.primary_key.desired_name == "accounts_pk"
     assert table.primary_key_name == "accounts_pk"
 
 
@@ -528,7 +528,7 @@ def test_primary_key_name_is_preserved_as_explicit_managed_state():
 
     # Then both the public API and lowered state preserve its spelling
     assert desired.primary_key is not None
-    assert desired.primary_key.requested_name == "Accounts_Business_Key"
+    assert desired.primary_key.desired_name == "Accounts_Business_Key"
     assert table.primary_key_name == "Accounts_Business_Key"
 
 
@@ -679,7 +679,7 @@ def test_delta_table_accepts_foreign_keys_parameter():
     assert foreign_key.local_columns == ("customer_id",)
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.requested_name == "orders_customer_id_fk"
+    assert foreign_key.desired_name == "orders_customer_id_fk"
 
 
 def test_foreign_key_name_is_preserved_as_explicit_managed_state():
@@ -703,7 +703,7 @@ def test_foreign_key_name_is_preserved_as_explicit_managed_state():
     # Then the public declaration and domain constraint preserve its spelling
     assert declaration.name == "Orders_Customer_Relationship"
     [constraint] = orders.to_desired_table().foreign_keys
-    assert str(constraint.requested_name) == "Orders_Customer_Relationship"
+    assert str(constraint.desired_name) == "Orders_Customer_Relationship"
 
 
 @pytest.mark.parametrize(
@@ -794,7 +794,7 @@ def test_delta_table_foreign_keys_round_trip_as_declarations():
     # Then the public declarations round-trip and lowering uses the new owner
     assert copy.foreign_keys == original.foreign_keys
     [constraint] = copy.to_desired_table().foreign_keys
-    assert constraint.requested_name == "orders_copy_customer_id_fk"
+    assert constraint.desired_name == "orders_copy_customer_id_fk"
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
@@ -1536,7 +1536,7 @@ def test_foreign_key_declaration_rejects_internal_constraint_fields():
         ForeignKey(  # type: ignore[call-arg]
             columns={"customer_id": "id"},
             references=_customers(),
-            requested_name="orders_customer_id_fk",
+            desired_name="orders_customer_id_fk",
         )
 
 
@@ -1704,7 +1704,7 @@ def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
 
     # Then construction succeeds with one generated and one explicit name
     assert tuple(
-        str(constraint.requested_name) for constraint in orders.to_desired_table().foreign_keys
+        str(constraint.desired_name) for constraint in orders.to_desired_table().foreign_keys
     ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
 
 
@@ -1883,7 +1883,7 @@ def test_mapping_insertion_order_is_irrelevant():
 
     # Then the constraints are identical, including the generated name
     assert one == two
-    assert one.requested_name == two.requested_name
+    assert one.desired_name == two.desired_name
 
 
 def test_mapping_not_covering_the_key_is_rejected():
@@ -2004,7 +2004,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
                 local_columns=foreign_key.local_columns,
                 referenced_table=foreign_key.referenced_table,
                 referenced_columns=foreign_key.referenced_columns,
-                catalog_name=foreign_key.requested_name,
+                catalog_name=foreign_key.desired_name,
             )
             for foreign_key in before.foreign_keys
         ),
@@ -2033,8 +2033,8 @@ def test_generated_foreign_key_name_is_identical_across_declaration_casing():
         )
 
     # When lowering the same declaration in two spellings
-    camel = declare("CustomerId").to_desired_table().foreign_keys[0].requested_name
-    lower = declare("customerid").to_desired_table().foreign_keys[0].requested_name
+    camel = declare("CustomerId").to_desired_table().foreign_keys[0].desired_name
+    lower = declare("customerid").to_desired_table().foreign_keys[0].desired_name
 
     # Then the generated constraint name is identical and lowercase
     assert camel == lower == "orders_customerid_fk"

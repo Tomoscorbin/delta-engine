@@ -32,132 +32,121 @@ def _catalog_name(name: str) -> str:
     return str(name)
 
 
-class _PrimaryKeyDefinition:
-    """Implement structural identity shared by primary-key lifecycle values."""
-
-    __slots__ = ()
+@dataclass(frozen=True, slots=True, eq=False)
+class DesiredPrimaryKey:
+    """A declared primary-key definition and the name desired on creation."""
 
     columns: ListOrTuple[str]
-
-    @property
-    def definition_key(self) -> frozenset[Identifier]:
-        """The name-independent relational identity of this key."""
-        return frozenset(Identifier(column) for column in self.columns)
+    desired_name: str
 
     def matches_columns(self, columns: Iterable[str]) -> bool:
         """Return whether columns identify this key, ignoring order and case."""
-        return self.definition_key == frozenset(Identifier(column) for column in columns)
+        return _primary_key_definition(self) == frozenset(Identifier(column) for column in columns)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _PrimaryKeyDefinition):
+        if not isinstance(other, (DesiredPrimaryKey, ObservedPrimaryKey)):
             return NotImplemented
-        return self.definition_key == other.definition_key
+        return _primary_key_definition(self) == _primary_key_definition(other)
 
     def __hash__(self) -> int:
-        return hash(("primary_key", self.definition_key))
-
-    def _normalize_columns(self) -> None:
-        object.__setattr__(self, "columns", _constraint_columns(self.columns, kind="primary key"))
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class DesiredPrimaryKey(_PrimaryKeyDefinition):
-    """A declared primary-key definition and the name requested on creation."""
-
-    columns: ListOrTuple[str]
-    requested_name: str
+        return hash(("primary_key", _primary_key_definition(self)))
 
     def __post_init__(self) -> None:
-        self._normalize_columns()
-        object.__setattr__(self, "requested_name", Identifier(self.requested_name))
+        object.__setattr__(
+            self,
+            "columns",
+            _constraint_columns(self.columns, kind="primary key"),
+        )
+        object.__setattr__(self, "desired_name", Identifier(self.desired_name))
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class ObservedPrimaryKey(_PrimaryKeyDefinition):
+class ObservedPrimaryKey:
     """A primary-key occurrence read from the catalog."""
 
     columns: ListOrTuple[str]
     catalog_name: str
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, (DesiredPrimaryKey, ObservedPrimaryKey)):
+            return NotImplemented
+        return _primary_key_definition(self) == _primary_key_definition(other)
+
+    def __hash__(self) -> int:
+        return hash(("primary_key", _primary_key_definition(self)))
+
     def __post_init__(self) -> None:
-        self._normalize_columns()
+        object.__setattr__(
+            self,
+            "columns",
+            _constraint_columns(self.columns, kind="primary key"),
+        )
         object.__setattr__(self, "catalog_name", _catalog_name(self.catalog_name))
 
 
-class _ForeignKeyDefinition:
-    """Implement structural identity shared by foreign-key lifecycle values."""
+def _primary_key_definition(
+    key: DesiredPrimaryKey | ObservedPrimaryKey,
+) -> frozenset[Identifier]:
+    """Return a primary key's name-independent relational identity."""
+    return frozenset(Identifier(column) for column in key.columns)
 
-    __slots__ = ()
+
+def _foreign_key_columns(
+    local: object,
+    referenced: object,
+) -> tuple[tuple[Identifier, ...], tuple[Identifier, ...]]:
+    """Normalize and canonically pair the two sides of a foreign key."""
+    local_columns = _constraint_columns(local, kind="foreign key local")
+    referenced_columns = _constraint_columns(referenced, kind="foreign key referenced")
+
+    if len(local_columns) != len(referenced_columns):
+        raise ValueError(
+            "local_columns and referenced_columns must have the same number of entries;"
+            f" got {len(local_columns)} local and"
+            f" {len(referenced_columns)} referenced"
+        )
+
+    # Canonical storage makes rendering deterministic while preserving each
+    # local-to-referenced pairing and its supplied spelling.
+    pairs = sorted(
+        zip(local_columns, referenced_columns, strict=True),
+        key=lambda pair: pair[0].lower(),
+    )
+    return (
+        tuple(pair[0] for pair in pairs),
+        tuple(pair[1] for pair in pairs),
+    )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class DesiredForeignKey:
+    """A declared foreign-key definition and the name desired on creation."""
 
     local_columns: ListOrTuple[str]
     referenced_table: QualifiedName
     referenced_columns: ListOrTuple[str]
-
-    @property
-    def definition_key(
-        self,
-    ) -> tuple[QualifiedName, frozenset[tuple[Identifier, Identifier]]]:
-        """The name-independent relational identity of this key."""
-        return (
-            self.referenced_table,
-            frozenset(
-                (Identifier(local), Identifier(referenced))
-                for local, referenced in zip(
-                    self.local_columns,
-                    self.referenced_columns,
-                    strict=True,
-                )
-            ),
-        )
+    desired_name: str
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _ForeignKeyDefinition):
+        if not isinstance(other, (DesiredForeignKey, ObservedForeignKey)):
             return NotImplemented
-        return self.definition_key == other.definition_key
+        return _foreign_key_definition(self) == _foreign_key_definition(other)
 
     def __hash__(self) -> int:
-        return hash(("foreign_key", self.definition_key))
-
-    def _normalize_columns(self) -> None:
-        local_columns = _constraint_columns(self.local_columns, kind="foreign key local")
-        referenced_columns = _constraint_columns(
-            self.referenced_columns,
-            kind="foreign key referenced",
-        )
-
-        if len(local_columns) != len(referenced_columns):
-            raise ValueError(
-                "local_columns and referenced_columns must have the same number of entries;"
-                f" got {len(local_columns)} local and"
-                f" {len(referenced_columns)} referenced"
-            )
-
-        # Canonical storage makes rendering deterministic while preserving each
-        # local-to-referenced pairing and its supplied spelling.
-        pairs = sorted(
-            zip(local_columns, referenced_columns, strict=True),
-            key=lambda pair: pair[0].lower(),
-        )
-        object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
-        object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class DesiredForeignKey(_ForeignKeyDefinition):
-    """A declared foreign-key definition and the name requested on creation."""
-
-    local_columns: ListOrTuple[str]
-    referenced_table: QualifiedName
-    referenced_columns: ListOrTuple[str]
-    requested_name: str
+        return hash(("foreign_key", _foreign_key_definition(self)))
 
     def __post_init__(self) -> None:
-        self._normalize_columns()
-        object.__setattr__(self, "requested_name", Identifier(self.requested_name))
+        local_columns, referenced_columns = _foreign_key_columns(
+            self.local_columns,
+            self.referenced_columns,
+        )
+        object.__setattr__(self, "local_columns", local_columns)
+        object.__setattr__(self, "referenced_columns", referenced_columns)
+        object.__setattr__(self, "desired_name", Identifier(self.desired_name))
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class ObservedForeignKey(_ForeignKeyDefinition):
+class ObservedForeignKey:
     """A foreign-key occurrence read from the catalog."""
 
     local_columns: ListOrTuple[str]
@@ -165,9 +154,39 @@ class ObservedForeignKey(_ForeignKeyDefinition):
     referenced_columns: ListOrTuple[str]
     catalog_name: str
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, (DesiredForeignKey, ObservedForeignKey)):
+            return NotImplemented
+        return _foreign_key_definition(self) == _foreign_key_definition(other)
+
+    def __hash__(self) -> int:
+        return hash(("foreign_key", _foreign_key_definition(self)))
+
     def __post_init__(self) -> None:
-        self._normalize_columns()
+        local_columns, referenced_columns = _foreign_key_columns(
+            self.local_columns,
+            self.referenced_columns,
+        )
+        object.__setattr__(self, "local_columns", local_columns)
+        object.__setattr__(self, "referenced_columns", referenced_columns)
         object.__setattr__(self, "catalog_name", _catalog_name(self.catalog_name))
+
+
+def _foreign_key_definition(
+    key: DesiredForeignKey | ObservedForeignKey,
+) -> tuple[QualifiedName, frozenset[tuple[Identifier, Identifier]]]:
+    """Return a foreign key's name-independent relational identity."""
+    return (
+        key.referenced_table,
+        frozenset(
+            (Identifier(local), Identifier(referenced))
+            for local, referenced in zip(
+                key.local_columns,
+                key.referenced_columns,
+                strict=True,
+            )
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

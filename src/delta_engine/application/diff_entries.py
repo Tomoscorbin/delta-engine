@@ -245,7 +245,7 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
             DiffEntry(
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
-                subject=f"primary key {primary_key.requested_name}",
+                subject=f"primary key {primary_key.desired_name}",
                 detail=_columns_detail(primary_key.columns),
             )
         )
@@ -445,7 +445,7 @@ def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"primary key {action.primary_key.requested_name}",
+            subject=f"primary key {action.primary_key.desired_name}",
             detail=_columns_detail(action.primary_key.columns),
         ),
     )
@@ -469,7 +469,7 @@ def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"foreign key {action.constraint.requested_name}",
+            subject=f"foreign key {action.constraint.desired_name}",
             detail=(f"({local_columns}) → {action.constraint.referenced_table}",),
         ),
     )

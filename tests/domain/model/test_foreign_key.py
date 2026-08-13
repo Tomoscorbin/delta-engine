@@ -19,7 +19,7 @@ def test_constraint_identity_excludes_lifecycle_names():
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
     two = ObservedForeignKey(
         local_columns=("customer_id",),
@@ -42,13 +42,13 @@ def test_constraint_identity_includes_the_referenced_table():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "old_customers"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
     to_new = DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "new_customers"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
 
     # Then they are different managed constraints
@@ -62,7 +62,7 @@ def test_rejects_empty_local_columns():
             local_columns=(),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -73,7 +73,7 @@ def test_rejects_empty_referenced_columns():
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=(),
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -96,7 +96,7 @@ def test_rejects_invalid_column_collections(
             local_columns=local_columns,  # type: ignore[arg-type]
             referenced_table=_customers(),
             referenced_columns=referenced_columns,  # type: ignore[arg-type]
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -108,7 +108,7 @@ def test_rejects_mismatched_column_counts():
             local_columns=("a", "b"),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -119,7 +119,7 @@ def test_rejects_duplicate_local_columns():
             local_columns=("customer_id", "customer_id"),
             referenced_table=_customers(),
             referenced_columns=("tenant_id", "id"),
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -130,7 +130,7 @@ def test_rejects_duplicate_referenced_columns():
             local_columns=("customer_id", "tenant_id"),
             referenced_table=_customers(),
             referenced_columns=("id", "id"),
-            requested_name="x_fk",
+            desired_name="x_fk",
         )
 
 
@@ -151,7 +151,7 @@ def test_rejects_invalid_constraint_name(
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=("id",),
-            requested_name=constraint_name,  # type: ignore[arg-type]
+            desired_name=constraint_name,  # type: ignore[arg-type]
         )
 
 
@@ -200,7 +200,7 @@ def test_construction_canonicalizes_pair_order_by_local_column():
         local_columns=("b", "a"),
         referenced_table=_customers(),
         referenced_columns=("y", "x"),
-        requested_name="orders_fk",
+        desired_name="orders_fk",
     )
 
     # Then storage is sorted by local column with the pairing preserved
@@ -214,13 +214,13 @@ def test_constraint_identity_ignores_declared_pair_order():
         local_columns=("a", "b"),
         referenced_table=_customers(),
         referenced_columns=("x", "y"),
-        requested_name="orders_fk",
+        desired_name="orders_fk",
     )
     two = DesiredForeignKey(
         local_columns=("b", "a"),
         referenced_table=_customers(),
         referenced_columns=("y", "x"),
-        requested_name="orders_fk",
+        desired_name="orders_fk",
     )
 
     # Then they are the same constraint — order is not part of identity
@@ -232,7 +232,7 @@ def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
         local_columns=("Zebra", "Apple"),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("z_id", "a_id"),
-        requested_name="t_fk",
+        desired_name="t_fk",
     )
     assert tuple(str(column) for column in constraint.local_columns) == ("Apple", "Zebra")
     assert tuple(str(column) for column in constraint.referenced_columns) == ("a_id", "z_id")
@@ -244,7 +244,7 @@ def test_rejects_local_columns_differing_only_by_case_as_duplicates():
             local_columns=("id", "ID"),
             referenced_table=QualifiedName("cat", "sch", "parent"),
             referenced_columns=("a", "b"),
-            requested_name="t_fk",
+            desired_name="t_fk",
         )
 
 
@@ -254,7 +254,7 @@ def test_constraints_match_across_case_variant_spellings() -> None:
         local_columns=("orderref",),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("orderid",),
-        requested_name="child_orderref_fk",
+        desired_name="child_orderref_fk",
     )
     observed = ObservedForeignKey(
         local_columns=("OrderRef",),
@@ -280,7 +280,7 @@ def test_constraint_identity_matches_when_case_flips_raw_pair_sort_order() -> No
         local_columns=("Zeta", "alpha"),
         referenced_table=QualifiedName("cat", "sch", "parent"),
         referenced_columns=("z_id", "a_id"),
-        requested_name="t_fk",
+        desired_name="t_fk",
     )
     observed = ObservedForeignKey(
         local_columns=("ZETA", "ALPHA"),
@@ -295,12 +295,12 @@ def test_constraint_identity_matches_when_case_flips_raw_pair_sort_order() -> No
 
 
 def test_primary_and_foreign_keys_never_compare_equal() -> None:
-    primary_key = DesiredPrimaryKey(columns=("customer_id",), requested_name="orders_pk")
+    primary_key = DesiredPrimaryKey(columns=("customer_id",), desired_name="orders_pk")
     foreign_key = DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        requested_name="orders_fk",
+        desired_name="orders_fk",
     )
 
     assert primary_key != foreign_key

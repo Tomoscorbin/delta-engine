@@ -6,7 +6,7 @@ from delta_engine.domain.model.constraints import DesiredPrimaryKey, ObservedPri
 def test_rejects_empty_columns():
     # When a primary key has no columns, then construction fails
     with pytest.raises(ValueError):
-        DesiredPrimaryKey(columns=(), requested_name="t_pk")
+        DesiredPrimaryKey(columns=(), desired_name="t_pk")
 
 
 @pytest.mark.parametrize(
@@ -21,14 +21,14 @@ def test_rejects_invalid_column_collections(columns: object) -> None:
     with pytest.raises(TypeError):
         DesiredPrimaryKey(
             columns=columns,  # type: ignore[arg-type]
-            requested_name="t_pk",
+            desired_name="t_pk",
         )
 
 
 def test_rejects_duplicate_columns():
     # When a primary key repeats a column, then construction fails
     with pytest.raises(ValueError):
-        DesiredPrimaryKey(columns=("id", "id"), requested_name="t_pk")
+        DesiredPrimaryKey(columns=("id", "id"), desired_name="t_pk")
 
 
 @pytest.mark.parametrize(
@@ -46,22 +46,22 @@ def test_rejects_invalid_constraint_name(
     with pytest.raises(expected_error):
         DesiredPrimaryKey(
             columns=("id",),
-            requested_name=invalid_name,  # type: ignore[arg-type]
+            desired_name=invalid_name,  # type: ignore[arg-type]
         )
 
 
 def test_mixed_case_columns_and_name_are_preserved():
     # Given a constraint with mixed-case display spelling
-    pk = DesiredPrimaryKey(columns=("OrderId",), requested_name="Orders_PK")
+    pk = DesiredPrimaryKey(columns=("OrderId",), desired_name="Orders_PK")
 
     # Then construction preserves that spelling
     assert tuple(str(column) for column in pk.columns) == ("OrderId",)
-    assert str(pk.requested_name) == "Orders_PK"
+    assert str(pk.desired_name) == "Orders_PK"
 
 
 def test_desired_and_observed_keys_compare_by_definition():
     # Given equivalent lifecycle values with different names, casing, and column order
-    desired = DesiredPrimaryKey(columns=("TenantId", "OrderId"), requested_name="Orders_PK")
+    desired = DesiredPrimaryKey(columns=("TenantId", "OrderId"), desired_name="Orders_PK")
     observed = ObservedPrimaryKey(
         columns=("orderid", "tenantid"), catalog_name="catalog_generated_name"
     )
@@ -78,7 +78,7 @@ def test_desired_and_observed_keys_compare_by_definition():
 @pytest.mark.parametrize(
     "other",
     [
-        DesiredPrimaryKey(columns=("other_id",), requested_name="orders_pk"),
+        DesiredPrimaryKey(columns=("other_id",), desired_name="orders_pk"),
         ObservedPrimaryKey(columns=("other_id",), catalog_name="catalog_pk"),
     ],
 )
@@ -86,7 +86,7 @@ def test_equality_rejects_different_definitions(
     other: DesiredPrimaryKey | ObservedPrimaryKey,
 ):
     # Given primary keys over different column sets
-    key = DesiredPrimaryKey(columns=("id",), requested_name="orders_pk")
+    key = DesiredPrimaryKey(columns=("id",), desired_name="orders_pk")
 
     # When comparing the constraints
     are_equal = key == other
@@ -95,9 +95,9 @@ def test_equality_rejects_different_definitions(
     assert not are_equal
 
 
-def test_requested_name_is_not_part_of_desired_key_equality() -> None:
-    one = DesiredPrimaryKey(columns=("id",), requested_name="one_pk")
-    two = DesiredPrimaryKey(columns=("id",), requested_name="two_pk")
+def test_desired_name_is_not_part_of_desired_key_equality() -> None:
+    one = DesiredPrimaryKey(columns=("id",), desired_name="one_pk")
+    two = DesiredPrimaryKey(columns=("id",), desired_name="two_pk")
 
     assert one == two
     assert hash(one) == hash(two)
@@ -132,7 +132,7 @@ def test_observed_key_retains_exact_catalog_name_identity() -> None:
 
 def test_matches_columns_excludes_the_constraint_name_from_comparison():
     # Given a named, composite primary key
-    key = DesiredPrimaryKey(columns=("TenantId", "OrderId"), requested_name="orders_pk")
+    key = DesiredPrimaryKey(columns=("TenantId", "OrderId"), desired_name="orders_pk")
 
     # When comparing columns with different order and identifier casing
     matches = key.matches_columns(("orderid", "tenantid"))
@@ -145,4 +145,4 @@ def test_matches_columns_excludes_the_constraint_name_from_comparison():
 def test_rejects_columns_differing_only_by_case_as_duplicates():
     # When one column is repeated with different casing, then construction fails
     with pytest.raises(ValueError):
-        DesiredPrimaryKey(columns=("id", "ID"), requested_name="t_pk")
+        DesiredPrimaryKey(columns=("id", "ID"), desired_name="t_pk")

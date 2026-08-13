@@ -17,9 +17,11 @@ from delta_engine.domain.model import (
     Array,
     DataType,
     DesiredColumn,
+    DesiredForeignKey,
     DesiredTable,
     Map,
     ObservedColumn,
+    ObservedForeignKey,
     ObservedTable,
     QualifiedName,
     Struct,
@@ -547,29 +549,28 @@ def _diff_foreign_keys(
     the child's own snapshot; whether the referenced table can hold up its end
     is the relationship resolver's judgment, not a difference.
     """
-    unmatched_observed = sorted(
-        observed.foreign_keys,
-        key=lambda foreign_key: (foreign_key.catalog_name.casefold(), foreign_key.catalog_name),
-    )
-    sets: list[SetForeignKey] = []
+    unmatched_desired: set[DesiredForeignKey | ObservedForeignKey] = set(desired.foreign_keys)
+    drops: list[DropForeignKey] = []
 
-    for desired_constraint in desired.foreign_keys:
-        matched_index = next(
-            (
-                index
-                for index, observed_constraint in enumerate(unmatched_observed)
-                if desired_constraint == observed_constraint
-            ),
-            None,
-        )
-        if matched_index is None:
-            sets.append(SetForeignKey(constraint=desired_constraint))
-        else:
-            unmatched_observed.pop(matched_index)
+    for observed_constraint in sorted(
+        observed.foreign_keys,
+        key=lambda constraint: (
+            constraint.catalog_name.casefold(),
+            constraint.catalog_name,
+        ),
+    ):
+        if observed_constraint not in unmatched_desired:
+            drops.append(DropForeignKey(constraint=observed_constraint))
+            continue
+        unmatched_desired.remove(observed_constraint)
 
     return (
-        *(DropForeignKey(constraint=constraint) for constraint in unmatched_observed),
-        *sets,
+        *drops,
+        *(
+            SetForeignKey(constraint=constraint)
+            for constraint in desired.foreign_keys
+            if constraint in unmatched_desired
+        ),
     )
 
 

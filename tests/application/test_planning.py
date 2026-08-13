@@ -64,13 +64,13 @@ def _foreign_key(
     local_columns: tuple[str, ...],
     referenced_table: QualifiedName,
     referenced_columns: tuple[str, ...],
-    requested_name: str,
+    desired_name: str,
 ) -> DesiredForeignKey:
     return DesiredForeignKey(
         local_columns=local_columns,
         referenced_table=referenced_table,
         referenced_columns=referenced_columns,
-        requested_name=requested_name,
+        desired_name=desired_name,
     )
 
 
@@ -218,7 +218,7 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
         referenced_columns=("id",),
-        requested_name="test_id_fk",
+        desired_name="test_id_fk",
     )
     desired = _desired(
         columns=(DesiredColumn("id", Integer(), tags={"pii": "false"}),),
@@ -331,7 +331,7 @@ def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
         local_columns=("parent_id",),
         referenced_table=parent,
         referenced_columns=("id",),
-        requested_name="test_parent_id_fk",
+        desired_name="test_parent_id_fk",
     )
     observed_key = _observed_foreign_key(
         local_columns=("parent",),
@@ -365,7 +365,7 @@ def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_
         local_columns=("manager_id",),
         referenced_table=_NAME,
         referenced_columns=("employee_id",),
-        requested_name="test_manager_id_fk",
+        desired_name="test_manager_id_fk",
     )
     observed_key = _observed_foreign_key(
         local_columns=("manager_id",),
@@ -478,7 +478,7 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "unregistered_parent"),
         referenced_columns=("parent_id",),
-        requested_name="test_id_fk",
+        desired_name="test_id_fk",
     )
     desired = DesiredTable(
         qualified_name=_NAME,
@@ -498,7 +498,7 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     # Given a mixed-case table to create with key and layout references
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=DesiredPrimaryKey(columns=("requestId",), requested_name="test_pk"),
+        primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="test_pk"),
         clustered_by=("requestId",),
     )
 
@@ -522,7 +522,7 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customers_fk",
+        desired_name="orders_customers_fk",
     )
     # When planning
     result = plan_changes(
@@ -578,7 +578,7 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customers_fk",
+        desired_name="orders_customers_fk",
     )
     # When planning
     result = plan_changes(
@@ -603,7 +603,7 @@ def test_missing_table_plan_contains_the_declared_foreign_keys():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customers_fk",
+        desired_name="orders_customers_fk",
     )
     desired = _desired(
         columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),

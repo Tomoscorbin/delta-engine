@@ -35,7 +35,7 @@ _EACH_TABLE_AND_COLUMN_TYPE = pytest.mark.parametrize(
 
 def _primary_key_for(table_type, columns, name):
     if table_type is DesiredTable:
-        return DesiredPrimaryKey(columns=columns, requested_name=name)
+        return DesiredPrimaryKey(columns=columns, desired_name=name)
     return ObservedPrimaryKey(columns=columns, catalog_name=name)
 
 
@@ -46,7 +46,7 @@ def _foreign_key_for(table_type, *, local_columns, referenced_columns, name):
         "referenced_columns": referenced_columns,
     }
     if table_type is DesiredTable:
-        return DesiredForeignKey(**fields, requested_name=name)
+        return DesiredForeignKey(**fields, desired_name=name)
     return ObservedForeignKey(**fields, catalog_name=name)
 
 
@@ -143,7 +143,7 @@ def test_desired_table_rejects_pk_column_not_in_columns():
         DesiredTable(
             qualified_name=_QN,
             columns=(_COL,),
-            primary_key=DesiredPrimaryKey(columns=("missing_col",), requested_name="orders_pk"),
+            primary_key=DesiredPrimaryKey(columns=("missing_col",), desired_name="orders_pk"),
         )
 
 
@@ -166,7 +166,7 @@ def test_desired_table_rejects_nullable_primary_key_column():
         DesiredTable(
             qualified_name=_QN,
             columns=(DesiredColumn("id", Integer(), nullable=True),),
-            primary_key=DesiredPrimaryKey(columns=("id",), requested_name="orders_pk"),
+            primary_key=DesiredPrimaryKey(columns=("id",), desired_name="orders_pk"),
         )
 
 
@@ -192,7 +192,7 @@ def test_desired_table_reports_the_offending_nullable_primary_key_column():
                 DesiredColumn("id", Integer(), nullable=False),
                 DesiredColumn("tenant_id", Integer(), nullable=True),
             ),
-            primary_key=DesiredPrimaryKey(columns=("id", "tenant_id"), requested_name="orders_pk"),
+            primary_key=DesiredPrimaryKey(columns=("id", "tenant_id"), desired_name="orders_pk"),
         )
 
 
@@ -226,7 +226,7 @@ def test_observed_table_rejects_a_desired_primary_key() -> None:
             qualified_name=_QN,
             columns=(_OBSERVED_COL,),
             primary_key=DesiredPrimaryKey(  # type: ignore[arg-type]
-                columns=("id",), requested_name="t_pk"
+                columns=("id",), desired_name="t_pk"
             ),
         )
 
@@ -248,7 +248,7 @@ def test_desired_table_stores_foreign_keys():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -262,10 +262,10 @@ def test_desired_table_stores_foreign_keys():
             local_columns=("customer_id",),
             referenced_table=QualifiedName("cat", "sch", "customers"),
             referenced_columns=("id",),
-            requested_name="orders_customer_id_fk",
+            desired_name="orders_customer_id_fk",
         ),
     )
-    assert table.foreign_keys[0].requested_name == "orders_customer_id_fk"
+    assert table.foreign_keys[0].desired_name == "orders_customer_id_fk"
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -319,7 +319,7 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
         local_columns=("nonexistent",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_nonexistent_fk",
+        desired_name="orders_nonexistent_fk",
     )
 
     # When / Then the DesiredTable rejects the FK referencing a column that does not exist
@@ -338,13 +338,13 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
     fk_two = DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "accounts"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_accounts_fk",
+        desired_name="orders_customer_id_accounts_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected
@@ -363,13 +363,13 @@ def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
         local_columns=("a", "b_c"),
         referenced_table=QualifiedName("cat", "sch", "p1"),
         referenced_columns=("x", "y"),
-        requested_name="t_a_b_c_fk",
+        desired_name="t_a_b_c_fk",
     )
     second = DesiredForeignKey(
         local_columns=("a_b", "c"),
         referenced_table=QualifiedName("cat", "sch", "p2"),
         referenced_columns=("x", "y"),
-        requested_name="t_a_b_c_fk",
+        desired_name="t_a_b_c_fk",
     )
 
     # When / Then the collision is rejected, naming both column tuples
@@ -393,13 +393,13 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
         local_columns=("tenant_id", "customer_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("tenant_id", "id"),
-        requested_name="orders_tenant_id_customer_id_fk",
+        desired_name="orders_tenant_id_customer_id_fk",
     )
     fk_two = DesiredForeignKey(
         local_columns=("customer_id", "tenant_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id", "tenant_id"),
-        requested_name="orders_customer_id_tenant_id_fk",
+        desired_name="orders_customer_id_tenant_id_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected
@@ -420,7 +420,7 @@ def test_desired_table_accepts_an_already_named_foreign_key():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name="orders_customer_id_fk",
+        desired_name="orders_customer_id_fk",
     )
 
     # When building a DesiredTable with it
@@ -431,7 +431,7 @@ def test_desired_table_accepts_an_already_named_foreign_key():
     )
 
     # Then the name is preserved (not regenerated, not rejected)
-    assert table.foreign_keys[0].requested_name == "orders_customer_id_fk"
+    assert table.foreign_keys[0].desired_name == "orders_customer_id_fk"
 
 
 def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
@@ -466,7 +466,7 @@ def test_tables_reject_foreign_keys_from_the_other_lifecycle() -> None:
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        requested_name="requested_fk",
+        desired_name="requested_fk",
     )
     observed_key = ObservedForeignKey(
         local_columns=("customer_id",),
@@ -815,7 +815,7 @@ def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
                     "customer_name", String(), nullable=False, renamed_from="customer_nm"
                 ),
             ),
-            primary_key=DesiredPrimaryKey(columns=("customer_nm",), requested_name="orders_pk"),
+            primary_key=DesiredPrimaryKey(columns=("customer_nm",), desired_name="orders_pk"),
         )
 
 
@@ -829,7 +829,7 @@ def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -
                     local_columns=("parent",),
                     referenced_table=QualifiedName("c", "s", "parent"),
                     referenced_columns=("id",),
-                    requested_name="orders_parent_fk",
+                    desired_name="orders_parent_fk",
                 ),
             ),
         )

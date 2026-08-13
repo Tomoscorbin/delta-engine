@@ -479,7 +479,7 @@ class ForeignKey:
             local_columns=local_columns,
             referenced_table=referenced.table,
             referenced_columns=referenced_columns,
-            requested_name=(
+            desired_name=(
                 self.name
                 if self.name is not None
                 else _foreign_key_constraint_name(
@@ -647,7 +647,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     primary_key_constraint = (
         DesiredPrimaryKey(
             columns=primary_key_columns,
-            requested_name=(
+            desired_name=(
                 declaration.primary_key_name
                 if declaration.primary_key_name is not None
                 else Identifier(f"{declaration.qualified_name.name}_pk")
@@ -831,7 +831,7 @@ class DeltaTable:
     def primary_key_name(self) -> str | None:
         """Generated or explicitly declared primary-key name, if a key exists."""
         primary_key = self._desired_table.primary_key
-        return str(primary_key.requested_name) if primary_key is not None else None
+        return str(primary_key.desired_name) if primary_key is not None else None
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:
