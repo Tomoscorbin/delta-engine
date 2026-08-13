@@ -112,6 +112,7 @@ def test_databricks_import_path_exposes_backend_entry_points():
         "build_spark_engine",
         "build_sql_engine",
         "configure_logging",
+        "to_spark_schema",
     }
 
 
@@ -124,7 +125,7 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
         "    Engine, Failure, SyncFailedError, SyncReport, TableChangeState, TableRunStatus,\n"
         ")\n"
         "from delta_engine.databricks import (\n"
-        "    build_spark_engine, build_sql_engine, configure_logging,\n"
+        "    build_spark_engine, build_sql_engine, configure_logging, to_spark_schema,\n"
         ")\n"
         "print('ok')\n"
     )

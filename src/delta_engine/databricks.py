@@ -13,12 +13,14 @@ import logging
 from typing import TYPE_CHECKING, TextIO
 
 from delta_engine.application.engine import Engine
+from delta_engine.application.ports import DesiredTableSource
 
 if TYPE_CHECKING:
     from databricks.sql.client import Connection
     from pyspark.sql import SparkSession
+    from pyspark.sql.types import StructType
 
-__all__ = ["build_spark_engine", "build_sql_engine", "configure_logging"]
+__all__ = ["build_spark_engine", "build_sql_engine", "configure_logging", "to_spark_schema"]
 
 _SPARK_RUNTIME_HINT = (
     "delta-engine's Spark backend requires the PySpark supplied by a supported Databricks Runtime."
@@ -41,6 +43,27 @@ def build_spark_engine(spark: SparkSession) -> Engine:
         raise
 
     return _build_engine(spark)
+
+
+def to_spark_schema(table: DesiredTableSource) -> StructType:
+    """
+    Convert a table declaration to a native PySpark ``StructType``.
+
+    Preserves column order, authored name spelling, data type, and nullability.
+    Comments and tags remain catalog metadata and are not copied into Spark
+    field metadata. Array elements and map values are nullable because Delta
+    Engine declarations do not model their nullability separately.
+    """
+    try:
+        from delta_engine.adapters.databricks.spark.schema import (
+            to_spark_schema as _to_spark_schema,
+        )
+    except ModuleNotFoundError as error:
+        if _is_pyspark_import_error(error):
+            raise RuntimeError(_SPARK_RUNTIME_HINT) from error
+        raise
+
+    return _to_spark_schema(table.to_desired_table())
 
 
 def build_sql_engine(connection: Connection) -> Engine:
