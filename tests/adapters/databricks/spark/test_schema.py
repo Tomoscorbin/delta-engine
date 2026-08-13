@@ -60,12 +60,18 @@ def _table(*columns: DesiredColumn) -> DesiredTable:
     ],
 )
 def test_converts_each_scalar_data_type(data_type: DataType, spark_type: T.DataType) -> None:
-    schema = to_spark_schema(_table(DesiredColumn("value", data_type)))
+    # Given a desired table containing one modeled scalar type
+    table = _table(DesiredColumn("value", data_type))
 
+    # When converting its row schema to PySpark
+    schema = to_spark_schema(table)
+
+    # Then the field carries the corresponding native Spark type
     assert schema == T.StructType([T.StructField("value", spark_type, nullable=True)])
 
 
 def test_preserves_nested_structure_order_names_and_nullability() -> None:
+    # Given ordered columns with authored casing, nested types, nullability, and annotations
     table = _table(
         DesiredColumn("ID", Integer(), nullable=False, comment="catalog annotation"),
         DesiredColumn(
@@ -81,8 +87,10 @@ def test_preserves_nested_structure_order_names_and_nullability() -> None:
         ),
     )
 
+    # When converting the desired row schema to PySpark
     schema = to_spark_schema(table)
 
+    # Then row structure is preserved while catalog annotations stay out of field metadata
     assert schema == T.StructType(
         [
             T.StructField("ID", T.IntegerType(), nullable=False),
@@ -111,6 +119,7 @@ def test_preserves_nested_structure_order_names_and_nullability() -> None:
 
 
 def test_public_converter_accepts_a_delta_table_declaration() -> None:
+    # Given a public DeltaTable declaration
     table = DeltaTable(
         catalog="catalog",
         schema="schema",
@@ -118,7 +127,11 @@ def test_public_converter_accepts_a_delta_table_declaration() -> None:
         columns=[Column("id", Long(), nullable=False), Column("name", String())],
     )
 
-    assert public_to_spark_schema(table) == T.StructType(
+    # When converting it through the public Databricks facade
+    schema = public_to_spark_schema(table)
+
+    # Then the facade returns the declaration's native Spark row schema
+    assert schema == T.StructType(
         [
             T.StructField("id", T.LongType(), nullable=False),
             T.StructField("name", T.StringType(), nullable=True),
@@ -127,14 +140,22 @@ def test_public_converter_accepts_a_delta_table_declaration() -> None:
 
 
 def test_rejects_an_unmapped_data_type() -> None:
+    # Given a desired table containing a DataType outside the closed modeled set
     class CustomType(DataType):
         pass
 
-    with pytest.raises(TypeError, match="Unsupported DataType variant: CustomType"):
-        to_spark_schema(_table(DesiredColumn("value", CustomType())))
+    table = _table(DesiredColumn("value", CustomType()))
+
+    # When converting the desired row schema to PySpark
+    with pytest.raises(TypeError) as raised:
+        to_spark_schema(table)
+
+    # Then conversion fails explicitly at the unsupported type
+    assert str(raised.value) == "Unsupported DataType variant: CustomType"
 
 
 def test_public_converter_explains_when_pyspark_is_unavailable() -> None:
+    # Given a fresh interpreter where PySpark cannot be imported
     program = """
 import sys
 
@@ -152,7 +173,9 @@ else:
     raise AssertionError("conversion unexpectedly succeeded without PySpark")
 """
 
+    # When calling the public converter in that interpreter
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
+    # Then the failure explains the supported runtime requirement
     assert result.returncode == 0, result.stderr
     assert "requires the PySpark supplied by a supported Databricks Runtime" in result.stdout

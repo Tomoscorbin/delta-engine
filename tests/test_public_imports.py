@@ -107,8 +107,11 @@ def test_api_package_does_not_export_the_user_schema_surface():
 def test_databricks_import_path_exposes_backend_entry_points():
     # Given the preferred user-facing Databricks import path
 
+    # When inspecting its declared public surface
+    exports = set(databricks.__all__)
+
     # Then it exposes exactly the supported backend entry points
-    assert set(databricks.__all__) == {
+    assert exports == {
         "build_spark_engine",
         "build_sql_engine",
         "configure_logging",
