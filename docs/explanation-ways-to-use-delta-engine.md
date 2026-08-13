@@ -24,7 +24,8 @@ deployment for centrally managed annotations.
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
 | [Pattern 1: Release table contracts](#pattern-1-release-table-contracts-with-the-application)       | Controlled production releases and continuing table estates          | A dedicated job after the application bundle is deployed |
 | [Pattern 2: Reconcile a target table](#pattern-2-reconcile-a-target-table-before-its-etl-runs)      | ETL applications that own a single target table                      | Application startup before transformations or writes     |
-| [Pattern 3: Add governance](#pattern-3-add-governance-without-taking-over-the-pipeline)             | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
+| [Pattern 3: Reuse declarations in ETL](#pattern-3-reuse-table-declarations-throughout-etl-code)     | ETL applications that use declared schema and row identity at write time | Transformation and write code                         |
+| [Pattern 4: Add governance](#pattern-4-add-governance-without-taking-over-the-pipeline)             | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
 
 ## Pattern 1: Release table contracts with the application
 
@@ -228,7 +229,108 @@ Use this pattern when:
 It is particularly straightforward for batch applications because the table
 check becomes part of the application's normal startup sequence.
 
-## Pattern 3: Add governance without taking over the pipeline
+## Pattern 3: Reuse table declarations throughout ETL code
+
+A `DeltaTable` declaration can also be imported throughout the ETL that
+produces it. Table names, schemas, keys, and column lists then stay in one
+place rather than being repeated across the pipeline. This works especially
+well alongside Pattern 2: reconcile the declaration at startup, then use the
+same object while producing rows.
+
+### Conform output to the declared schema
+
+Use the declaration to cast and order the final DataFrame before writing it:
+
+```python
+result = transform(source).to(to_spark_schema(customers))
+```
+
+Here, `to_spark_schema` is application code that converts a `DeltaTable` into
+a PySpark `StructType`; Delta Engine deliberately does not expose PySpark
+types from its schema API. Keeping that conversion at the Spark edge lets the
+ETL use `customers.columns` as the ordered, authoritative column list. A
+schema change consequently updates both the table contract and the final
+projection together.
+
+### Build merges from the declared primary key
+
+Use the same primary key declared on the table to construct the Delta merge
+condition. This handles composite keys without maintaining a separate join
+predicate:
+
+```python
+from functools import reduce
+from operator import and_
+
+from pyspark.sql import functions as F
+
+
+condition = reduce(
+    and_,
+    (
+        F.col(f"target.{column}") == F.col(f"source.{column}")
+        for column in customers.primary_key
+    ),
+)
+
+(
+    target.alias("target")
+    .merge(result.alias("source"), condition)
+    .whenMatchedUpdateAll()
+    .whenNotMatchedInsertAll()
+    .execute()
+)
+```
+
+Only use this pattern for a declaration with a primary key. An empty key has
+no row-identity meaning and cannot form a merge condition.
+
+### Derive update columns from the declaration
+
+When a merge should not update key columns, derive the mutable columns instead
+of maintaining another list:
+
+```python
+update_columns = [
+    column.name
+    for column in customers.columns
+    if column.name not in customers.primary_key
+]
+
+updates = {
+    column: F.col(f"source.{column}")
+    for column in update_columns
+}
+
+(
+    target.alias("target")
+    .merge(result.alias("source"), condition)
+    .whenMatchedUpdate(set=updates)
+    .whenNotMatchedInsertAll()
+    .execute()
+)
+```
+
+### Reuse the key wherever row identity matters
+
+The declared primary key can also drive deduplication, windowing, and other
+key-based ETL logic. For example, retain the latest event for each customer:
+
+```python
+from pyspark.sql import Window, functions as F
+
+
+latest = Window.partitionBy(*customers.primary_key).orderBy(
+    F.col("event_timestamp").desc()
+)
+
+result = result.withColumn("_row_number", F.row_number().over(latest))
+```
+
+The table contract remains the single definition of the output schema and row
+identity, while the ETL code consumes those facts where it needs them.
+
+## Pattern 4: Add governance without taking over the pipeline
 
 Table ownership is not always all-or-nothing. A data-product team may own the
 schema and row production while a platform or governance team owns comments,
