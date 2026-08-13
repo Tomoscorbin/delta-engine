@@ -357,14 +357,19 @@ in one place.
 Use the declaration to derive which columns must always contain a value:
 
 ```python
-required_columns = [
-    column.name
-    for column in customers.columns
-    if not column.nullable
-]
+def test_produces_no_nulls_in_required_columns(source) -> None:
+    # When
+    result = transform(source)
 
-for column in required_columns:
-    assert result.filter(F.col(column).isNull()).isEmpty()
+    # Then
+    required_columns = [
+        column.name
+        for column in customers.columns
+        if not column.nullable
+    ]
+
+    for column in required_columns:
+        assert result.filter(F.col(column).isNull()).isEmpty()
 ```
 
 ### Test primary-key uniqueness
@@ -372,14 +377,19 @@ for column in required_columns:
 The declared primary key can drive data-level key checks:
 
 ```python
-duplicates = (
-    result
-    .groupBy(*customers.primary_key)
-    .count()
-    .filter(F.col("count") > 1)
-)
+def test_produces_unique_primary_keys(source) -> None:
+    # When
+    result = transform(source)
 
-assert duplicates.isEmpty()
+    # Then
+    duplicates = (
+        result
+        .groupBy(*customers.primary_key)
+        .count()
+        .filter(F.col("count") > 1)
+    )
+
+    assert duplicates.isEmpty()
 ```
 
 ### Test foreign-key relationships
@@ -388,16 +398,20 @@ Related table declarations can also drive referential-integrity tests. For a
 foreign key whose local and referenced columns have the same names:
 
 ```python
-missing_customers = (
-    orders_result
-    .join(
-        customers_result,
-        on=list(orders.foreign_keys[0].columns),
-        how="left_anti",
+def test_produces_valid_customer_references(
+    orders_result,
+    customers_result,
+) -> None:
+    missing_customers = (
+        orders_result
+        .join(
+            customers_result,
+            on=list(orders.foreign_keys[0].columns),
+            how="left_anti",
+        )
     )
-)
 
-assert missing_customers.isEmpty()
+    assert missing_customers.isEmpty()
 ```
 
 ## Pattern 5: Add governance without taking over the pipeline
