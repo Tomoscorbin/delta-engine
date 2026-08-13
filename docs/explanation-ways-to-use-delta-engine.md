@@ -234,9 +234,7 @@ check becomes part of the application's normal startup sequence.
 
 A `DeltaTable` declaration can also be imported throughout the ETL that
 produces it. Table names, schemas, keys, and column lists then stay in one
-place rather than being repeated across the pipeline. This works especially
-well alongside Pattern 2: reconcile the declaration at startup, then use the
-same object while producing rows.
+place rather than being repeated across the pipeline.
 
 ### Conform output to the declared schema
 
@@ -245,13 +243,6 @@ Use the declaration to cast and order the final DataFrame before writing it:
 ```python
 result = transform(source).to(to_spark_schema(customers))
 ```
-
-Here, `to_spark_schema` is application code that converts a `DeltaTable` into
-a PySpark `StructType`; Delta Engine deliberately does not expose PySpark
-types from its schema API. Keeping that conversion at the Spark edge lets the
-ETL use `customers.columns` as the ordered, authoritative column list. A
-schema change consequently updates both the table contract and the final
-projection together.
 
 ### Build merges from the declared primary key
 
@@ -282,9 +273,6 @@ condition = reduce(
     .execute()
 )
 ```
-
-Only use this pattern for a declaration with a primary key. An empty key has
-no row-identity meaning and cannot form a merge condition.
 
 ### Derive update columns from the declaration
 
@@ -327,9 +315,6 @@ latest = Window.partitionBy(*customers.primary_key).orderBy(
 
 result = result.withColumn("_row_number", F.row_number().over(latest))
 ```
-
-The table contract remains the single definition of the output schema and row
-identity, while the ETL code consumes those facts where it needs them.
 
 ## Pattern 4: Use table declarations in unit tests
 
