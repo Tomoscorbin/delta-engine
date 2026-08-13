@@ -25,7 +25,8 @@ deployment for centrally managed annotations.
 | [Pattern 1: Release table contracts](#pattern-1-release-table-contracts-with-the-application)       | Controlled production releases and continuing table estates          | A dedicated job after the application bundle is deployed |
 | [Pattern 2: Reconcile a target table](#pattern-2-reconcile-a-target-table-before-its-etl-runs)      | ETL applications that own a single target table                      | Application startup before transformations or writes     |
 | [Pattern 3: Reuse declarations in ETL](#pattern-3-reuse-table-declarations-throughout-etl-code)     | ETL applications that use declared schema and row identity at write time | Transformation and write code                         |
-| [Pattern 4: Add governance](#pattern-4-add-governance-without-taking-over-the-pipeline)             | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
+| [Pattern 4: Use declarations in tests](#pattern-4-use-table-declarations-in-unit-tests)              | ETL applications that test schemas, required values, and relationships | Unit tests                                            |
+| [Pattern 5: Add governance](#pattern-5-add-governance-without-taking-over-the-pipeline)              | Split ownership between data-product, platform, and governance teams | A separate restricted-scope deployment                   |
 
 ## Pattern 1: Release table contracts with the application
 
@@ -330,7 +331,100 @@ result = result.withColumn("_row_number", F.row_number().over(latest))
 The table contract remains the single definition of the output schema and row
 identity, while the ETL code consumes those facts where it needs them.
 
-## Pattern 4: Add governance without taking over the pipeline
+## Pattern 4: Use table declarations in unit tests
+
+The same `DeltaTable` used by production code can define the schemas, keys,
+and relationships expected by ETL tests. Tests can therefore work from the
+real table contract instead of maintaining separate schemas and column lists.
+
+### Create test DataFrames from declared schemas
+
+Use the declared Spark schema when creating test fixtures:
+
+```python
+source = spark.createDataFrame(
+    [
+        (1, "Alice"),
+        (2, "Bob"),
+    ],
+    schema=to_spark_schema(customers),
+)
+```
+
+This keeps test fixtures aligned with the schema used by the application and
+Unity Catalog.
+
+### Assert the ETL produces the declared schema
+
+Compare the final DataFrame with the same table contract:
+
+```python
+def test_produces_the_declared_schema(source) -> None:
+    # When
+    result = transform(source)
+
+    # Then
+    assert result.schema == to_spark_schema(customers)
+```
+
+A schema change now changes the production contract and the test expectation
+in one place.
+
+### Test non-nullable columns
+
+Use the declaration to derive which columns must always contain a value:
+
+```python
+required_columns = [
+    column.name
+    for column in customers.columns
+    if not column.nullable
+]
+
+for column in required_columns:
+    assert result.filter(F.col(column).isNull()).isEmpty()
+```
+
+### Test primary-key uniqueness
+
+The declared primary key can drive data-level key checks:
+
+```python
+duplicates = (
+    result
+    .groupBy(*customers.primary_key)
+    .count()
+    .filter(F.col("count") > 1)
+)
+
+assert duplicates.isEmpty()
+```
+
+The same primary key is therefore used by the table declaration, production
+ETL logic, and tests rather than being defined independently in each place.
+
+### Test foreign-key relationships
+
+Related table declarations can also drive referential-integrity tests. For a
+foreign key whose local and referenced columns have the same names:
+
+```python
+missing_customers = (
+    orders_result
+    .join(
+        customers_result,
+        on=list(orders.foreign_keys[0].columns),
+        how="left_anti",
+    )
+)
+
+assert missing_customers.isEmpty()
+```
+
+Delta Engine validates that the declared relationship is structurally valid;
+the test verifies that the data produced by the ETL satisfies that relationship.
+
+## Pattern 5: Add governance without taking over the pipeline
 
 Table ownership is not always all-or-nothing. A data-product team may own the
 schema and row production while a platform or governance team owns comments,
