@@ -342,10 +342,8 @@ Compare the final DataFrame with the same table contract:
 
 ```python
 def test_produces_the_declared_schema(source) -> None:
-    # When
     result = transform(source)
 
-    # Then
     assert result.schema == to_spark_schema(customers)
 ```
 
@@ -358,10 +356,8 @@ Use the declaration to derive which columns must always contain a value:
 
 ```python
 def test_produces_no_nulls_in_required_columns(source) -> None:
-    # When
     result = transform(source)
 
-    # Then
     required_columns = [
         column.name
         for column in customers.columns
@@ -378,10 +374,8 @@ The declared primary key can drive data-level key checks:
 
 ```python
 def test_produces_unique_primary_keys(source) -> None:
-    # When
     result = transform(source)
 
-    # Then
     duplicates = (
         result
         .groupBy(*customers.primary_key)
