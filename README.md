@@ -48,7 +48,7 @@ Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing 
 
    Every sync returns a structured `SyncReport` describing each table’s semantic changes, rejected changes, planned SQL, failures, and execution progress. The report has a stable, versioned, JSON-serialisable representation, so the same information can drive CI gates, structured logging, audit history, dashboards, and other automation rather than existing only as console output.
 
-## Choose how to run it
+## Use Delta Engine in your workflow
 
 Delta Engine runs where your release or data workflow calls it. See
 [Ways to use Delta Engine](https://tomoscorbin.github.io/delta-engine/explanation-ways-to-use-delta-engine.html)
