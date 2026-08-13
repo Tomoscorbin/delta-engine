@@ -13,7 +13,7 @@ propagates across a whole run is tested with the engine.
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.application.relationships import TableResolution, resolve
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import DesiredForeignKey, DesiredPrimaryKey
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, Self, String
 
@@ -575,13 +575,13 @@ def test_resolve_reports_invalid_fk_target_over_cycle_for_the_same_fk():
             Column("email", String()),
             Column("ref_id", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="b_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="b_pk"),
         foreign_keys=(
-            ForeignKeyConstraint(
+            DesiredForeignKey(
                 local_columns=("ref_id",),
                 referenced_table=_qualified_name("cat.sch.a"),
                 referenced_columns=("id",),
-                constraint_name="b_ref_id_fk",
+                requested_name="b_ref_id_fk",
             ),
         ),
     )
@@ -591,13 +591,13 @@ def test_resolve_reports_invalid_fk_target_over_cycle_for_the_same_fk():
             Column("id", String(), nullable=False),
             Column("ref_email", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="a_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="a_pk"),
         foreign_keys=(
-            ForeignKeyConstraint(
+            DesiredForeignKey(
                 local_columns=("ref_email",),
                 referenced_table=_qualified_name("cat.sch.b"),
                 referenced_columns=("email",),
-                constraint_name="a_ref_email_fk",
+                requested_name="a_ref_email_fk",
             ),
         ),
     )
@@ -684,13 +684,13 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
             Column("id", String(), nullable=False),
             Column("ref_email", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="orders_pk"),
         foreign_keys=(
-            ForeignKeyConstraint(
+            DesiredForeignKey(
                 local_columns=("ref_email",),
                 referenced_table=_qualified_name("cat.sch.customers"),
                 referenced_columns=("email",),
-                constraint_name="orders_ref_email_fk",
+                requested_name="orders_ref_email_fk",
             ),
         ),
     )
@@ -784,13 +784,13 @@ def test_resolve_fails_when_fk_references_only_part_of_composite_primary_key():
             Column("id", String(), nullable=False),
             Column("customer_id", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="orders_pk"),
         foreign_keys=(
-            ForeignKeyConstraint(
+            DesiredForeignKey(
                 local_columns=("customer_id",),
                 referenced_table=_qualified_name("cat.sch.customers"),
                 referenced_columns=("customer_id",),
-                constraint_name="orders_customer_id_fk",
+                requested_name="orders_customer_id_fk",
             ),
         ),
     )
@@ -822,13 +822,13 @@ def test_resolve_treats_composite_pk_referenced_column_order_as_irrelevant():
             Column("customer_id", String()),
             Column("country_code", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), requested_name="orders_pk"),
         foreign_keys=(
-            ForeignKeyConstraint(
+            DesiredForeignKey(
                 local_columns=("country_code", "customer_id"),
                 referenced_table=_qualified_name("cat.sch.customers"),
                 referenced_columns=("country_code", "customer_id"),
-                constraint_name="orders_country_code_customer_id_fk",
+                requested_name="orders_country_code_customer_id_fk",
             ),
         ),
     )

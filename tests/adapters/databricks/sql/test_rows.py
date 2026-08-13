@@ -69,7 +69,7 @@ def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
 
     assert result is not None
     assert tuple(str(column) for column in result.columns) == ("Order_Id", "Line_No")
-    assert str(result.constraint_name) == "Orders_PK"
+    assert result.catalog_name == "Orders_PK"
 
 
 def test_primary_key_empty_rows_map_to_none() -> None:
@@ -95,7 +95,7 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
     # Then constraint and column spellings carry verbatim
-    assert str(fk.constraint_name) == "Orders_Customer_FK"
+    assert fk.catalog_name == "Orders_Customer_FK"
     assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
     assert fk.referenced_table == QualifiedName("dev", "silver", "customer")
     assert tuple(str(column) for column in fk.referenced_columns) == ("Id",)
@@ -153,7 +153,7 @@ def test_multiple_foreign_keys_group_by_constraint_name() -> None:
     result = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
     assert len(result) == 2
-    assert {fk.constraint_name for fk in result} == {"fk_one", "fk_two"}
+    assert {fk.catalog_name for fk in result} == {"fk_one", "fk_two"}
 
 
 def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
@@ -177,7 +177,7 @@ def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
         _runner(referencing_foreign_keys_query(QN), rows), QN
     )
 
-    assert str(reference.constraint_name) == "Orders_Customer_FK"
+    assert reference.catalog_name == "Orders_Customer_FK"
     assert reference.referencing_table == QualifiedName("dev", "silver", "orders")
 
 

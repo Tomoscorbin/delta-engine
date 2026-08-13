@@ -29,8 +29,8 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import (
     DesiredColumn,
+    DesiredForeignKey,
     DesiredTable,
-    ForeignKeyConstraint,
     Integer,
     ObservedColumn,
     ObservedTable,
@@ -150,7 +150,7 @@ def _report(
     plan: ActionPlan | None | object = _PLAN_UNSET,
     statements: tuple[str, ...] = (),
     failures: tuple[Failure, ...] = (),
-    dependencies: tuple[ForeignKeyConstraint, ...] = (),
+    dependencies: tuple[DesiredForeignKey, ...] = (),
     execution: ExecutionResult | None = None,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
     diff: TableDiff | None = None,
@@ -1210,17 +1210,17 @@ def test_to_dict_is_deterministic():
 # ---------- Derived dependency blocking
 
 
-def _fk_edge(parent: QualifiedName, constraint_name: str = "blocked_edge_fk"):
+def _fk_edge(parent: QualifiedName, requested_name: str = "blocked_edge_fk"):
     """Build a dependency edge onto ``parent``; blocking reads its columns and target."""
-    return ForeignKeyConstraint(
+    return DesiredForeignKey(
         local_columns=("parent_id",),
         referenced_table=parent,
         referenced_columns=("id",),
-        constraint_name=constraint_name,
+        requested_name=requested_name,
     )
 
 
-def _sound_report(name: str, dependencies: tuple[ForeignKeyConstraint, ...] = ()):
+def _sound_report(name: str, dependencies: tuple[DesiredForeignKey, ...] = ()):
     """Build a table that read, planned, and validated cleanly, with ``dependencies``."""
     return _report(
         desired=_a_desired_table(name),
@@ -1261,7 +1261,7 @@ def test_assemble_propagates_blocking_along_chains():
     reports = (
         _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom")),
         _sound_report("b", dependencies=(_fk_edge(_name("a")),)),
-        _sound_report("c", dependencies=(_fk_edge(_name("b"), constraint_name="c_b_fk"),)),
+        _sound_report("c", dependencies=(_fk_edge(_name("b"), requested_name="c_b_fk"),)),
     )
 
     # When the run report is assembled

@@ -25,11 +25,11 @@ from delta_engine.domain.model import (
     Boolean,
     DataType,
     DesiredColumn as Column,
+    DesiredForeignKey,
+    DesiredPrimaryKey,
     DesiredTable,
-    ForeignKeyConstraint,
     Identifier,
     Map,
-    PrimaryKeyConstraint,
     QualifiedName,
     Struct,
     TableAspect,
@@ -328,7 +328,7 @@ class _ReferencedSide(NamedTuple):
     """The referenced side of a foreign key, resolved at lowering time."""
 
     table: QualifiedName
-    primary_key: PrimaryKeyConstraint | None
+    primary_key: DesiredPrimaryKey | None
     column_types: dict[str, DataType]
 
 
@@ -409,8 +409,8 @@ class ForeignKey:
         self,
         owner_name: QualifiedName,
         owner_columns: tuple[Column, ...],
-        owner_primary_key: PrimaryKeyConstraint | None,
-    ) -> ForeignKeyConstraint:
+        owner_primary_key: DesiredPrimaryKey | None,
+    ) -> DesiredForeignKey:
         """
         Lower this declaration into a domain constraint.
 
@@ -475,11 +475,11 @@ class ForeignKey:
                     f" is {referenced_type}"
                 )
 
-        return ForeignKeyConstraint(
+        return DesiredForeignKey(
             local_columns=local_columns,
             referenced_table=referenced.table,
             referenced_columns=referenced_columns,
-            constraint_name=(
+            requested_name=(
                 self.name
                 if self.name is not None
                 else _foreign_key_constraint_name(
@@ -493,7 +493,7 @@ class ForeignKey:
         self,
         owner_name: QualifiedName,
         owner_columns: tuple[Column, ...],
-        owner_primary_key: PrimaryKeyConstraint | None,
+        owner_primary_key: DesiredPrimaryKey | None,
     ) -> _ReferencedSide:
         """
         Resolve ``references`` to the referenced side of the constraint.
@@ -516,7 +516,7 @@ class ForeignKey:
     def _resolve_column_pairs(
         self,
         referenced_table: QualifiedName,
-        primary_key: PrimaryKeyConstraint,
+        primary_key: DesiredPrimaryKey,
     ) -> tuple[tuple[str, str], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
         if isinstance(self.columns, Mapping):
@@ -645,9 +645,9 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         else None
     )
     primary_key_constraint = (
-        PrimaryKeyConstraint(
+        DesiredPrimaryKey(
             columns=primary_key_columns,
-            constraint_name=(
+            requested_name=(
                 declaration.primary_key_name
                 if declaration.primary_key_name is not None
                 else Identifier(f"{declaration.qualified_name.name}_pk")
@@ -831,7 +831,7 @@ class DeltaTable:
     def primary_key_name(self) -> str | None:
         """Generated or explicitly declared primary-key name, if a key exists."""
         primary_key = self._desired_table.primary_key
-        return str(primary_key.constraint_name) if primary_key is not None else None
+        return str(primary_key.requested_name) if primary_key is not None else None
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:

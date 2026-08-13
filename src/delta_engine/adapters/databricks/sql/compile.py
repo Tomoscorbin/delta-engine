@@ -106,7 +106,7 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = backtick(table.primary_key.constraint_name)
+        constraint_name = backtick(table.primary_key.requested_name)
         column_defs.append(f"CONSTRAINT {constraint_name} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
@@ -252,7 +252,7 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
-    constraint = backtick(action.primary_key.constraint_name)
+    constraint = backtick(action.primary_key.requested_name)
     return f"{target.alter_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
 
 
@@ -260,14 +260,14 @@ def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
 def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
     # IF EXISTS converges like DropPrimaryKey: already absent is the end state.
-    constraint = backtick(action.constraint.constraint_name)
+    constraint = backtick(action.constraint.catalog_name)
     return f"{target.alter_clause} DROP CONSTRAINT IF EXISTS {constraint}"
 
 
 @_compile_action.register
 def _compile_set_foreign_key(action: SetForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    constraint = backtick(action.constraint.constraint_name)
+    constraint = backtick(action.constraint.requested_name)
     local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)
     ref_cols = ", ".join(backtick(col) for col in action.constraint.referenced_columns)
     backticked_ref = backtick_qualified_name(action.constraint.referenced_table)

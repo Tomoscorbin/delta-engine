@@ -34,14 +34,15 @@ from delta_engine.domain.model import (
     Array,
     Decimal,
     DesiredColumn,
+    DesiredForeignKey,
+    DesiredPrimaryKey,
     DesiredTable,
-    ForeignKeyConstraint,
     Integer,
     Long,
     Map,
     ObservedColumn,
+    ObservedForeignKey,
     ObservedTable,
-    PrimaryKeyConstraint,
     QualifiedName,
     String,
     Struct,
@@ -85,16 +86,27 @@ from tests.builders import build_compiled_plan
 
 def _primary_key(
     columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
-) -> PrimaryKeyConstraint:
-    return PrimaryKeyConstraint(columns, constraint_name)
+) -> DesiredPrimaryKey:
+    return DesiredPrimaryKey(columns, constraint_name)
 
 
-def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> ForeignKeyConstraint:
-    return ForeignKeyConstraint(
+def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> DesiredForeignKey:
+    return DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        constraint_name=constraint_name,
+        requested_name=constraint_name,
+    )
+
+
+def _observed_foreign_key(
+    catalog_name: str = "orders_customer_id_fk",
+) -> ObservedForeignKey:
+    return ObservedForeignKey(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+        catalog_name=catalog_name,
     )
 
 
@@ -229,7 +241,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         (
-            DropForeignKey(constraint=_foreign_key()),
+            DropForeignKey(constraint=_observed_foreign_key()),
             (
                 DiffEntry(
                     DiffCategory.KEYS, DiffOperation.REMOVE, "foreign key orders_customer_id_fk"
@@ -401,7 +413,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
                 "delta.logRetentionDuration": None,
             },
             partitioned_by=("day",),
-            primary_key=PrimaryKeyConstraint(("id",), "tbl_pk"),
+            primary_key=DesiredPrimaryKey(("id",), "tbl_pk"),
         )
     )
 

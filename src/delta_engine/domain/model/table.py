@@ -9,9 +9,11 @@ from typing import Final, Self
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
-    ForeignKeyConstraint,
-    ForeignKeyReference,
-    PrimaryKeyConstraint,
+    DesiredForeignKey,
+    DesiredPrimaryKey,
+    ObservedForeignKey,
+    ObservedPrimaryKey,
+    ObservedReferencingForeignKey,
 )
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -36,8 +38,8 @@ def _validate_table_structure(
     tags: Mapping[str, str],
     partitioned_by: Sequence[str],
     clustered_by: Sequence[str],
-    primary_key: PrimaryKeyConstraint | None,
-    foreign_keys: Sequence[ForeignKeyConstraint],
+    primary_key: DesiredPrimaryKey | ObservedPrimaryKey | None,
+    foreign_keys: Sequence[DesiredForeignKey | ObservedForeignKey],
 ) -> None:
     """
     Validate the structural invariants shared by desired and observed tables.
@@ -186,8 +188,8 @@ class DesiredTable:
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: ListOrTuple[str] = ()
     clustered_by: ListOrTuple[str] = ()
-    primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
+    primary_key: DesiredPrimaryKey | None = None
+    foreign_keys: ListOrTuple[DesiredForeignKey] = ()
     properties: Mapping[str, str | None] = field(default_factory=dict)
     scope: TableScope = TableScope.FULL
 
@@ -232,6 +234,12 @@ class DesiredTable:
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+
+        if self.primary_key is not None and not isinstance(self.primary_key, DesiredPrimaryKey):
+            raise TypeError("DesiredTable primary_key must be a desired primary key")
+        if not all(isinstance(foreign_key, DesiredForeignKey) for foreign_key in self.foreign_keys):
+            raise TypeError("DesiredTable foreign_keys must be desired foreign keys")
+
         _validate_table_structure(
             columns=self.columns,
             tags=self.tags,
@@ -242,7 +250,7 @@ class DesiredTable:
         )
 
         seen: set[frozenset[str]] = set()
-        local_columns_by_constraint_name: dict[str, Sequence[str]] = {}
+        local_columns_by_requested_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -251,17 +259,15 @@ class DesiredTable:
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
-            collided = local_columns_by_constraint_name.get(foreign_key.constraint_name)
+            collided = local_columns_by_requested_name.get(foreign_key.requested_name)
             if collided is not None:
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
-                    f" '{foreign_key.constraint_name}': local columns {collided}"
+                    f" '{foreign_key.requested_name}': local columns {collided}"
                     f" and {foreign_key.local_columns}. Every foreign key on a"
                     " table must have a distinct constraint name."
                 )
-            local_columns_by_constraint_name[foreign_key.constraint_name] = (
-                foreign_key.local_columns
-            )
+            local_columns_by_requested_name[foreign_key.requested_name] = foreign_key.local_columns
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)
@@ -339,11 +345,11 @@ class ObservedTable:
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: ListOrTuple[str] = ()
     clustered_by: ListOrTuple[str] = ()
-    primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
+    primary_key: ObservedPrimaryKey | None = None
+    foreign_keys: ListOrTuple[ObservedForeignKey] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     supported_features: Set[TableFeature] = frozenset()
-    referencing_foreign_keys: ListOrTuple[ForeignKeyReference] = ()
+    referencing_foreign_keys: ListOrTuple[ObservedReferencingForeignKey] = ()
     kind: TableKind = TableKind.TABLE
 
     @property
@@ -362,6 +368,18 @@ class ObservedTable:
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(self, "supported_features", frozenset(self.supported_features))
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
+
+        if self.primary_key is not None and not isinstance(self.primary_key, ObservedPrimaryKey):
+            raise TypeError("ObservedTable primary_key must be an observed primary key")
+        if not all(
+            isinstance(foreign_key, ObservedForeignKey) for foreign_key in self.foreign_keys
+        ):
+            raise TypeError("ObservedTable foreign_keys must be observed foreign keys")
+        if not all(
+            isinstance(reference, ObservedReferencingForeignKey)
+            for reference in self.referencing_foreign_keys
+        ):
+            raise TypeError("ObservedTable referencing_foreign_keys must be observed references")
 
         _validate_table_structure(
             columns=self.columns,

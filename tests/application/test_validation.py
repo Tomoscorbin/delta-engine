@@ -15,16 +15,17 @@ from delta_engine.domain.model import (
     Date,
     Decimal,
     DesiredColumn,
+    DesiredPrimaryKey,
     DesiredTable,
     Double,
     Float,
-    ForeignKeyConstraint,
-    ForeignKeyReference,
     Integer,
     Long,
     ObservedColumn,
+    ObservedForeignKey,
+    ObservedPrimaryKey,
+    ObservedReferencingForeignKey,
     ObservedTable,
-    PrimaryKeyConstraint,
     QualifiedName,
     Short,
     String,
@@ -67,7 +68,7 @@ def _desired_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
     scope: TableScope = TableScope.FULL,
-    primary_key: PrimaryKeyConstraint | None = None,
+    primary_key: ObservedPrimaryKey | None = None,
 ) -> DesiredTable:
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
@@ -87,8 +88,8 @@ def _observed_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
     kind: TableKind = TableKind.TABLE,
-    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = (),
-    primary_key: PrimaryKeyConstraint | None = None,
+    referencing_foreign_keys: tuple[ObservedReferencingForeignKey, ...] = (),
+    primary_key: DesiredPrimaryKey | None = None,
 ) -> ObservedTable:
     source = (DesiredColumn("id", Integer()),) if columns is None else columns
     return ObservedTable(
@@ -920,8 +921,8 @@ def test_multiple_column_drops_produce_one_column_mapping_failure():
 
 def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
     # Given a PK removal while the observed table is referenced by another table's FK
-    reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
+    reference = ObservedReferencingForeignKey(
+        catalog_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
     change = DropPrimaryKey("test_pk")
@@ -949,14 +950,14 @@ def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
 def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_this_table():
     # Given a self-referential FK dropped in the same sync as the PK
     # (DROP_FOREIGN_KEY phases before DROP_PRIMARY_KEY, so execution succeeds)
-    own_fk = ForeignKeyConstraint(
+    own_fk = ObservedForeignKey(
         local_columns=("parent_id",),
         referenced_table=_QUALIFIED_NAME,
         referenced_columns=("id",),
-        constraint_name="test_parent_id_fk",
+        catalog_name="test_parent_id_fk",
     )
-    reference = ForeignKeyReference(
-        constraint_name="test_parent_id_fk",
+    reference = ObservedReferencingForeignKey(
+        catalog_name="test_parent_id_fk",
         referencing_table=_QUALIFIED_NAME,
     )
     pk_change = DropPrimaryKey("test_pk")
@@ -1125,7 +1126,8 @@ def test_column_spelling_check_reports_before_the_streaming_table_check():
 # ---- streaming tables
 
 
-_PIPELINE_KEY = PrimaryKeyConstraint(("id",), "test_pk")
+_DESIRED_PIPELINE_KEY = DesiredPrimaryKey(("id",), "test_pk")
+_OBSERVED_PIPELINE_KEY = ObservedPrimaryKey(("id",), "test_pk")
 # Unity Catalog will not key a nullable column and the engine will not declare
 # one, so the key column of a pipeline-declared key is NOT NULL on both sides
 _KEYED_COLUMNS = (DesiredColumn("id", Integer(), nullable=False),)
@@ -1178,7 +1180,9 @@ def test_annotations_scope_refuses_to_drop_a_pipeline_declared_key():
     # SQL, and an annotations-scope declaration that does not restate it
     desired = _desired_table(columns=_KEYED_COLUMNS, scope=TableScope.ANNOTATIONS)
     observed = _observed_table(
-        columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
+        columns=_KEYED_COLUMNS,
+        kind=TableKind.STREAMING_TABLE,
+        primary_key=_OBSERVED_PIPELINE_KEY,
     )
 
     # When validating the real diff of the two
@@ -1193,10 +1197,14 @@ def test_annotations_scope_refuses_to_drop_a_pipeline_declared_key():
 def test_a_declaration_mirroring_the_pipeline_key_leaves_it_alone():
     # Given the same table, with the declaration restating the pipeline's key
     desired = _desired_table(
-        columns=_KEYED_COLUMNS, scope=TableScope.ANNOTATIONS, primary_key=_PIPELINE_KEY
+        columns=_KEYED_COLUMNS,
+        scope=TableScope.ANNOTATIONS,
+        primary_key=_DESIRED_PIPELINE_KEY,
     )
     observed = _observed_table(
-        columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
+        columns=_KEYED_COLUMNS,
+        kind=TableKind.STREAMING_TABLE,
+        primary_key=_OBSERVED_PIPELINE_KEY,
     )
 
     # Then the key yields no action to disown. Mirroring is what the engine asks
