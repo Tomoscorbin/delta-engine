@@ -848,6 +848,8 @@ the backend it needs when called:
 
 - `build_spark_engine` imports `delta_engine.adapters.databricks.spark` on
   demand, which requires PySpark.
+- `to_spark_schema` imports the Spark schema converter on demand and translates
+  a backend-neutral desired table to PySpark's native `StructType`.
 - `build_sql_engine` imports `delta_engine.adapters.databricks.warehouse` on
   demand. That backend runs without PySpark entirely, and does not import
   `databricks-sql-connector` either — it only takes a connection the caller
