@@ -336,9 +336,6 @@ source = spark.createDataFrame(
 )
 ```
 
-This keeps test fixtures aligned with the schema used by the application and
-Unity Catalog.
-
 ### Assert the ETL produces the declared schema
 
 Compare the final DataFrame with the same table contract:
@@ -385,9 +382,6 @@ duplicates = (
 assert duplicates.isEmpty()
 ```
 
-The same primary key is therefore used by the table declaration, production
-ETL logic, and tests rather than being defined independently in each place.
-
 ### Test foreign-key relationships
 
 Related table declarations can also drive referential-integrity tests. For a
@@ -405,9 +399,6 @@ missing_customers = (
 
 assert missing_customers.isEmpty()
 ```
-
-Delta Engine validates that the declared relationship is structurally valid;
-the test verifies that the data produced by the ETL satisfies that relationship.
 
 ## Pattern 5: Add governance without taking over the pipeline
 
