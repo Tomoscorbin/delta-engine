@@ -55,7 +55,7 @@ def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_ta
     assert created["table_tags"] == {"owner": "data-platform"}
     assert created["column_tags"] == {("name", "pii"): "true"}
     assert created["primary_key"] == ("id",)
-    assert created["primary_key_name"] == f"{table_name}_pk"
+    assert isinstance(created["primary_key_name"], str) and created["primary_key_name"]
 
 
 def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection, live_tables):

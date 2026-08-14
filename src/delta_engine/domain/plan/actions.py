@@ -367,7 +367,7 @@ class AddPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        return self.primary_key.desired_name
+        return ",".join(self.primary_key.columns)
 
 
 @dataclass(frozen=True, slots=True)

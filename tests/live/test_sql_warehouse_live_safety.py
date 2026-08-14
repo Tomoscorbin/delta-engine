@@ -257,7 +257,8 @@ def test_referenced_primary_key_change_is_rejected_without_catalog_change(
     assert parent_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = parent_report.failures
     assert isinstance(failure, ValidationFailure)
-    assert f"{child_name}_parent_id_fk" in failure.message
+    [(catalog_name, *_)] = child_before["foreign_keys"]
+    assert catalog_name in failure.message
     assert parent_report.compiled is None
     assert read_live_table(live_connection, parent_name) == parent_before
     assert read_live_table(live_connection, child_name) == child_before

@@ -131,10 +131,10 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
     assert len(statements) == 3
     assert "DROP PRIMARY KEY" in statements[0]
     assert "RENAME COLUMN" in statements[1]
-    assert "ADD CONSTRAINT" in statements[2]
+    assert "ADD PRIMARY KEY" in statements[2]
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("customer_name",)
-    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
     assert engine.sync(renamed).has_changes is False
 
 
@@ -185,10 +185,10 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
     assert len(statements) == 3
     assert "DROP PRIMARY KEY" in statements[0]
     assert "RENAME COLUMN" in statements[1]
-    assert "ADD CONSTRAINT" in statements[2]
+    assert "ADD PRIMARY KEY" in statements[2]
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("tenant_id", "customer_name")
-    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
     assert engine.sync(renamed).has_changes is False
 
 
@@ -228,8 +228,14 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
     # whose referenced table is not registered in the same run.
     engine.sync(renamed_child, parent)
 
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
-        (f"{child_name}_parent_id_fk", "parent_id", parent_name, "id"),
+    [(constraint_name, local_column, referenced_table, referenced_column)] = read_live_table(
+        live_connection, child_name
+    )["foreign_keys"]
+    assert isinstance(constraint_name, str) and constraint_name
+    assert (local_column, referenced_table, referenced_column) == (
+        "parent_id",
+        parent_name,
+        "id",
     )
     assert engine.sync(renamed_child, parent).has_changes is False
 
@@ -267,9 +273,12 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
         ),
         parent,
     )
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
-        (f"{child_name}_account_num_tenant_id_fk", "account_num", parent_name, "account_id"),
-        (f"{child_name}_account_num_tenant_id_fk", "tenant_id", parent_name, "tenant_id"),
+    original_foreign_keys = read_live_table(live_connection, child_name)["foreign_keys"]
+    original_name = original_foreign_keys[0][0]
+    assert isinstance(original_name, str) and original_name
+    assert original_foreign_keys == (
+        (original_name, "account_num", parent_name, "account_id"),
+        (original_name, "tenant_id", parent_name, "tenant_id"),
     )
 
     renamed_child = DeltaTable(
@@ -293,10 +302,13 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
     engine.sync(renamed_child, parent)
 
     # Renaming one local column replaces the whole composite key: the new
-    # local column set names a new constraint and both pairs survive intact.
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
-        (f"{child_name}_account_id_tenant_id_fk", "account_id", parent_name, "account_id"),
-        (f"{child_name}_account_id_tenant_id_fk", "tenant_id", parent_name, "tenant_id"),
+    # local column set produces a new occurrence and both pairs survive intact.
+    renamed_foreign_keys = read_live_table(live_connection, child_name)["foreign_keys"]
+    renamed_name = renamed_foreign_keys[0][0]
+    assert isinstance(renamed_name, str) and renamed_name
+    assert renamed_foreign_keys == (
+        (renamed_name, "account_id", parent_name, "account_id"),
+        (renamed_name, "tenant_id", parent_name, "tenant_id"),
     )
     assert engine.sync(renamed_child, parent).has_changes is False
 

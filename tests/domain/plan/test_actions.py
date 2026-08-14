@@ -60,7 +60,7 @@ def _plan(*plan_actions: Action) -> ActionPlan:
     return ActionPlan(target=_TARGET, actions=plan_actions)
 
 
-def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
+def _primary_key(name: str | None = "table_pk", columns: tuple[str, ...] = ("id",)):
     return DesiredPrimaryKey(columns=columns, desired_name=name)
 
 
@@ -71,7 +71,8 @@ def _observed_primary_key(
 
 
 def _foreign_key(
-    name: str = "table_customer_id_fk", local_columns: tuple[str, ...] = ("customer_id",)
+    name: str | None = "table_customer_id_fk",
+    local_columns: tuple[str, ...] = ("customer_id",),
 ) -> DesiredForeignKey:
     return DesiredForeignKey(
         local_columns=local_columns,
@@ -193,7 +194,7 @@ def test_constraint_actions_reject_the_wrong_lifecycle(action) -> None:
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
         (_drop_primary_key(), "table_pk"),
-        (AddPrimaryKey(_primary_key()), "table_pk"),
+        (AddPrimaryKey(_primary_key()), "id"),
         (DropForeignKey(_observed_foreign_key()), "table_customer_id_fk"),
         (AddForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),
@@ -202,6 +203,11 @@ def test_constraint_actions_reject_the_wrong_lifecycle(action) -> None:
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
     assert action.subject == expected_subject
+
+
+def test_unnamed_constraint_additions_have_structural_subjects():
+    assert AddPrimaryKey(_primary_key(None, ("tenant_id", "id"))).subject == "tenant_id,id"
+    assert AddForeignKey(_foreign_key(None)).subject == "customer_id"
 
 
 @pytest.mark.parametrize(

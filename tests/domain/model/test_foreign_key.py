@@ -14,12 +14,11 @@ def _customers() -> QualifiedName:
 
 
 def test_constraint_identity_excludes_lifecycle_names():
-    # Given desired and observed FKs with identical definitions but different names
+    # Given desired and observed FKs with identical definitions under different naming lifecycles
     one = DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
-        desired_name="orders_customer_id_fk",
     )
     two = ObservedForeignKey(
         local_columns=("customer_id",),
@@ -34,6 +33,16 @@ def test_constraint_identity_excludes_lifecycle_names():
     assert hash(one) == hash(two)
     assert two.catalog_name == "chosen_elsewhere"
     assert type(two.catalog_name) is str
+
+
+def test_desired_foreign_key_accepts_an_omitted_creation_name():
+    key = DesiredForeignKey(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+
+    assert key.desired_name is None
 
 
 def test_constraint_identity_includes_the_referenced_table():

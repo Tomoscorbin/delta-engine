@@ -243,7 +243,7 @@ def test_desired_table_defaults_to_no_foreign_keys():
 
 
 def test_desired_table_stores_foreign_keys():
-    # Given a foreign key referencing another table (name generated at the API layer)
+    # Given a named foreign key referencing another table
     fk = DesiredForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
@@ -256,7 +256,7 @@ def test_desired_table_stores_foreign_keys():
         foreign_keys=(fk,),
     )
 
-    # Then the FK is stored, carrying its engine-generated constraint name
+    # Then the FK and its desired creation name are stored
     assert table.foreign_keys == (
         DesiredForeignKey(
             local_columns=("customer_id",),
@@ -356,9 +356,8 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         )
 
 
-def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
-    # Given two FKs over different local columns whose generated names collide:
-    # ('a', 'b_c') and ('a_b', 'c') both derive t_a_b_c_fk
+def test_desired_table_rejects_foreign_keys_with_the_same_explicit_name():
+    # Given two structurally different FKs with the same desired creation name
     first = DesiredForeignKey(
         local_columns=("a", "b_c"),
         referenced_table=QualifiedName("cat", "sch", "p1"),
@@ -384,6 +383,32 @@ def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
             ),
             foreign_keys=(first, second),
         )
+
+
+def test_desired_table_accepts_structurally_distinct_unnamed_foreign_keys():
+    first = DesiredForeignKey(
+        local_columns=("a", "b_c"),
+        referenced_table=QualifiedName("cat", "sch", "p1"),
+        referenced_columns=("x", "y"),
+    )
+    second = DesiredForeignKey(
+        local_columns=("a_b", "c"),
+        referenced_table=QualifiedName("cat", "sch", "p2"),
+        referenced_columns=("x", "y"),
+    )
+
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "t"),
+        columns=(
+            DesiredColumn("a", Integer()),
+            DesiredColumn("b_c", Integer()),
+            DesiredColumn("a_b", Integer()),
+            DesiredColumn("c", Integer()),
+        ),
+        foreign_keys=(first, second),
+    )
+
+    assert tuple(key.desired_name for key in table.foreign_keys) == (None, None)
 
 
 def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
