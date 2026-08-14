@@ -8,6 +8,7 @@ from delta_engine.application.validation import (
     ELIGIBILITY_CHECKS,
     UnmanagedAspectDrift,
     validate_diff,
+    validate_plan_set,
 )
 from delta_engine.domain.model import (
     Byte,
@@ -15,6 +16,7 @@ from delta_engine.domain.model import (
     Date,
     Decimal,
     DesiredColumn,
+    DesiredForeignKey,
     DesiredPrimaryKey,
     DesiredTable,
     Double,
@@ -37,7 +39,10 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.plan import (
     Action,
+    ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterColumnType,
     DropColumn,
     DropForeignKey,
@@ -59,6 +64,31 @@ from delta_engine.domain.plan.unresolvable import (
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
+
+
+def _plan(
+    table: str,
+    *actions: Action,
+    catalog: str = "dev",
+    schema: str = "silver",
+) -> ActionPlan:
+    return ActionPlan(
+        target=QualifiedName(catalog, schema, table),
+        actions=actions,
+    )
+
+
+def _desired_primary_key(name: str | None) -> DesiredPrimaryKey:
+    return DesiredPrimaryKey(columns=("id",), desired_name=name)
+
+
+def _desired_foreign_key(name: str | None) -> DesiredForeignKey:
+    return DesiredForeignKey(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        desired_name=name,
+    )
 
 
 def _observed_primary_key(name: str = "test_pk") -> ObservedPrimaryKey:
@@ -233,6 +263,73 @@ def test_validate_diff_applies_supplied_rules_to_drift():
     assert failures == (
         ValidationFailure(rule_name="AlwaysFail", message="checked dev.silver.test"),
     )
+
+
+# ---- plan-set validation
+
+
+def test_plan_set_rejects_case_insensitive_name_collision_across_pk_and_fk_additions():
+    plans = (
+        _plan(
+            "customers",
+            AddPrimaryKey(_desired_primary_key("Customer_Key")),
+        ),
+        _plan(
+            "orders",
+            AddForeignKey(_desired_foreign_key("customer_key")),
+        ),
+    )
+
+    failures = validate_plan_set(plans)
+
+    assert set(failures) == {
+        QualifiedName("dev", "silver", "customers"),
+        QualifiedName("dev", "silver", "orders"),
+    }
+    for (failure,) in failures.values():
+        assert failure.rule_name == "ConstraintNameMustBeUniqueInSchema"
+        assert failure.subject == "Customer_Key"
+        assert failure.details == (
+            "dev.silver.customers: primary key (id) requests 'Customer_Key'",
+            "dev.silver.orders: foreign key (customer_id) requests 'customer_key'",
+        )
+
+
+def test_plan_set_rejects_pk_and_fk_with_the_same_name_on_one_table():
+    plan = _plan(
+        "orders",
+        AddPrimaryKey(_desired_primary_key("shared_key")),
+        AddForeignKey(_desired_foreign_key("shared_key")),
+    )
+
+    failures = validate_plan_set((plan,))
+
+    assert list(failures) == [QualifiedName("dev", "silver", "orders")]
+    assert failures[plan.target][0].rule_name == "ConstraintNameMustBeUniqueInSchema"
+
+
+def test_plan_set_allows_the_same_explicit_name_in_different_schemas():
+    plans = (
+        _plan("customers", AddPrimaryKey(_desired_primary_key("shared_key")), schema="silver"),
+        _plan("orders", AddForeignKey(_desired_foreign_key("shared_key")), schema="gold"),
+    )
+
+    assert validate_plan_set(plans) == {}
+
+
+def test_plan_set_ignores_unnamed_constraint_additions():
+    plans = (
+        _plan("customers", AddPrimaryKey(_desired_primary_key(None))),
+        _plan("orders", AddForeignKey(_desired_foreign_key(None))),
+    )
+
+    assert validate_plan_set(plans) == {}
+
+
+def test_plan_set_allows_one_explicit_addition():
+    plans = (_plan("customers", AddPrimaryKey(_desired_primary_key("customers_pk"))),)
+
+    assert validate_plan_set(plans) == {}
 
 
 # ---- passing validation

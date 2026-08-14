@@ -15,15 +15,17 @@ The steps are:
                 the changes against it at the planning boundary, and compile
                 the accepted plan — freezing the outcomes into one complete
                 `TableRun`
-  4. Execute  — the one cross-table walk (real runs only): fold the blocking
+  4. Validate — judge the complete set of accepted plans together and reject
+                plans whose actions cannot coexist
+  5. Execute  — the one cross-table walk (real runs only): fold the blocking
                 rule over the runs and attach attempted statement results
                 to each executed table
-  5. Report   — assemble the aggregate ``SyncReport``, deriving dependency
+  6. Report   — assemble the aggregate ``SyncReport``, deriving dependency
                 blocking from the same edges
 
 Because the plan pass is read-only, every table is diffed and planned
 against the catalog as it stood before any statement ran, and a dry run is
-a real run that stops after the plan pass: the planned runs are the
+a real run that stops after plan-set validation: the validated runs are the
 preview. A run is born frozen and complete for everything its table can
 know alone; `None` on it means "not applicable" (no planning after a failed
 read), never "not yet". Execution and blocking — the two facts that depend
@@ -78,6 +80,7 @@ from delta_engine.application.report import (
     SyncReport,
     TableRun,
 )
+from delta_engine.application.validation import validate_plan_set
 from delta_engine.domain.model import (
     DesiredTable,
     QualifiedName,
@@ -136,12 +139,13 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs lower → resolve → plan → execute → report. Resolution orders
+        Runs lower → resolve → plan → validate plan set → execute → report. Resolution orders
         the tables dependency-first with their static facts, the plan pass
         takes each table through its read-only steps (read, plan, compile)
-        and freezes one complete ``TableRun``, execution attaches
-        attempted statement results to the tables it reaches, and assembly
-        derives dependency blocking from the edges.
+        and freezes one complete ``TableRun``, plan-set validation rejects
+        accepted actions that cannot coexist, execution attaches attempted
+        statement results to the tables it reaches, and assembly derives
+        dependency blocking from the edges.
 
         A table that fails an early phase carries that failure on its run
         and is skipped by execution; it is still included in the report.
@@ -150,7 +154,7 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, stop after the plan pass and attempt no
+            dry_run: When True, stop after plan-set validation and attempt no
                 statements (zero catalog mutations). No table retains attempted statement
                 results, while its ``plan`` still records the actions compiled
                 from the observed snapshot. Blocking is derived rather than
@@ -176,6 +180,7 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = tuple(self._plan_execution(resolution) for resolution in resolve(desired))
+        runs = self._apply_plan_set_validation(runs)
         if not dry_run:
             runs = self._execute(runs)
 
@@ -243,6 +248,38 @@ class Engine:
                 )
             case _ as unreachable:
                 assert_never(unreachable)
+
+    def _apply_plan_set_validation(
+        self,
+        runs: tuple[TableRun, ...],
+    ) -> tuple[TableRun, ...]:
+        """Reject accepted table plans that cannot coexist in this sync."""
+        plans = tuple(run.plan for run in runs if run.plan is not None)
+        failures_by_target = validate_plan_set(plans)
+        if not failures_by_target:
+            return runs
+
+        validated: list[TableRun] = []
+        for run in runs:
+            failures = failures_by_target.get(run.qualified_name)
+            if failures is None:
+                validated.append(run)
+                continue
+
+            planning = run.planning
+            if not isinstance(planning, PlanningAccepted):
+                raise AssertionError("Plan-set failure must target an accepted plan")
+
+            logger.error("Plan-set validation failed for %s", run.qualified_name)
+            validated.append(
+                replace(
+                    run,
+                    planning=PlanningRejected(diff=planning.diff, failures=failures),
+                    compiled=None,
+                )
+            )
+
+        return tuple(validated)
 
     def _execute(self, runs: tuple[TableRun, ...]) -> tuple[TableRun, ...]:
         """

@@ -209,10 +209,12 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
     """
     Return every action needed to realize a missing table.
 
-    CREATE TABLE establishes columns, comment, properties, layout, and the
-    primary key. Unity Catalog tags and foreign keys need follow-up actions;
-    ``ADD_FOREIGN_KEY`` phases after ``CREATE_TABLE``, so a self-referential
-    key sequences correctly by action phasing alone.
+    CREATE TABLE establishes columns, comment, properties, and layout. Tags
+    and constraints use the same explicit actions as changes to an existing
+    table, so every planned constraint creation has one representation.
+    ``ADD_PRIMARY_KEY`` and ``ADD_FOREIGN_KEY`` phase after ``CREATE_TABLE``;
+    the primary key phases first, so a self-referential foreign key sequences
+    correctly by action ordering alone.
     """
     table_tag_actions = tuple(
         SetTableTag(name=name, desired_value=value, observed_value=None)
@@ -228,10 +230,14 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
         for column in desired.columns
         for name, value in column.tags.items()
     )
+    primary_key_actions = (
+        (AddPrimaryKey(primary_key=desired.primary_key),) if desired.primary_key is not None else ()
+    )
     return (
         CreateTable(desired),
         *table_tag_actions,
         *column_tag_actions,
+        *primary_key_actions,
         *(AddForeignKey(constraint=foreign_key) for foreign_key in desired.foreign_keys),
     )
 

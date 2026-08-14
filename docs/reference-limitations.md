@@ -65,6 +65,10 @@ omits one. Delta-engine likewise omits the name unless `primary_key_name` or
 matching observed constraint: an explicit name is a creation preference, not
 ongoing managed state. Changing only that preference does not rename an
 existing constraint; Databricks has no direct constraint-rename clause.
+Before execution, delta-engine rejects explicit-name collisions among the
+constraint additions in the current sync. It does not read every constraint in
+the schema, so a collision with an unseen or externally managed constraint can
+still fail at Databricks execution.
 
 The declaration does not expose the physical name Databricks assigns to an
 unnamed constraint. `DeltaTable.primary_key_name` and `ForeignKey.name` report

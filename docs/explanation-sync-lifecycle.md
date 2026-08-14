@@ -17,7 +17,7 @@ one table's failure does not take down the rest of the run.
 Every sync runs the same chain of phases over every table in the call:
 
 ```text
-lower → resolve → read → diff → plan → compile → execute → report
+lower → resolve → read → diff → plan → compile → validate plan set → execute → report
 ```
 
 | Phase       | Question it answers                          | Outcome                                                            |
@@ -28,6 +28,7 @@ lower → resolve → read → diff → plan → compile → execute → report
 | **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — foreign-key existence included — or no drift |
 | **Plan**    | Is the complete diff accepted?               | A validated action plan, or named validation failures with no plan |
 | **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
+| **Validate plan set** | Can all accepted plans coexist? | Planning failures for explicit PK/FK creation-name collisions, or acceptance |
 | **Execute** | Apply the compiled statements                | Attempted results — or nothing, for tables skipped as no-ops, blocked, or on a dry run |
 
 Resolution comes before read because it needs nothing from the catalog: it
@@ -51,6 +52,11 @@ policy decides to reject them. The planning boundary always validates that
 complete diff and returns either an accepted `ActionPlan` or failures; a
 rejected result has no plan. An accepted plan carries the qualified table
 target and relation kind needed for compilation as well as its ordered actions.
+
+After all tables are planned, one plan-set check considers their actions
+together. It rejects explicit primary-key or foreign-key additions that reuse
+the same case-insensitive name within one catalog and schema. This cannot be a
+table-local safety rule because no individual diff can see the competing plan.
 
 This separation is why rejections are precise: a failed sync names the exact
 rule that fired and the column or table it fired on, rather than a generic

@@ -287,7 +287,7 @@ less truthful. Instead:
 1. let an action state all affected aspects, with ordinary actions exposing a
    singleton and `CreateTable` exposing the complete set it establishes;
 2. move missing-table action construction behind one named creation-plan
-   function, including the explicit post-create tag and foreign-key actions;
+   function, including the explicit post-create tag and constraint actions;
 3. make the creation diff projection cover every declared fact embedded in the
    create, including comments, properties, and partitioning; and
 4. add a coverage-style test that a populated creation declaration is fully
@@ -298,13 +298,15 @@ remain separate consumers of that meaning.
 
 ### Implemented
 
-Creation remains a single `CreateTable` aggregate. Its semantic diff projection
-now reports every declared fact embedded in the create statement: columns and
-nullability, primary key, partitioning or clustering, valued properties, column
-comments, and the table comment. Tags and foreign keys remain visible through
-their explicit follow-up actions. Coverage exercises a populated creation in
-both semantic reporting and compiled SQL; property absence assertions are
-correctly omitted because a new table already satisfies them.
+Creation retains a `CreateTable` aggregate for the state embedded in the base
+statement: columns and nullability, partitioning or clustering, valued
+properties, column comments, and the table comment. Tags and constraints are
+visible through explicit follow-up actions. In particular, the later
+constraint-lifecycle work made a missing table's key an `AddPrimaryKey`, so
+every physical key creation has one action representation and plan-set name
+validation needs no `CreateTable` exception. Coverage exercises the populated
+creation plan in both semantic reporting and compiled SQL; property absence
+assertions are correctly omitted because a new table already satisfies them.
 
 ## 5. Put key identity behind the primary-key value
 

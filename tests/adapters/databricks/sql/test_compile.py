@@ -218,7 +218,7 @@ def test_add_column_without_comment_omits_comment_clause():
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT"
 
 
-def test_create_table_renders_all_state_embedded_in_creation():
+def test_create_table_renders_all_base_state_embedded_in_creation():
     # Given a CREATE TABLE with structure, comments, properties, partitioning, and a key
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False, comment="identifier"),
@@ -232,11 +232,10 @@ def test_create_table_renders_all_state_embedded_in_creation():
     # When compiling
     statement = _compile_single(action)
 
-    # Then all state embedded in the creation aggregate is rendered
+    # Then all base state is rendered while the key remains a separate add action
     assert statement == (
         "CREATE TABLE `cat`.`sch`.`tbl`"
-        " (`id` INT NOT NULL COMMENT 'identifier', `day` STRING COMMENT 'partition date',"
-        " CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
+        " (`id` INT NOT NULL COMMENT 'identifier', `day` STRING COMMENT 'partition date')"
         " USING delta"
         " COMMENT 'core table'"
         " TBLPROPERTIES ('delta.appendOnly'='true')"
@@ -312,8 +311,8 @@ def test_create_table_renders_properties_in_sorted_order_and_filters_none_values
     assert "delta.logRetentionDuration" not in statement
 
 
-def test_create_table_inlines_primary_key_constraint():
-    # Given a CREATE TABLE with a primary key
+def test_create_table_leaves_primary_key_for_its_add_action():
+    # Given a base CREATE TABLE action whose desired table has a primary key
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
@@ -323,22 +322,20 @@ def test_create_table_inlines_primary_key_constraint():
     # When compiling
     statement = _compile_single(action)
 
-    # Then the primary key constraint is inlined in the column list
+    # Then CREATE TABLE establishes only the base table definition
     assert statement == (
-        "CREATE TABLE `cat`.`sch`.`tbl`"
-        " (`id` INT NOT NULL, `name` STRING, CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
-        " USING delta"
+        "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT NOT NULL, `name` STRING) USING delta"
     )
 
 
-def test_create_table_inlines_unnamed_primary_key():
+def test_create_table_also_leaves_unnamed_primary_key_for_its_add_action():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         primary_key=DesiredPrimaryKey(columns=("id",)),
     )
 
     assert _compile_single(action) == (
-        "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT NOT NULL, PRIMARY KEY (`id`)) USING delta"
+        "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT NOT NULL) USING delta"
     )
 
 
@@ -723,7 +720,7 @@ def test_add_primary_key_emits_the_exact_bound_spelling():
     )
 
 
-def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
+def test_create_table_emits_declared_spelling_for_columns_and_clustering():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
@@ -734,9 +731,8 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
 
     [statement] = compile_plan(plan).statements
 
-    # Then both the column definition and the inline key carry the declared spelling
+    # Then the base table statement carries the declared column spelling
     assert "`requestId` STRING NOT NULL" in statement
-    assert "PRIMARY KEY (`requestId`)" in statement
     assert "CLUSTER BY (`requestId`)" in statement
 
 

@@ -411,6 +411,9 @@ boundary.
 
 - Remove unconditional duplicate desired-name validation from individual
   desired-table construction.
+- Represent a missing table's primary key with `AddPrimaryKey` instead of
+  embedding it in `CreateTable`, so every physical constraint creation has one
+  action representation.
 - After all tables are planned, collect `AddPrimaryKey` and `AddForeignKey`
   actions with explicit desired names.
 - Group requests by catalog, schema, and case-folded name.
@@ -430,17 +433,19 @@ objects remain Databricks execution failures.
 
 #### Architectural work
 
-This likely requires an explicit plan-set validation step between per-table
-planning and compilation/execution:
+Use an explicit plan-set validation step between the table-local plan pass and
+execution:
 
 ```text
-read and plan each table
-    -> validate the set of accepted plans
-    -> compile accepted plans
+read, plan, and compile each table without mutation
+    -> validate the complete set of accepted plans
     -> execute
 ```
 
-Keep that orchestration change isolated in this PR.
+Compilation is pure and `TableRun` deliberately keeps every accepted table
+plan paired with its SQL, so a plan rejected by the set-wide check discards its
+already-rendered SQL. No statement executes before the check completes. Keep
+that orchestration change isolated in this PR.
 
 #### Acceptance criteria
 

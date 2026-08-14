@@ -2,9 +2,9 @@
 Run records: per-table and run-level outcome aggregates.
 
 `TableRun` is the immutable record of one table's sync run, born complete
-at the engine's plan pass and enriched afterwards with the cross-table
-facts (execution, dependency blocking); `SyncReport` aggregates those
-records for the whole run.
+at the engine's plan pass and functionally replaced as cross-table facts
+(plan-set admission, execution, dependency blocking) become known;
+`SyncReport` aggregates those records for the whole run.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -200,9 +200,11 @@ class TableRun:
     Born complete at the engine's plan pass: everything the table can know
     alone — its resolution, read, planning outcome, and compiled SQL — is
     fixed at construction, in lifecycle field order, and the trailing fields
-    default to their not-applicable state. The two facts that depend on other
-    tables are attached afterwards as functional updates: ``execution`` by
-    the execute walk, ``blocked_failures`` at assembly. A run without
+    default to their not-applicable state. Facts that depend on other tables
+    are attached afterwards as functional updates: a plan-set rejection
+    replaces the table-local planning outcome and discards its pure compiled
+    SQL, ``execution`` is attached by the execute walk, and
+    ``blocked_failures`` at assembly. A run without
     execution is a legitimate terminal state (a dry run, a blocked table, a
     no-op plan), not an unfinished one.
 

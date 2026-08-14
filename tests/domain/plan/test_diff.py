@@ -138,6 +138,18 @@ def test_missing_table_actions_are_exactly_the_table_creation():
     assert diff.actions == (CreateTable(desired),)
 
 
+def test_missing_table_primary_key_uses_the_same_add_action_as_existing_table_drift():
+    primary_key = DesiredPrimaryKey(columns=("id",), desired_name="test_pk")
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer(), nullable=False),),
+        primary_key=primary_key,
+    )
+
+    diff = diff_table(desired, observed=None)
+
+    assert diff.actions == (CreateTable(desired), AddPrimaryKey(primary_key))
+
+
 def test_equal_tables_diff_to_empty_drift():
     # Given identical desired and observed definitions
     diff = diff_table(_desired(), _observed())

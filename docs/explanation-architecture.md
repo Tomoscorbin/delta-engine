@@ -270,9 +270,9 @@ depend on the order arguments were passed.
 
 Each plan pass returns a frozen, immutable `TableRun` — the public record
 of that table's run, complete for everything the table can know alone, with
-failures and status derived from the retained outcomes. The two facts that
-depend on other tables are attached afterwards as functional updates
-(`dataclasses.replace`, re-validated by the value's own invariants): execution
+failures and status derived from the retained outcomes. Cross-table facts are
+attached afterwards as functional updates (`dataclasses.replace`, re-validated
+by the value's own invariants): plan-set rejection before execution, execution
 results by the execute walk, and derived dependency blocking at assembly.
 
 ```mermaid
@@ -283,6 +283,7 @@ sequenceDiagram
     participant Reader as CatalogStateReader
     participant Differ as diff_table
     participant Planner as plan_changes
+    participant Validator as validate_plan_set
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
@@ -301,6 +302,8 @@ sequenceDiagram
         Executor-->>Engine: SQL statements
         Engine->>Engine: freeze the TableRun
     end
+    Engine->>Validator: validate all accepted plans together
+    Validator-->>Engine: failures by affected table
     loop dependency-ordered runs (execute, real runs only)
         Engine->>Engine: skip the run if it failed or a dependency will not converge
         Engine->>Executor: execute(statement) until the first failure
@@ -329,13 +332,17 @@ The full run, with reporting last:
    early exit is a lifecycle rule — a failed read leaves nothing to plan, a
    rejected plan leaves nothing to compile — and the `TableRun` is frozen and
    complete when the plan pass returns it.
-4. **Execute** (real runs only): one walk in dependency order over the frozen
+4. **Validate plan set**: judge all accepted plans together and reject every
+   table whose explicitly named PK/FK addition collides with another planned
+   addition in the same catalog and schema. This pass is read-only; any SQL
+   compiled for a rejected plan is discarded.
+5. **Execute** (real runs only): one walk in dependency order over the frozen
    runs. A run with failures of its own, or with a dependency that will not
    converge, is skipped; the compiled statements of the rest are executed
    until the first failure, and each attempted run is replaced by a copy
    carrying its execution result. Because the plan pass is read-only, every
    table was planned against the catalog as it stood before any statement ran.
-5. **Report**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
+6. **Report**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
    which derives dependency blocking from the retained edges; or raise
    `SyncFailedError` with that report on real runs that failed.
 
@@ -446,8 +453,10 @@ observed)` produces a `TableDiff` — `TableCreation` when the table does not
 exist, else a `TableDrift` holding executable `actions` and non-action
 `unresolvable` differences as two typed tuples. Actions carry their `TableAspect` plus the
 complete desired/observed state needed by validation and reporting;
-`CreateTable` uses the table-existence aspect because it realizes a missing
-table's complete desired state rather than belonging to one schema dimension.
+`CreateTable` uses the table-existence aspect and establishes a missing table's
+base definition. Primary keys, foreign keys, and tags use the same explicit
+follow-up actions used for an existing table, so each planned constraint
+creation has one representation.
 Every value is named once (`desired_*` / `observed_*` for transition state),
 and compilers and renderers read those names directly. There is no mirrored
 fact vocabulary and no lowering method.
@@ -575,6 +584,16 @@ plan and records its validation failures; a `PlanningAccepted` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
 an empty plan with a real target and relation kind.
 
+Once every table has been planned, `validate_plan_set` judges facts that no
+single table diff can know. It scans explicit `AddPrimaryKey` and
+`AddForeignKey` requests across the accepted plans and rejects every plan in a
+case-insensitive constraint-name collision within one catalog and schema. This
+is unconditional plan-set admission, not a table-local `SafetyRule`: omitted
+names and already-satisfied declarations produce no conflicting named add
+action. The per-table compilation step is pure, so SQL already rendered for a
+rejected plan is discarded before any statement can execute. Collisions with
+unseen or externally managed constraints remain Databricks execution failures.
+
 ## Deterministic action plans
 
 An `ActionPlan` owns its table target, relation kind, and action ordering.
@@ -593,7 +612,7 @@ orders.
 
 The phase ordering exists because backend DDL has dependencies:
 
-- Table creation comes before follow-up tag and foreign-key actions for a
+- Table creation comes before follow-up tag, primary-key, and foreign-key actions for a
   missing table.
 - Foreign keys are dropped before primary keys and column drops, because a
   referenced key or column cannot be dropped while an FK still points at it.
@@ -663,6 +682,12 @@ the same run.
 Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
 `validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableCreation` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+
+`validate_plan_set` then checks the complete accepted action set for
+schema-wide creation-name collisions. It is a separate validation boundary
+because a `SafetyRule` receives one existing-table drift and is never called
+for table creation, while this rule requires all plans and applies equally to
+new and existing tables.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`

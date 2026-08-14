@@ -81,7 +81,7 @@ class Action(ABC):
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """Create a missing table from its complete desired definition."""
+    """Create a missing table's base definition; constraints use add actions."""
 
     table: DesiredTable
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_EXISTENCE

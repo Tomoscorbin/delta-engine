@@ -1,4 +1,4 @@
-"""Validation rules judging the diff between desired and observed table state."""
+"""Validation of individual table diffs and the complete accepted plan set."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from delta_engine.domain.model import (
     Float,
     Integer,
     Long,
+    QualifiedName,
     Short,
     TableAspect,
     TableKind,
@@ -29,7 +30,10 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.plan import (
     Action,
+    ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterColumnType,
     ColumnCaseDrift,
     ColumnRenameConflict,
@@ -46,6 +50,92 @@ from delta_engine.domain.plan import (
     Unresolvable,
     UnsetProperty,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedConstraintAddition:
+    """One explicit physical name that an accepted action plan will use."""
+
+    target: QualifiedName
+    desired_name: str
+    description: str
+
+
+def validate_plan_set(
+    plans: tuple[ActionPlan, ...],
+) -> dict[QualifiedName, tuple[ValidationFailure, ...]]:
+    """
+    Report explicit constraint names reused by planned additions in one schema.
+
+    Databricks gives primary and foreign keys one case-insensitive constraint
+    namespace per catalog and schema. Only add actions participate: an omitted
+    name is allocated by Databricks, and a satisfied declaration produces no
+    add action and therefore does not use its creation preference.
+
+    The result is keyed by the table whose accepted plan must be rejected.
+    Empty means the plans are jointly admissible. This check deliberately
+    makes no claim about constraints outside the supplied plans; unseen
+    catalog objects can still reject a statement at execution.
+    """
+    additions_by_name: dict[
+        tuple[str, str, str],
+        list[_PlannedConstraintAddition],
+    ] = {}
+
+    for plan in plans:
+        for action in plan:
+            addition: _PlannedConstraintAddition | None = None
+            if isinstance(action, AddPrimaryKey):
+                desired_name = action.primary_key.desired_name
+                if desired_name is not None:
+                    columns = ", ".join(action.primary_key.columns)
+                    addition = _PlannedConstraintAddition(
+                        target=plan.target,
+                        desired_name=desired_name,
+                        description=f"primary key ({columns})",
+                    )
+            elif isinstance(action, AddForeignKey):
+                desired_name = action.constraint.desired_name
+                if desired_name is not None:
+                    columns = ", ".join(action.constraint.local_columns)
+                    addition = _PlannedConstraintAddition(
+                        target=plan.target,
+                        desired_name=desired_name,
+                        description=f"foreign key ({columns})",
+                    )
+
+            if addition is None:
+                continue
+            key = (
+                plan.target.catalog,
+                plan.target.schema,
+                str(addition.desired_name).casefold(),
+            )
+            additions_by_name.setdefault(key, []).append(addition)
+
+    failures_by_target: dict[QualifiedName, list[ValidationFailure]] = {}
+    for (catalog, schema, _), additions in additions_by_name.items():
+        if len(additions) < 2:
+            continue
+
+        details = tuple(
+            f"{addition.target}: {addition.description} requests '{addition.desired_name}'"
+            for addition in additions
+        )
+        failure = ValidationFailure(
+            rule_name="ConstraintNameMustBeUniqueInSchema",
+            subject=str(additions[0].desired_name),
+            message=(
+                "Operation not allowed: multiple planned constraint additions"
+                f" request the same case-insensitive name in {catalog}.{schema}."
+            ),
+            details=details,
+        )
+        for target in dict.fromkeys(addition.target for addition in additions):
+            failures_by_target.setdefault(target, []).append(failure)
+
+    return {target: tuple(failures) for target, failures in failures_by_target.items()}
+
 
 # The widenings Delta can apply in place (observed -> desired), per the
 # Databricks type-widening matrix. Decimal targets are handled separately —

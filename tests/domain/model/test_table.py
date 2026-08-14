@@ -356,7 +356,7 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         )
 
 
-def test_desired_table_rejects_foreign_keys_with_the_same_explicit_name():
+def test_desired_table_allows_creation_names_that_only_plan_set_validation_can_judge():
     # Given two structurally different FKs with the same desired creation name
     first = DesiredForeignKey(
         local_columns=("a", "b_c"),
@@ -371,18 +371,21 @@ def test_desired_table_rejects_foreign_keys_with_the_same_explicit_name():
         desired_name="t_a_b_c_fk",
     )
 
-    # When / Then the collision is rejected, naming both column tuples
-    with pytest.raises(ValueError, match="same constraint name"):
-        DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "t"),
-            columns=(
-                DesiredColumn("a", Integer()),
-                DesiredColumn("b_c", Integer()),
-                DesiredColumn("a_b", Integer()),
-                DesiredColumn("c", Integer()),
-            ),
-            foreign_keys=(first, second),
-        )
+    # When
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "t"),
+        columns=(
+            DesiredColumn("a", Integer()),
+            DesiredColumn("b_c", Integer()),
+            DesiredColumn("a_b", Integer()),
+            DesiredColumn("c", Integer()),
+        ),
+        foreign_keys=(first, second),
+    )
+
+    # Then the declaration remains representable; the names matter only if
+    # both constraints become planned additions.
+    assert table.foreign_keys == (first, second)
 
 
 def test_desired_table_accepts_structurally_distinct_unnamed_foreign_keys():

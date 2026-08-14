@@ -434,7 +434,7 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
     ]
 
 
-def test_create_table_entries_include_all_state_embedded_in_create():
+def test_create_table_entries_include_all_base_state_embedded_in_create():
     # Given a CREATE TABLE carrying structural, layout, property, and comment state
     action = CreateTable(
         table=DesiredTable(
@@ -453,12 +453,12 @@ def test_create_table_entries_include_all_state_embedded_in_create():
         )
     )
 
-    # Then reporting states every fact that CREATE TABLE establishes. A None
+    # Then reporting states every fact that CREATE TABLE establishes. The key
+    # is reported by its separate AddPrimaryKey action. A None
     # property asserts absence and is therefore not a creation change.
     assert action_entries(action) == (
         DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
         DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "day", ("String",)),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key tbl_pk", ("(id)",)),
         DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, "partitioning", ("(day)",)),
         DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, "delta.appendOnly", ("= 'true'",)),
         DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column id", ("'identifier'",)),
@@ -467,7 +467,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
     )
 
 
-def test_create_table_entry_identifies_unnamed_primary_key_by_columns():
+def test_create_table_entry_does_not_duplicate_its_separate_primary_key_action():
     action = CreateTable(
         table=DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "tbl"),
@@ -478,9 +478,7 @@ def test_create_table_entry_identifies_unnamed_primary_key_by_columns():
 
     key_entries = [entry for entry in action_entries(action) if entry.category is DiffCategory.KEYS]
 
-    assert key_entries == [
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key (id)", ("(id)",))
-    ]
+    assert key_entries == []
 
 
 def test_every_category_names_itself_in_singular_and_plural():

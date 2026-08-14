@@ -38,6 +38,7 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
     AddColumn,
+    AddPrimaryKey,
     CreateTable,
     SetColumnComment,
     SetColumnTag,
@@ -94,12 +95,31 @@ def _spec_without_pk(fqn: str) -> DeltaTable:
     )
 
 
+def _spec_with_pk_name(fqn: str, primary_key_name: str) -> DeltaTable:
+    """Build a keyed table with an explicit primary-key creation name."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("id", String(), nullable=False),),
+        primary_key=["id"],
+        primary_key_name=primary_key_name,
+    )
+
+
 def _referenced_spec(fqn: str) -> DeltaTable:
     """Build a minimal table declaration for use as an FK target."""
     return _spec(fqn)
 
 
-def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
+def _spec_with_fk(
+    fqn: str,
+    references: str,
+    *,
+    foreign_key_name: str | None = None,
+) -> DeltaTable:
     """Build a table declaration with a single FK to another table."""
     catalog, schema, table_name = _split_fqn(fqn)
 
@@ -116,6 +136,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
             ForeignKey(
                 columns={"ref_id": "id"},
                 references=_referenced_spec(references),
+                name=foreign_key_name,
             )
         ],
     )
@@ -537,7 +558,7 @@ def test_real_run_records_the_applied_plan_on_the_report():
 
     # Then the report records the plan that was applied
     [table_report] = list(report)
-    assert [type(action) for action in table_report.plan] == [CreateTable]
+    assert [type(action) for action in table_report.plan] == [CreateTable, AddPrimaryKey]
     assert table_report.status is TableRunStatus.SUCCESS
     assert executor.executed_names == [fqn]
 
@@ -638,6 +659,8 @@ def test_all_reads_complete_before_execution_and_a_read_failure_blocks_only_its_
         "read:c.s.b",
         "read:c.s.c",
         "execute:c.s.a",
+        "execute:c.s.a",
+        "execute:c.s.c",
         "execute:c.s.c",
     ]
 
@@ -776,7 +799,8 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 def test_unexpected_executor_exception_propagates():
     class BuggyExecutor:
         def compile(self, plan: ActionPlan) -> CompiledPlan:
-            return build_compiled_plan(plan, (f"STATEMENT FOR {plan.target}",))
+            statements = tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
+            return build_compiled_plan(plan, statements)
 
         def execute(self, _statement: str) -> None:
             raise RuntimeError("adapter bug")
@@ -1328,6 +1352,115 @@ def test_sync_rejects_duplicate_table_names_before_reading():
 
 
 # ---------------------------------------------------------------------------
+# Plan-set validation
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_rejects_case_variant_pk_and_fk_creation_names_before_execution():
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    report = engine.sync(
+        _spec_with_pk_name("cat.sch.customers", "Customer_Key"),
+        _spec_with_fk(
+            "cat.sch.orders",
+            "cat.sch.customers",
+            foreign_key_name="customer_key",
+        ),
+        dry_run=True,
+    )
+
+    customers = _assert_status(report, "cat.sch.customers", TableRunStatus.PLANNING_FAILED)
+    orders = _assert_status(report, "cat.sch.orders", TableRunStatus.PLANNING_FAILED)
+    for table_run in (customers, orders):
+        assert table_run.plan is None
+        assert table_run.compiled is None
+        assert any(
+            isinstance(failure, ValidationFailure)
+            and failure.rule_name == "ConstraintNameMustBeUniqueInSchema"
+            for failure in table_run.failures
+        )
+    assert executor.executed_names == []
+
+
+def test_real_run_executes_independent_table_but_no_colliding_table():
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[None])
+    engine = Engine(reader=reader, executor=executor)
+
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_pk_name("cat.sch.a", "shared_key"),
+            _spec_with_pk_name("cat.sch.b", "SHARED_KEY"),
+            _spec("cat.sch.independent"),
+        )
+
+    report = exc_info.value.report
+    _assert_status(report, "cat.sch.a", TableRunStatus.PLANNING_FAILED)
+    _assert_status(report, "cat.sch.b", TableRunStatus.PLANNING_FAILED)
+    _assert_status(report, "cat.sch.independent", TableRunStatus.SUCCESS)
+    assert executor.executed_names == ["cat.sch.independent"]
+
+
+def test_same_explicit_constraint_name_is_allowed_in_different_schemas():
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    report = engine.sync(
+        _spec_with_pk_name("cat.silver.customers", "shared_key"),
+        _spec_with_pk_name("cat.gold.orders", "shared_key"),
+        dry_run=True,
+    )
+
+    assert report.has_failures is False
+
+
+def test_already_satisfied_constraints_do_not_use_their_creation_names():
+    reader = _RecordingReader(
+        {
+            "cat.sch.customers": _existing_id_table_synced("cat.sch.customers"),
+            "cat.sch.orders": _existing_id_table_synced("cat.sch.orders"),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    report = engine.sync(
+        _spec_with_pk_name("cat.sch.customers", "shared_key"),
+        _spec_with_pk_name("cat.sch.orders", "SHARED_KEY"),
+        dry_run=True,
+    )
+
+    assert report.has_failures is False
+    assert report.has_changes is False
+
+
+def test_constraint_name_failure_blocks_a_foreign_key_dependent():
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    report = engine.sync(
+        _spec_with_pk_name("cat.sch.parent", "shared_key"),
+        _spec_with_pk_name("cat.sch.peer", "SHARED_KEY"),
+        _spec_with_fk("cat.sch.child", "cat.sch.parent"),
+        dry_run=True,
+    )
+
+    _assert_status(report, "cat.sch.parent", TableRunStatus.PLANNING_FAILED)
+    _assert_status(report, "cat.sch.peer", TableRunStatus.PLANNING_FAILED)
+    child = _assert_status(report, "cat.sch.child", TableRunStatus.FOREIGN_KEY_FAILED)
+    _assert_has_fk_failure(
+        child,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.parent",
+    )
+    assert executor.executed_names == []
+
+
+# ---------------------------------------------------------------------------
 # Dry run behaviour
 # ---------------------------------------------------------------------------
 
@@ -1373,7 +1506,7 @@ def test_dry_run_exposes_the_planned_actions_on_the_report():
     # Then the table report carries the plan that would have been applied
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    assert [type(action) for action in table_report.plan] == [CreateTable]
+    assert [type(action) for action in table_report.plan] == [CreateTable, AddPrimaryKey]
     assert table_report.execution is None
     assert executor.executed_names == []
 

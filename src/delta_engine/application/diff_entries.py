@@ -245,21 +245,6 @@ def drift_entries(drift: TableDrift) -> tuple[DiffEntry, ...]:
 def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     entries = [_column_add_entry(column) for column in action.table.columns]
 
-    primary_key = action.table.primary_key
-    if primary_key is not None:
-        entries.append(
-            DiffEntry(
-                DiffCategory.KEYS,
-                DiffOperation.ADD,
-                subject=_key_subject(
-                    "primary key",
-                    primary_key.desired_name,
-                    primary_key.columns,
-                ),
-                detail=_columns_detail(primary_key.columns),
-            )
-        )
-
     if action.table.clustered_by:
         entries.append(
             DiffEntry(

@@ -102,12 +102,9 @@ def _compile_action(action: Action, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_create_table(action: CreateTable, target: _Target) -> str:
-    """Compile a CREATE TABLE statement including columns, comment, properties, and optional PK."""
+    """Compile a base CREATE TABLE; constraints compile from their add actions."""
     table = action.table
     column_defs = [_column_definition(column) for column in table.columns]
-
-    if table.primary_key is not None:
-        column_defs.append(_primary_key_definition(table.primary_key))
 
     columns_clause = ", ".join(column_defs)
     table_comment = _table_comment_clause(table.comment)

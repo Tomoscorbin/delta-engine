@@ -148,7 +148,11 @@ def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
     )
 ```
 
-An action may emit several entries across categories (`CreateTable` lists its columns and its primary key), and category grouping in the diff is display-only — it never changes execution order. `test_every_action_type_has_registered_diff_entries` fails if an action has no arm.
+An action may emit several entries across categories (`CreateTable` lists its
+columns, layout, properties, and comments; constraints use their own add
+actions), and category grouping in the diff is display-only — it never changes
+execution order. `test_every_action_type_has_registered_diff_entries` fails if
+an action has no arm.
 
 ## 6. Add a validation rule if needed
 

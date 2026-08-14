@@ -207,9 +207,6 @@ class DesiredTable:
         Checking the column *set* (order-insensitive) also rejects a reordered
         duplicate.
 
-        No two explicitly named foreign keys may carry the same desired name.
-        Unnamed keys leave physical naming to Databricks.
-
         A primary key column must be NOT NULL — a nullable primary key is not a
         well-formed desired schema, independent of any migration. Enforcing it
         here (rather than as a plan-validation rule) keeps the planning layer
@@ -246,7 +243,6 @@ class DesiredTable:
         )
 
         seen: set[frozenset[str]] = set()
-        local_columns_by_desired_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -255,18 +251,6 @@ class DesiredTable:
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
-            desired_name = foreign_key.desired_name
-            if desired_name is None:
-                continue
-            collided = local_columns_by_desired_name.get(desired_name)
-            if collided is not None:
-                raise ValueError(
-                    "Two foreign keys carry the same constraint name"
-                    f" '{desired_name}': local columns {collided}"
-                    f" and {foreign_key.local_columns}. Every foreign key on a"
-                    " table must have a distinct constraint name."
-                )
-            local_columns_by_desired_name[desired_name] = foreign_key.local_columns
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)
