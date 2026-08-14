@@ -970,7 +970,7 @@ recommendations do not become parallel sources of truth.
 | --- | --- |
 | Resolve foreign keys at the declaration-set boundary | Open as findings 1 and 2; the review repeated the same split-authority evidence. |
 | Hide property-dependent capabilities behind property policy | Open as finding 17, the one distinct recommendation from that review. |
-| Separate desired constraint intent from observed physical identity | Implemented by PRs #355, #356, and #358. Desired values carry optional creation names, observed values carry exact catalog names, and reconciliation matches relational definitions. Planned explicit-name collision admission remains separate correctness debt. |
+| Separate desired constraint intent from observed physical identity | Implemented by PRs #355, #356, and #358. Desired values carry optional creation names, observed values carry exact catalog names, and reconciliation matches relational definitions. Explicit-name collisions are an accepted Databricks execution limitation: partial preflight would add a sync-wide planning boundary without complete namespace visibility. |
 | Give dependency convergence one owner | Not retained as a separate finding. The second whole-codebase pass found the shared rule already lives in `TableResolution.blocked_by`; execution and report assembly fold it for different purposes. A sync-wide schedule remains finding 3. |
 
 ### PR #341: constraint value depth

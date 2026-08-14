@@ -672,9 +672,10 @@ removed both name generators and delegates every omitted name to Databricks.
 
 Constraint definitions now reconcile structurally, so an existing occurrence
 is adopted under any catalog name. Explicit names remain optional creation
-preferences. Collisions among planned explicit additions are separate
-pre-execution hardening tracked in `todo.md`; collisions with constraints the
-engine cannot observe remain Databricks execution failures.
+preferences. Constraint-name collisions are deliberately left to Databricks:
+partial preflight would add a sync-wide planning boundary while still missing
+constraints the engine cannot observe. The resulting execution-time and
+partial-sync limitation is documented in `reference-limitations.md`.
 
 ## 14. Make dependency-cycle detection iterative
 

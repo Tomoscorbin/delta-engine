@@ -501,7 +501,9 @@ therefore a no-op; it does not rename or recreate an existing key.
 
 Constraint names share one case-insensitive namespace across all tables and
 constraint kinds in a schema. Choose an explicit name that is unique across
-that whole schema. A collision is reported as a Databricks execution failure.
+that whole schema. Delta-engine does not preflight this namespace: a collision
+is reported as a Databricks execution failure, and statements earlier in the
+sync remain applied. Fix or omit the name and rerun the sync.
 `DeltaTable.primary_key_name` returns only the explicit creation request, or
 `None` when the name was omitted (including when a primary key exists);
 `DeltaTable.primary_key` continues to return the tuple of key columns.
@@ -617,7 +619,9 @@ is omitted, the engine emits unnamed foreign-key SQL and Databricks allocates a
 schema-unique name. On later syncs, any observed foreign key with the same local
 columns, referenced table, and referenced columns satisfies the declaration,
 regardless of its physical name. Explicit names must be schema-unique at
-creation; a collision is reported as an execution failure from Databricks.
+creation. Delta-engine does not preflight this namespace; a collision is
+reported as an execution failure from Databricks and may follow statements
+that already succeeded. Fix or omit the name and rerun the sync.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
