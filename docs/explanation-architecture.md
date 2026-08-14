@@ -752,26 +752,24 @@ declaration shape.
 
 ## Constraint names
 
-Constraint names remain data on the concrete key objects; the domain does not
-introduce separate definition, desired-specification, or physical-occurrence
-wrappers.
+Constraint identity is structural. Primary keys compare by their column set;
+foreign keys compare by their local columns, referenced table, and referenced
+columns. Their physical name is deliberately excluded from equality and
+hashing.
 
-Every `PrimaryKeyConstraint` is complete: it carries its physical name as well
-as its columns. Public `primary_key_name=None` is input shorthand only. When
-the declaration is lowered, the API layer already knows the owning table and
-generates `{table}_pk` once; an explicit name passes through unchanged. The
-reader likewise supplies the catalog name when it constructs an observed key.
-The differ can therefore compare column-set and case-insensitive name identity
-without resolving lifecycle state, and the compiler consumes the same value.
+Desired constraints carry an optional creation preference. `None` makes the
+compiler omit the name so Databricks allocates one; an explicit value requests
+that name when the constraint is created. Once the constraint exists,
+Databricks owns its physical name. Changing only the preference is therefore a
+no-op rather than an implicit drop and recreate.
 
-Every `ForeignKeyConstraint` is likewise complete: it carries its physical name
-as well as its local-to-referenced definition. Public `ForeignKey.name=None` is
-input shorthand only. When the declaration is attached to a `DeltaTable`, the
-API layer already knows the owner and generates `{table}_{local_columns}_fk`
-once; an explicit name passes through unchanged. Canonicalized column pairs and
-case-insensitive identifiers make normal constraint equality express both
-physical-name and structural identity. The differ and compiler consume that
-same complete value.
+Catalog reads produce `ObservedPrimaryKeyConstraint` and
+`ObservedForeignKeyConstraint`, whose names are required. This keeps physical
+identity available for drop operations without making every constraint
+consumer handle `None`. Reconciliation itself stays ordinary: desired and
+observed constraints compare with `==`, unmatched observations are dropped,
+and unmatched declarations are created. Optional SQL grammar remains inside
+the compiler; other layers neither predict nor reconcile platform names.
 
 ## Reporting and failure semantics
 

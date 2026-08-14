@@ -84,17 +84,17 @@ from tests.builders import build_compiled_plan
 
 
 def _primary_key(
-    columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
+    columns: tuple[str, ...] = ("id",), name: str | None = "tbl_pk"
 ) -> PrimaryKeyConstraint:
-    return PrimaryKeyConstraint(columns, constraint_name)
+    return PrimaryKeyConstraint(columns, name)
 
 
-def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> ForeignKeyConstraint:
+def _foreign_key(name: str | None = "orders_customer_id_fk") -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        constraint_name=constraint_name,
+        name=name,
     )
 
 
@@ -229,7 +229,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         (
-            DropForeignKey(constraint=_foreign_key()),
+            DropForeignKey(name="orders_customer_id_fk"),
             (
                 DiffEntry(
                     DiffCategory.KEYS, DiffOperation.REMOVE, "foreign key orders_customer_id_fk"
@@ -368,6 +368,35 @@ def test_action_entries_render_expected(action, expected):
     assert action_entries(action) == expected
 
 
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        pytest.param(
+            SetPrimaryKey(primary_key=_primary_key(("id", "tenant_id"), None)),
+            DiffEntry(
+                DiffCategory.KEYS,
+                DiffOperation.ADD,
+                "primary key (id, tenant_id)",
+                ("(id, tenant_id)",),
+            ),
+            id="primary-key",
+        ),
+        pytest.param(
+            SetForeignKey(constraint=_foreign_key(None)),
+            DiffEntry(
+                DiffCategory.KEYS,
+                DiffOperation.ADD,
+                "foreign key (customer_id)",
+                ("(customer_id) → cat.sch.customers",),
+            ),
+            id="foreign-key",
+        ),
+    ],
+)
+def test_unnamed_key_entries_identify_constraints_by_columns(action, expected):
+    assert action_entries(action) == (expected,)
+
+
 def test_create_table_entries_include_clustering_without_optimize_hint():
     # Given a CREATE TABLE that declares clustering keys
     action = CreateTable(
@@ -417,6 +446,22 @@ def test_create_table_entries_include_all_state_embedded_in_create():
         DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column day", ("'partition date'",)),
         DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "table", ("'daily orders'",)),
     )
+
+
+def test_create_table_entry_identifies_unnamed_primary_key_by_columns():
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "tbl"),
+            columns=(DesiredColumn("id", Integer(), nullable=False),),
+            primary_key=PrimaryKeyConstraint(("id",)),
+        )
+    )
+
+    key_entries = [entry for entry in action_entries(action) if entry.category is DiffCategory.KEYS]
+
+    assert key_entries == [
+        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key (id)", ("(id)",))
+    ]
 
 
 def test_every_category_names_itself_in_singular_and_plural():

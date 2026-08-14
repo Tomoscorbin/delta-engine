@@ -42,12 +42,14 @@ def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
     engine.sync(DeltaTable(live_catalog(), live_schema(), table_name, columns=columns))
     assert read_live_table(live_connection, table_name)["primary_key"] == ()
 
-    engine.sync(
-        DeltaTable(live_catalog(), live_schema(), table_name, columns=columns, primary_key=("id",))
+    single_key = DeltaTable(
+        live_catalog(), live_schema(), table_name, columns=columns, primary_key=("id",)
     )
+    engine.sync(single_key)
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("id",)
-    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
+    assert engine.sync(single_key).has_changes is False
 
     engine.sync(
         DeltaTable(
@@ -112,10 +114,15 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
         "tenant_id",
         "account_id",
     )
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
-        (f"{child_name}_account_id_tenant_id_fk", "account_id", parent_name, "account_id"),
-        (f"{child_name}_account_id_tenant_id_fk", "tenant_id", parent_name, "tenant_id"),
+    foreign_keys = read_live_table(live_connection, child_name)["foreign_keys"]
+    assert len(foreign_keys) == 2
+    generated_name = foreign_keys[0][0]
+    assert isinstance(generated_name, str) and generated_name
+    assert foreign_keys == (
+        (generated_name, "account_id", parent_name, "account_id"),
+        (generated_name, "tenant_id", parent_name, "tenant_id"),
     )
+    assert engine.sync(child, parent).has_changes is False
 
     child_without_fk = DeltaTable(
         live_catalog(),
@@ -151,14 +158,20 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
 
     build_sql_engine(live_connection).sync(table)
 
-    assert read_live_table(live_connection, table_name)["foreign_keys"] == (
-        (f"{table_name}_manager_id_fk", "manager_id", table_name, "id"),
+    [(constraint_name, local_column, referenced_table, referenced_column)] = read_live_table(
+        live_connection, table_name
+    )["foreign_keys"]
+    assert isinstance(constraint_name, str) and constraint_name
+    assert (local_column, referenced_table, referenced_column) == (
+        "manager_id",
+        table_name,
+        "id",
     )
 
 
-def test_explicit_constraint_names_avoid_drift(live_connection, live_tables):
-    """Explicit PK and FK names adopt matching existing constraints."""
-    # Given live constraints under names the engine would not generate
+def test_unnamed_declarations_adopt_existing_constraint_names(live_connection, live_tables):
+    """Matching PK and FK definitions adopt names already present in the catalog."""
+    # Given live constraints under explicit legacy names
     table_name = live_tables("adopted_names")
     execute_sql(
         live_connection,
@@ -170,7 +183,6 @@ def test_explicit_constraint_names_avoid_drift(live_connection, live_tables):
         f"ALTER TABLE {qualified_table(table_name)} ADD CONSTRAINT {table_name}_legacy_fk "
         f"FOREIGN KEY (manager_id) REFERENCES {qualified_table(table_name)} (id)",
     )
-    # Both physical names are managed, so adopting the legacy names is explicit.
     declaration = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -180,12 +192,10 @@ def test_explicit_constraint_names_avoid_drift(live_connection, live_tables):
             Column("manager_id", Integer()),
         ),
         primary_key=("id",),
-        primary_key_name=f"{table_name}_legacy_pk",
         foreign_keys=(
             ForeignKey(
                 columns={"manager_id": "id"},
                 references=Self,
-                name=f"{table_name}_legacy_fk",
             ),
         ),
     )
@@ -199,6 +209,33 @@ def test_explicit_constraint_names_avoid_drift(live_connection, live_tables):
     state = read_live_table(live_connection, table_name)
     assert state["primary_key_name"] == f"{table_name}_legacy_pk"
     assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
+
+
+def test_explicit_primary_key_name_is_only_used_when_creating_the_constraint(
+    live_connection, live_tables
+):
+    table_name = live_tables("creation_only_pk_name")
+    old_name = f"{table_name}_old_pk"
+    new_name = f"{table_name}_business_key"
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} "
+        f"(id INT NOT NULL, CONSTRAINT `{old_name}` PRIMARY KEY (id)) USING DELTA",
+    )
+    declaration = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=("id",),
+        primary_key_name=new_name,
+    )
+
+    report = build_sql_engine(live_connection).sync(declaration)
+
+    assert report.has_failures is False
+    assert report.has_changes is False
+    assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name.lower()
 
 
 def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_named_drop(
@@ -259,9 +296,8 @@ def test_platform_generates_names_for_unnamed_primary_and_foreign_keys(
     live_connection, live_tables
 ):
     """Databricks accepts unnamed keys and exposes the generated names in the catalog."""
-    # The engine will continue to materialize its own default names. This pin
-    # records that raw SQL callers may omit names without making generated-name
-    # shape or stability part of the engine's contract.
+    # Generated-name shape and stability are deliberately not part of the
+    # engine's contract.
     parent_name = live_tables("unnamed_parent")
     child_name = live_tables("unnamed_child")
     execute_sql(
@@ -428,12 +464,11 @@ def test_primary_key_on_a_camel_case_column_converges(live_connection, live_tabl
     assert report.has_failures is False
     statements = next(iter(report.planned_sql_statements.values()))
     assert statements == (
-        f"ALTER TABLE {qualified_table(table_name)} "
-        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestId`)",
+        f"ALTER TABLE {qualified_table(table_name)} ADD PRIMARY KEY (`requestId`)",
     )
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("requestId",)
-    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
     assert engine.sync(declaration).has_changes is False
 
 
@@ -524,11 +559,17 @@ def test_foreign_key_on_camel_case_columns_converges(live_connection, live_table
     assert report.has_failures is False
     assert report.planned_sql_statements[f"{live_catalog()}.{live_schema()}.{child_name}"] == (
         f"ALTER TABLE {qualified_table(child_name)} "
-        f"ADD CONSTRAINT `{child_name}_orderref_fk` FOREIGN KEY (`orderRef`) "
+        f"ADD FOREIGN KEY (`orderRef`) "
         f"REFERENCES {qualified_table(parent_name)} (`orderId`)",
     )
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
-        (f"{child_name}_orderref_fk", "orderRef", parent_name, "orderId"),
+    [(constraint_name, local_column, referenced_table, referenced_column)] = read_live_table(
+        live_connection, child_name
+    )["foreign_keys"]
+    assert isinstance(constraint_name, str) and constraint_name
+    assert (local_column, referenced_table, referenced_column) == (
+        "orderRef",
+        parent_name,
+        "orderId",
     )
     assert engine.sync(child, parent).has_changes is False
 

@@ -20,7 +20,11 @@ from delta_engine.domain.model import (
     TimestampNtz,
     Variant,
 )
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
+    PrimaryKeyConstraint,
+)
 from delta_engine.domain.plan.actions import (
     AddColumn,
     AlterClustering,
@@ -54,7 +58,11 @@ from delta_engine.domain.plan.unresolvable import (
     PartitioningChanged,
     PropertyUndeclared,
 )
-from tests.builders import as_observed_columns
+from tests.builders import (
+    as_observed_columns,
+    as_observed_foreign_keys,
+    as_observed_primary_key,
+)
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _PARENT_NAME = QualifiedName("dev", "silver", "other")
@@ -69,11 +77,13 @@ def _observed(**overrides) -> ObservedTable:
     defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(ObservedColumn("id", Integer()),))
     merged = {**defaults, **overrides}
     merged["columns"] = as_observed_columns(merged["columns"])
+    merged["primary_key"] = as_observed_primary_key(merged.get("primary_key"))
+    merged["foreign_keys"] = as_observed_foreign_keys(merged.get("foreign_keys", ()))
     return ObservedTable(**merged)
 
 
 def _foreign_key(
-    constraint_name: str = "test_id_fk",
+    constraint_name: str | None = "test_id_fk",
     local_columns: tuple[str, ...] = ("id",),
     referenced_columns: tuple[str, ...] = ("id",),
     referenced_table: QualifiedName = _PARENT_NAME,
@@ -82,7 +92,7 @@ def _foreign_key(
         local_columns=local_columns,
         referenced_table=referenced_table,
         referenced_columns=referenced_columns,
-        constraint_name=constraint_name,
+        name=constraint_name,
     )
 
 
@@ -679,7 +689,7 @@ def test_clustering_removal_produces_cluster_by_none_action():
 
 
 def test_desired_only_primary_key_produces_added_change():
-    pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
+    pk = PrimaryKeyConstraint(columns=("id",), name="test_pk")
     diff = diff_table(
         _desired(columns=(DesiredColumn("id", Integer(), nullable=False),), primary_key=pk),
         _observed(columns=(DesiredColumn("id", Integer(), nullable=False),)),
@@ -689,10 +699,10 @@ def test_desired_only_primary_key_produces_added_change():
     assert diff.actions == (SetPrimaryKey(primary_key=pk),)
 
 
-def test_equal_primary_keys_by_column_set_and_name_produce_no_change():
-    # Given the same PK column set and name under different orders and casing
-    desired_pk = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="Other_Name")
-    observed_pk = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="other_name")
+def test_primary_key_equality_ignores_column_order_and_case():
+    # Given the same PK column set under different orders and casing
+    desired_pk = PrimaryKeyConstraint(columns=("a", "b"), name="Other_Name")
+    observed_pk = PrimaryKeyConstraint(columns=("b", "a"), name="other_name")
     columns = (
         DesiredColumn("a", Integer(), nullable=False),
         DesiredColumn("b", Integer(), nullable=False),
@@ -704,16 +714,16 @@ def test_equal_primary_keys_by_column_set_and_name_produce_no_change():
         _observed(columns=columns, primary_key=observed_pk),
     )
 
-    # Then column-set and identifier-name identity agree — no change
+    # Then structural equality produces no change
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()
 
 
-def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
-    # Given identical key columns under different physical names
-    desired_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="managed_pk")
-    observed_pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+@pytest.mark.parametrize("desired_name", [None, "managed_pk"], ids=["unnamed", "explicit"])
+def test_matching_primary_key_definition_ignores_names(desired_name: str | None):
+    desired_pk = PrimaryKeyConstraint(columns=("id",), name=desired_name)
+    observed_pk = PrimaryKeyConstraint(columns=("id",), name="legacy_pk")
     columns = (DesiredColumn("id", Integer(), nullable=False),)
 
     # When diffing the declarations
@@ -722,18 +732,15 @@ def test_explicit_primary_key_name_drift_produces_drop_and_set_actions():
         _observed(columns=columns, primary_key=observed_pk),
     )
 
-    # Then the observed name is replaced by the explicitly managed name
+    # Then the matching definition is already converged
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (
-        DropPrimaryKey("legacy_pk"),
-        SetPrimaryKey(primary_key=desired_pk),
-    )
+    assert diff.actions == ()
 
 
 # ---------- constraint changes
 
 
-def test_present_table_diffs_foreign_keys_by_name_and_definition():
+def test_present_table_diffs_foreign_keys_by_definition():
     # Given one FK declared-and-present, one declared-but-absent,
     # and one observed-but-undeclared
     shared = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
@@ -762,14 +769,18 @@ def test_present_table_diffs_foreign_keys_by_name_and_definition():
     # Then the absent declaration is set and the undeclared observation dropped
     assert isinstance(drift, TableDrift)
     assert drift.actions == (
-        DropForeignKey(constraint=observed_only),
+        DropForeignKey(name="legacy_archive_fk"),
         SetForeignKey(constraint=declared_only),
     )
 
 
-def test_foreign_key_name_drift_replaces_the_constraint():
-    # Given the same FK definition under different desired and observed names
-    desired_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+@pytest.mark.parametrize(
+    "desired_name",
+    [None, "orders_customer_fk"],
+    ids=["unnamed", "explicit"],
+)
+def test_matching_foreign_key_definition_ignores_names(desired_name: str | None):
+    desired_key = _foreign_key(desired_name, local_columns=("customer_id",))
     observed_key = _foreign_key("legacy_customer_fk", local_columns=("customer_id",))
     columns = (DesiredColumn("customer_id", String()),)
 
@@ -779,35 +790,34 @@ def test_foreign_key_name_drift_replaces_the_constraint():
         _observed(columns=columns, foreign_keys=(observed_key,)),
     )
 
-    # Then the observed occurrence is dropped and the desired one is set
-    assert isinstance(drift, TableDrift)
-    assert drift.actions == (
-        DropForeignKey(constraint=observed_key),
-        SetForeignKey(constraint=desired_key),
-    )
-
-
-def test_foreign_key_name_identity_is_case_insensitive():
-    # Given matching definitions whose physical-name spelling differs only by case
-    desired_key = _foreign_key("Orders_Customer_FK", local_columns=("customer_id",))
-    observed_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
-    columns = (DesiredColumn("customer_id", String()),)
-
-    # When the table is diffed
-    drift = diff_table(
-        _desired(columns=columns, foreign_keys=(desired_key,)),
-        _observed(columns=columns, foreign_keys=(observed_key,)),
-    )
-
-    # Then identifier-equivalent names converge without replacement
+    # Then the matching definition is already converged
     assert isinstance(drift, TableDrift)
     assert drift.actions == ()
 
 
-def test_foreign_key_definition_drift_under_the_same_name_replaces_the_constraint():
-    # Given one physical FK name whose desired and observed definitions differ
+def test_multiple_foreign_keys_match_by_definition_regardless_of_names():
+    unnamed_customer = _foreign_key(None, local_columns=("customer_id",))
+    named_billing = _foreign_key("claimed_fk", local_columns=("billing_id",))
+    observed_customer = _foreign_key("claimed_fk", local_columns=("customer_id",))
+    observed_billing = _foreign_key("legacy_billing_fk", local_columns=("billing_id",))
+    columns = (
+        DesiredColumn("customer_id", String()),
+        DesiredColumn("billing_id", String()),
+    )
+
+    drift = diff_table(
+        _desired(columns=columns, foreign_keys=(unnamed_customer, named_billing)),
+        _observed(columns=columns, foreign_keys=(observed_customer, observed_billing)),
+    )
+
+    assert isinstance(drift, TableDrift)
+    assert drift.actions == ()
+
+
+def test_foreign_key_definition_drift_replaces_the_constraint():
+    # Given desired and observed foreign keys with different definitions
     desired_key = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
-    observed_key = _foreign_key("orders_customer_fk", local_columns=("legacy_customer_id",))
+    observed_key = _foreign_key("legacy_fk", local_columns=("legacy_customer_id",))
     columns = (
         DesiredColumn("customer_id", String()),
         DesiredColumn("legacy_customer_id", String()),
@@ -819,10 +829,10 @@ def test_foreign_key_definition_drift_under_the_same_name_replaces_the_constrain
         _observed(columns=columns, foreign_keys=(observed_key,)),
     )
 
-    # Then the stale definition is replaced under that name
+    # Then the stale definition is replaced, using the desired creation name
     assert isinstance(drift, TableDrift)
     assert drift.actions == (
-        DropForeignKey(constraint=observed_key),
+        DropForeignKey(name="legacy_fk"),
         SetForeignKey(constraint=desired_key),
     )
 
@@ -861,7 +871,7 @@ def test_missing_table_actions_include_every_declared_foreign_key():
             DesiredColumn("customer_id", String()),
             DesiredColumn("parent_order_id", String()),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("id",), name="orders_pk"),
         foreign_keys=(outbound, self_ref),
     )
 
@@ -871,7 +881,7 @@ def test_missing_table_actions_include_every_declared_foreign_key():
     assert isinstance(diff, TableCreation)
     assert isinstance(diff.actions[0], CreateTable)
     fk_actions = [a for a in diff.actions if isinstance(a, SetForeignKey)]
-    assert {str(a.constraint.constraint_name) for a in fk_actions} == {
+    assert {str(a.constraint.name) for a in fk_actions} == {
         "orders_customer_fk",
         "orders_parent_fk",
     }
@@ -895,7 +905,7 @@ def test_foreign_key_drift_is_stated_even_when_unmanaged():
 
 def test_observed_only_primary_key_produces_removed_change():
     # Given a catalog primary key that is absent from the declaration
-    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+    primary_key = PrimaryKeyConstraint(columns=("id",), name="legacy_pk")
 
     # When diffing
     diff = diff_table(
@@ -910,8 +920,8 @@ def test_observed_only_primary_key_produces_removed_change():
 
 def test_changed_primary_key_produces_drop_and_set_actions():
     # Given desired and observed primary keys over different column sets
-    desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
-    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
+    desired_primary_key = PrimaryKeyConstraint(columns=("id",), name="test_pk")
+    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), name="legacy_pk")
     columns = (
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("other_id", Integer(), nullable=False),
@@ -935,7 +945,7 @@ def test_set_primary_key_carries_the_declared_spelling():
     # Given a PK declared camelCase over a column the catalog spells lowercase
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("orderId",), constraint_name="orders_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("orderId",), name="orders_pk"),
     )
     observed = _observed(columns=(ObservedColumn("orderid", String(), nullable=False),))
 
@@ -954,7 +964,7 @@ def test_set_primary_key_keeps_declared_spelling_for_new_columns():
     # Given a PK over a column that does not exist in the catalog yet
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("orderId",), constraint_name="orders_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("orderId",), name="orders_pk"),
     )
     observed = _observed(columns=(ObservedColumn("other", String(), nullable=False),))
 
@@ -1117,8 +1127,8 @@ def test_diff_projects_partition_identity_across_a_rename():
 
 def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Given a primary key moving to a renamed column
-    desired_key = PrimaryKeyConstraint(columns=("customer_name",), constraint_name="test_pk")
-    observed_key = PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="legacy_pk")
+    desired_key = PrimaryKeyConstraint(columns=("customer_name",), name="test_pk")
+    observed_key = PrimaryKeyConstraint(columns=("customer_nm",), name="legacy_pk")
     desired = _desired(
         columns=(
             DesiredColumn("customer_name", String(), nullable=False, renamed_from="customer_nm"),
@@ -1206,13 +1216,13 @@ def test_case_only_layout_and_key_differences_produce_no_actions():
         qualified_name=qualified_name,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
         clustered_by=("requestId",),
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="t_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), name="t_pk"),
     )
     observed = ObservedTable(
         qualified_name=qualified_name,
         columns=(ObservedColumn("requestid", String(), nullable=False),),
         clustered_by=("requestid",),
-        primary_key=PrimaryKeyConstraint(columns=("requestid",), constraint_name="t_pk"),
+        primary_key=ObservedPrimaryKeyConstraint(columns=("requestid",), name="t_pk"),
     )
 
     diff = diff_table(desired, observed)

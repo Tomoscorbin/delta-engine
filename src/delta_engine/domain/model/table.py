@@ -11,6 +11,8 @@ from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.identifier import Identifier
@@ -36,8 +38,8 @@ def _validate_table_structure(
     tags: Mapping[str, str],
     partitioned_by: Sequence[str],
     clustered_by: Sequence[str],
-    primary_key: PrimaryKeyConstraint | None,
-    foreign_keys: Sequence[ForeignKeyConstraint],
+    primary_key: PrimaryKeyConstraint | ObservedPrimaryKeyConstraint | None,
+    foreign_keys: Sequence[ForeignKeyConstraint | ObservedForeignKeyConstraint],
 ) -> None:
     """
     Validate the structural invariants shared by desired and observed tables.
@@ -201,16 +203,13 @@ class DesiredTable:
         Validate shared table structure, then desired-only invariants.
 
         No two foreign keys may govern the same set of local columns. Two FKs
-        over the same local columns are incoherent, and would generate the same
-        constraint name (``{table}_{local_cols}_fk``) and collide at DDL time.
+        over the same local columns are incoherent, and Databricks rejects them.
         Checking the column *set* (order-insensitive) also rejects a reordered
         duplicate.
 
-        No two foreign keys may carry the same constraint name. Generated
-        names join local columns with underscores, so distinct tuples can
-        still collide — ``('a', 'b_c')`` and ``('a_b', 'c')`` both derive
-        ``{table}_a_b_c_fk`` — and the second ``ADD CONSTRAINT`` would fail at
-        execution with an error that points nowhere near the cause.
+        No two explicitly named foreign keys may carry the same constraint
+        name. Unnamed keys leave collision avoidance to Databricks; duplicate
+        explicit names are an incoherent declaration we can reject locally.
 
         A primary key column must be NOT NULL — a nullable primary key is not a
         well-formed desired schema, independent of any migration. Enforcing it
@@ -242,7 +241,7 @@ class DesiredTable:
         )
 
         seen: set[frozenset[str]] = set()
-        local_columns_by_constraint_name: dict[str, Sequence[str]] = {}
+        local_columns_by_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -251,17 +250,18 @@ class DesiredTable:
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
-            collided = local_columns_by_constraint_name.get(foreign_key.constraint_name)
+            name = foreign_key.name
+            if name is None:
+                continue
+            collided = local_columns_by_name.get(name)
             if collided is not None:
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
-                    f" '{foreign_key.constraint_name}': local columns {collided}"
+                    f" '{name}': local columns {collided}"
                     f" and {foreign_key.local_columns}. Every foreign key on a"
                     " table must have a distinct constraint name."
                 )
-            local_columns_by_constraint_name[foreign_key.constraint_name] = (
-                foreign_key.local_columns
-            )
+            local_columns_by_name[name] = foreign_key.local_columns
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)
@@ -339,8 +339,8 @@ class ObservedTable:
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: ListOrTuple[str] = ()
     clustered_by: ListOrTuple[str] = ()
-    primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
+    primary_key: ObservedPrimaryKeyConstraint | None = None
+    foreign_keys: ListOrTuple[ObservedForeignKeyConstraint] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     supported_features: Set[TableFeature] = frozenset()
     referencing_foreign_keys: ListOrTuple[ForeignKeyReference] = ()
@@ -358,10 +358,21 @@ class ObservedTable:
         clustered_by = tuple(self.clustered_by)
         object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
+
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(self, "supported_features", frozenset(self.supported_features))
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
+
+        if self.primary_key is not None and not isinstance(
+            self.primary_key, ObservedPrimaryKeyConstraint
+        ):
+            raise TypeError("ObservedTable primary_key must be an observed primary key")
+        if not all(
+            isinstance(foreign_key, ObservedForeignKeyConstraint)
+            for foreign_key in self.foreign_keys
+        ):
+            raise TypeError("ObservedTable foreign_keys must be observed foreign keys")
 
         _validate_table_structure(
             columns=self.columns,

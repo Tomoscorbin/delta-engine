@@ -507,30 +507,28 @@ def _diff_primary_key(
     """
     Return primary-key actions; a changed key becomes a drop and a set.
 
-    A primary key is identified by its column set and physical name. The
-    comparison runs against raw observed names, not the
-    rename-projected frame used by columns and layout: renaming a constrained
-    column drops the constraint, so a renamed key must surface as an explicit
-    drop and set. Both desired and observed constraints already carry physical
-    names. A declaration whose column spelling disagrees with the catalog is
-    rejected as ``ColumnCaseDrift`` before any plan forms.
+    Constraint equality is structural: names are creation preferences, while
+    Databricks owns the physical name of an existing constraint. The comparison
+    runs against raw observed columns, not the rename-projected frame used by
+    columns and layout: renaming a constrained column drops the constraint, so a
+    renamed key must surface as an explicit drop and set. A declaration whose
+    column spelling disagrees with the catalog is rejected as ``ColumnCaseDrift``
+    before any plan forms.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
-    if desired_key is None:
-        if observed_key is None:
-            return ()
-        return (DropPrimaryKey(constraint_name=observed_key.constraint_name),)
-
     if observed_key is None:
-        return (SetPrimaryKey(primary_key=desired_key),)
+        return () if desired_key is None else (SetPrimaryKey(primary_key=desired_key),)
+
+    if desired_key is None:
+        return (DropPrimaryKey(name=observed_key.name),)
 
     if desired_key == observed_key:
         return ()
 
     return (
-        DropPrimaryKey(constraint_name=observed_key.constraint_name),
+        DropPrimaryKey(name=observed_key.name),
         SetPrimaryKey(primary_key=desired_key),
     )
 
@@ -539,32 +537,30 @@ def _diff_foreign_keys(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
     """
-    Return set/drop actions converging the table's foreign keys.
+    Return set/drop actions converging foreign-key definitions.
 
-    A constraint is present only when its physical name and definition match.
-    Missing names are added, extra names are dropped, and a definition change
-    under the same name becomes a drop and set. Names use ``Identifier``
-    equality, so spelling case is immaterial. Everything here reads the
-    child's own snapshot; whether the referenced table can hold up its end is
-    the relationship resolver's judgment, not a difference.
+    Names are creation preferences rather than structural identity. Each
+    declaration adopts one existing constraint with the same definition,
+    regardless of its physical name; unmatched declarations are created and
+    unmatched observations are dropped.
+
+    Everything here reads the child's own snapshot; whether the referenced table
+    can hold up its end is the relationship resolver's judgment, not a difference.
     """
-    desired_by_name = {fk.constraint_name: fk for fk in desired.foreign_keys}
-    observed_by_name = {fk.constraint_name: fk for fk in observed.foreign_keys}
-    drops: list[DropForeignKey] = []
+    unmatched_observed = list(observed.foreign_keys)
     sets: list[SetForeignKey] = []
 
-    for name, desired_constraint in desired_by_name.items():
-        observed_constraint = observed_by_name.get(name)
+    for desired_constraint in desired.foreign_keys:
+        observed_constraint = next(
+            (candidate for candidate in unmatched_observed if desired_constraint == candidate),
+            None,
+        )
         if observed_constraint is None:
             sets.append(SetForeignKey(constraint=desired_constraint))
-        elif desired_constraint != observed_constraint:
-            drops.append(DropForeignKey(constraint=observed_constraint))
-            sets.append(SetForeignKey(constraint=desired_constraint))
+        else:
+            unmatched_observed.remove(observed_constraint)
 
-    for name, observed_constraint in observed_by_name.items():
-        if name not in desired_by_name:
-            drops.append(DropForeignKey(constraint=observed_constraint))
-
+    drops = [DropForeignKey(name=constraint.name) for constraint in unmatched_observed]
     return (*drops, *sets)
 
 

@@ -28,7 +28,10 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ObservedForeignKeyConstraint,
+    ObservedPrimaryKeyConstraint,
+)
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
     AddColumn,
@@ -155,7 +158,10 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), nullable=False),),
-            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{table_name}_pk"),
+            primary_key=ObservedPrimaryKeyConstraint(
+                columns=("id",),
+                name=f"{table_name}_pk",
+            ),
         )
     )
 
@@ -164,13 +170,24 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
     """Build an observed table that already matches _spec_with_fk(fqn, references)."""
     desired = _spec_with_fk(fqn, references).to_desired_table()
     assert desired.primary_key is not None
+    (desired_foreign_key,) = desired.foreign_keys
 
     return TablePresent(
         table=ObservedTable(
             qualified_name=desired.qualified_name,
             columns=as_observed_columns(desired.columns),
-            primary_key=desired.primary_key,
-            foreign_keys=desired.foreign_keys,
+            primary_key=ObservedPrimaryKeyConstraint(
+                columns=desired.primary_key.columns,
+                name="databricks_generated_pk",
+            ),
+            foreign_keys=(
+                ObservedForeignKeyConstraint(
+                    local_columns=desired_foreign_key.local_columns,
+                    referenced_table=desired_foreign_key.referenced_table,
+                    referenced_columns=desired_foreign_key.referenced_columns,
+                    name="databricks_generated_fk",
+                ),
+            ),
         )
     )
 
@@ -1511,7 +1528,7 @@ def test_foreign_key_failed_table_still_carries_its_planned_sql():
     assert orders.resolution.structural_failures != ()
     assert orders.compiled is not None
     assert orders.compiled.statements != ()
-    assert any("ADD CONSTRAINT" in statement for statement in orders.compiled.statements)
+    assert any("ADD FOREIGN KEY" in statement for statement in orders.compiled.statements)
     assert executor.executed_statements == []
 
 
@@ -1785,7 +1802,7 @@ def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "parent"),
                     columns=(ObservedColumn("orderid", String(), nullable=False),),
-                    primary_key=PrimaryKeyConstraint(("orderid",), "parent_pk"),
+                    primary_key=ObservedPrimaryKeyConstraint(("orderid",), "parent_pk"),
                 )
             ),
             "c.s.child": TablePresent(

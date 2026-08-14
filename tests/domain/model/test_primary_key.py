@@ -1,12 +1,15 @@
 import pytest
 
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ObservedPrimaryKeyConstraint,
+    PrimaryKeyConstraint,
+)
 
 
 def test_rejects_empty_columns():
     # When a primary key has no columns, then construction fails
     with pytest.raises(ValueError):
-        PrimaryKeyConstraint(columns=(), constraint_name="t_pk")
+        PrimaryKeyConstraint(columns=(), name="t_pk")
 
 
 @pytest.mark.parametrize(
@@ -21,14 +24,20 @@ def test_rejects_invalid_column_collections(columns: object) -> None:
     with pytest.raises(TypeError):
         PrimaryKeyConstraint(
             columns=columns,  # type: ignore[arg-type]
-            constraint_name="t_pk",
+            name="t_pk",
         )
 
 
 def test_rejects_duplicate_columns():
     # When a primary key repeats a column, then construction fails
     with pytest.raises(ValueError):
-        PrimaryKeyConstraint(columns=("id", "id"), constraint_name="t_pk")
+        PrimaryKeyConstraint(columns=("id", "id"), name="t_pk")
+
+
+def test_constraint_name_may_be_omitted():
+    key = PrimaryKeyConstraint(columns=("id",))
+
+    assert key.name is None
 
 
 @pytest.mark.parametrize(
@@ -46,59 +55,60 @@ def test_rejects_invalid_constraint_name(
     with pytest.raises(expected_error):
         PrimaryKeyConstraint(
             columns=("id",),
-            constraint_name=invalid_name,  # type: ignore[arg-type]
+            name=invalid_name,  # type: ignore[arg-type]
         )
+
+
+def test_observed_constraint_requires_a_name():
+    with pytest.raises(TypeError, match="string"):
+        ObservedPrimaryKeyConstraint(columns=("id",), name=None)  # type: ignore[arg-type]
 
 
 def test_mixed_case_columns_and_name_are_preserved():
     # Given a constraint with mixed-case display spelling
-    pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
+    pk = PrimaryKeyConstraint(columns=("OrderId",), name="Orders_PK")
 
     # Then construction preserves that spelling
     assert tuple(str(column) for column in pk.columns) == ("OrderId",)
-    assert str(pk.constraint_name) == "Orders_PK"
+    assert str(pk.name) == "Orders_PK"
 
 
-def test_equality_uses_constraint_name_and_column_set_identity():
-    # Given equivalent constraints with different identifier casing and column order
-    desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), constraint_name="Orders_PK")
-    observed = PrimaryKeyConstraint(columns=("orderid", "tenantid"), constraint_name="orders_pk")
+def test_equality_uses_structural_column_set_identity():
+    # Given equivalent constraints with different names, casing, and column order
+    desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), name="Orders_PK")
+    observed = ObservedPrimaryKeyConstraint(
+        columns=("orderid", "tenantid"),
+        name="legacy_pk",
+    )
 
     # When comparing the constraints
     are_equal = desired == observed
 
-    # Then their physical name and semantic column set make them the same value
+    # Then only their semantic column set determines equality
     assert are_equal
     assert hash(desired) == hash(observed)
 
 
-@pytest.mark.parametrize(
-    "other",
-    [
-        pytest.param(
-            PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk"),
-            id="different-name",
-        ),
-        pytest.param(
-            PrimaryKeyConstraint(columns=("other_id",), constraint_name="orders_pk"),
-            id="different-columns",
-        ),
-    ],
-)
-def test_equality_rejects_different_managed_identity(other: PrimaryKeyConstraint):
-    # Given a primary key with either a different name or column set
-    key = PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
+def test_equality_rejects_a_different_column_set():
+    key = PrimaryKeyConstraint(columns=("id",), name="orders_pk")
+    other = PrimaryKeyConstraint(columns=("other_id",), name="orders_pk")
 
-    # When comparing the constraints
-    are_equal = key == other
+    assert key != other
 
-    # Then they are different managed values
-    assert not are_equal
+
+def test_name_is_a_creation_preference_not_structural_identity():
+    unnamed = PrimaryKeyConstraint(columns=("id",))
+    named = PrimaryKeyConstraint(columns=("id",), name="orders_pk")
+
+    assert unnamed == named
+    assert hash(unnamed) == hash(named)
+    assert unnamed == PrimaryKeyConstraint(columns=("ID",))
+    assert hash(unnamed) == hash(PrimaryKeyConstraint(columns=("ID",)))
 
 
 def test_matches_columns_excludes_the_constraint_name_from_comparison():
     # Given a named, composite primary key
-    key = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), constraint_name="orders_pk")
+    key = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), name="orders_pk")
 
     # When comparing columns with different order and identifier casing
     matches = key.matches_columns(("orderid", "tenantid"))
@@ -111,4 +121,4 @@ def test_matches_columns_excludes_the_constraint_name_from_comparison():
 def test_rejects_columns_differing_only_by_case_as_duplicates():
     # When one column is repeated with different casing, then construction fails
     with pytest.raises(ValueError):
-        PrimaryKeyConstraint(columns=("id", "ID"), constraint_name="t_pk")
+        PrimaryKeyConstraint(columns=("id", "ID"), name="t_pk")

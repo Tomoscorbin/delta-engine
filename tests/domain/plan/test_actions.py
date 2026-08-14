@@ -58,18 +58,19 @@ def _plan(*plan_actions: Action) -> ActionPlan:
     return ActionPlan(target=_TARGET, actions=plan_actions)
 
 
-def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
-    return PrimaryKeyConstraint(columns=columns, constraint_name=name)
+def _primary_key(name: str | None = "table_pk", columns: tuple[str, ...] = ("id",)):
+    return PrimaryKeyConstraint(columns=columns, name=name)
 
 
 def _foreign_key(
-    name: str = "table_customer_id_fk", local_columns: tuple[str, ...] = ("customer_id",)
+    name: str | None = "table_customer_id_fk",
+    local_columns: tuple[str, ...] = ("customer_id",),
 ) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
         local_columns=local_columns,
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        constraint_name=name,
+        name=name,
     )
 
 
@@ -159,8 +160,8 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
         (_drop_primary_key(), "table_pk"),
-        (SetPrimaryKey(_primary_key()), "table_pk"),
-        (DropForeignKey(_foreign_key()), "table_customer_id_fk"),
+        (SetPrimaryKey(_primary_key()), "id"),
+        (DropForeignKey("table_customer_id_fk"), "table_customer_id_fk"),
         (SetForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),
         (AlterColumnType("id", Long(), Integer()), "id"),
@@ -168,6 +169,18 @@ def test_plan_ordering_ignores_non_subject_fields():
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
     assert action.subject == expected_subject
+
+
+def test_unnamed_primary_key_action_uses_columns_as_its_subject():
+    action = SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id")))
+
+    assert action.subject == "tenant_id,order_id"
+
+
+def test_drop_foreign_key_exposes_its_observed_name():
+    action = DropForeignKey("orders_customer_fk")
+
+    assert action.name == "orders_customer_fk"
 
 
 @pytest.mark.parametrize(
@@ -188,7 +201,7 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
         (SetColumnNullability("email", False, True), TableAspect.COLUMN_STRUCTURE),
         (_drop_primary_key(), TableAspect.PRIMARY_KEY),
         (SetPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
-        (DropForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
+        (DropForeignKey("table_customer_id_fk"), TableAspect.FOREIGN_KEYS),
         (SetForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
         (AlterClustering(("region",), ()), TableAspect.CLUSTERING),
         (AlterColumnType("id", Long(), Integer()), TableAspect.COLUMN_STRUCTURE),
@@ -225,7 +238,7 @@ def test_plan_full_phase_order_with_all_action_types():
         SetProperty("p_set", "1", None),
         UnsetProperty("p_unset", "1"),
         SetColumnNullability("nn_col", False, True),
-        DropForeignKey(_foreign_key("t_old_fk")),
+        DropForeignKey("t_old_fk"),
         _drop_primary_key(),
         RenameColumn("old", "new"),
         DropColumn(_observed_column("d_col")),
@@ -267,7 +280,7 @@ def test_plan_orders_constraint_drops_before_column_work():
     plan = _plan(
         DropColumn(_observed_column("customer_id")),
         _drop_primary_key(),
-        DropForeignKey(_foreign_key("orders_customer_id_fk")),
+        DropForeignKey("orders_customer_id_fk"),
         RenameColumn("old", "new"),
         AddColumn(_column("added")),
     )

@@ -446,9 +446,7 @@ class PrimaryKeyReferencedByForeignKeys:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every PK drop/change still referenced by a surviving foreign key."""
         dropped_here = {
-            change.constraint.constraint_name
-            for change in drift.actions
-            if isinstance(change, DropForeignKey)
+            change.name for change in drift.actions if isinstance(change, DropForeignKey)
         }
         failures: list[ValidationFailure] = []
         for change in drift.actions:
@@ -459,12 +457,12 @@ class PrimaryKeyReferencedByForeignKeys:
                 for reference in drift.observed.referencing_foreign_keys
                 if not (
                     reference.referencing_table == drift.desired.qualified_name
-                    and reference.constraint_name in dropped_here
+                    and reference.name in dropped_here
                 )
             )
             if blockers:
                 referenced_by = ", ".join(
-                    f"{ref.constraint_name} on {ref.referencing_table}" for ref in blockers
+                    f"{ref.name} on {ref.referencing_table}" for ref in blockers
                 )
                 failures.append(
                     ValidationFailure(

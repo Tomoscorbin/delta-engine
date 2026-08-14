@@ -338,17 +338,17 @@ class SetColumnNullability(Action):
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
-    constraint_name: str
+    name: str
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        object.__setattr__(self, "name", Identifier(self.name))
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,21 +362,24 @@ class SetPrimaryKey(Action):
 
     @property
     def subject(self) -> str:
-        return self.primary_key.constraint_name
+        return ",".join(self.primary_key.columns)
 
 
 @dataclass(frozen=True, slots=True)
 class DropForeignKey(Action):
-    """Drop a complete observed foreign key constraint."""
+    """Drop an observed foreign key by its concrete catalog name."""
 
-    constraint: ForeignKeyConstraint
+    name: str
 
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", Identifier(self.name))
+
     @property
     def subject(self) -> str:
-        return self.constraint.constraint_name
+        return self.name
 
 
 @dataclass(frozen=True, slots=True)

@@ -205,6 +205,12 @@ def _columns_detail(columns: Sequence[str]) -> tuple[str, ...]:
     return (f"({', '.join(columns)})",)
 
 
+def _key_subject(kind: str, name: str | None, columns: Sequence[str]) -> str:
+    """Identify a key by its requested name, or by columns when Databricks names it."""
+    identity = name if name is not None else f"({', '.join(columns)})"
+    return f"{kind} {identity}"
+
+
 @functools.singledispatch
 def action_entries(action: Action) -> tuple[DiffEntry, ...]:
     """Render one plan action as one or more category-tagged diff entries."""
@@ -245,7 +251,7 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
             DiffEntry(
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
-                subject=f"primary key {primary_key.constraint_name}",
+                subject=_key_subject("primary key", primary_key.name, primary_key.columns),
                 detail=_columns_detail(primary_key.columns),
             )
         )
@@ -445,7 +451,11 @@ def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"primary key {action.primary_key.constraint_name}",
+            subject=_key_subject(
+                "primary key",
+                action.primary_key.name,
+                action.primary_key.columns,
+            ),
             detail=_columns_detail(action.primary_key.columns),
         ),
     )
@@ -457,7 +467,7 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.REMOVE,
-            subject=f"primary key {action.constraint_name}",
+            subject=f"primary key {action.name}",
         ),
     )
 
@@ -469,7 +479,11 @@ def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"foreign key {action.constraint.constraint_name}",
+            subject=_key_subject(
+                "foreign key",
+                action.constraint.name,
+                action.constraint.local_columns,
+            ),
             detail=(f"({local_columns}) → {action.constraint.referenced_table}",),
         ),
     )
@@ -481,7 +495,7 @@ def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.REMOVE,
-            subject=f"foreign key {action.constraint.constraint_name}",
+            subject=f"foreign key {action.name}",
         ),
     )
 

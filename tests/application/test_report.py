@@ -1210,13 +1210,13 @@ def test_to_dict_is_deterministic():
 # ---------- Derived dependency blocking
 
 
-def _fk_edge(parent: QualifiedName, constraint_name: str = "blocked_edge_fk"):
+def _fk_edge(parent: QualifiedName, name: str = "blocked_edge_fk"):
     """Build a dependency edge onto ``parent``; blocking reads its columns and target."""
     return ForeignKeyConstraint(
         local_columns=("parent_id",),
         referenced_table=parent,
         referenced_columns=("id",),
-        constraint_name=constraint_name,
+        name=name,
     )
 
 
@@ -1261,7 +1261,7 @@ def test_assemble_propagates_blocking_along_chains():
     reports = (
         _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom")),
         _sound_report("b", dependencies=(_fk_edge(_name("a")),)),
-        _sound_report("c", dependencies=(_fk_edge(_name("b"), constraint_name="c_b_fk"),)),
+        _sound_report("c", dependencies=(_fk_edge(_name("b"), name="c_b_fk"),)),
     )
 
     # When the run report is assembled

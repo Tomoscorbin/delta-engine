@@ -117,11 +117,11 @@ Each handler receives a `_Target` — the table as statements address it. It
 renders the backticked table name (`target.name`) and a relation-correct
 `target.alter_clause` without exposing relation kind. The latter is
 pre-rendered with `ALTER TABLE ...` or `ALTER STREAMING TABLE ...` as
-appropriate. Planning has already accepted the action before compilation. A
-constraint action carries its complete constraint (named when the
-`DesiredTable` was built, or read from the catalog for an observed one), so
-the handler renders
-`action.constraint.constraint_name` directly rather than computing it.
+appropriate. Planning has already accepted the action before compilation.
+Actions carry only the inputs their operation needs: for example, adding a
+foreign key carries its complete declaration, while dropping one carries its
+concrete catalog name. The compiler owns the Databricks syntax for those
+inputs; it does not recover state or make planning decisions.
 
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).
 
