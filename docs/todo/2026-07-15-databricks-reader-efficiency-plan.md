@@ -650,7 +650,7 @@ def test_constraints_lowered_to_domain():
     )
     assert snap.primary_key is not None
     assert snap.primary_key.columns == ("id",)
-    assert snap.primary_key.name == "pk_demo"
+    assert snap.primary_key.constraint_name == "pk_demo"
 
 
 def test_unmappable_non_partition_column_is_skipped():
@@ -805,14 +805,14 @@ def _lower_constraints(
     if parsed.primary_key is not None:
         primary_key = PrimaryKeyConstraint(
             columns=parsed.primary_key.columns,
-            name=parsed.primary_key.constraint_name,
+            constraint_name=parsed.primary_key.constraint_name,
         )
     foreign_keys = tuple(
         ForeignKeyConstraint(
             local_columns=fk.local_columns,
             referenced_table=QualifiedName(*fk.referenced_table),
             referenced_columns=fk.referenced_columns,
-            name=fk.constraint_name,
+            constraint_name=fk.constraint_name,
         )
         for fk in parsed.foreign_keys
     )
