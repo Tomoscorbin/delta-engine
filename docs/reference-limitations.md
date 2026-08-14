@@ -66,6 +66,14 @@ matching observed constraint: an explicit name is a creation preference, not
 ongoing managed state. Changing only that preference does not rename an
 existing constraint; Databricks has no direct constraint-rename clause.
 
+The declaration does not expose the physical name Databricks assigns to an
+unnamed constraint. `DeltaTable.primary_key_name` and `ForeignKey.name` report
+only the creation request, and a sync does not perform an additional catalog
+read after executing its writes. A caller that needs the generated name must
+currently query Databricks `information_schema`. A dedicated read-only catalog
+inspection API may provide this without turning declarations into live
+Databricks objects or adding a round trip to every sync.
+
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and
 no periods, spaces, forward slashes, control characters, or DEL. Column names
