@@ -27,8 +27,14 @@ from delta_engine.application.report import (
     TableRun,
     TableRunStatus,
 )
-from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
+from delta_engine.domain.model import (
+    ObservedColumn,
+    ObservedForeignKey,
+    ObservedPrimaryKey,
+    ObservedTable,
+    QualifiedName,
+    TableKind,
+)
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
     AddColumn,
@@ -155,7 +161,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), nullable=False),),
-            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{table_name}_pk"),
+            primary_key=ObservedPrimaryKey(columns=("id",), catalog_name=f"{table_name}_pk"),
         )
     )
 
@@ -169,8 +175,19 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=desired.qualified_name,
             columns=as_observed_columns(desired.columns),
-            primary_key=desired.primary_key,
-            foreign_keys=desired.foreign_keys,
+            primary_key=ObservedPrimaryKey(
+                columns=desired.primary_key.columns,
+                catalog_name=desired.primary_key.desired_name,
+            ),
+            foreign_keys=tuple(
+                ObservedForeignKey(
+                    local_columns=foreign_key.local_columns,
+                    referenced_table=foreign_key.referenced_table,
+                    referenced_columns=foreign_key.referenced_columns,
+                    catalog_name=foreign_key.desired_name,
+                )
+                for foreign_key in desired.foreign_keys
+            ),
         )
     )
 
@@ -1785,7 +1802,7 @@ def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "parent"),
                     columns=(ObservedColumn("orderid", String(), nullable=False),),
-                    primary_key=PrimaryKeyConstraint(("orderid",), "parent_pk"),
+                    primary_key=ObservedPrimaryKey(("orderid",), "parent_pk"),
                 )
             ),
             "c.s.child": TablePresent(

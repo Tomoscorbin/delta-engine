@@ -17,9 +17,11 @@ from delta_engine.domain.model import (
     Array,
     DataType,
     DesiredColumn,
+    DesiredForeignKey,
     DesiredTable,
     Map,
     ObservedColumn,
+    ObservedForeignKey,
     ObservedTable,
     QualifiedName,
     Struct,
@@ -507,13 +509,13 @@ def _diff_primary_key(
     """
     Return primary-key actions; a changed key becomes a drop and a set.
 
-    A primary key is identified by its column set and physical name. The
-    comparison runs against raw observed names, not the
-    rename-projected frame used by columns and layout: renaming a constrained
-    column drops the constraint, so a renamed key must surface as an explicit
-    drop and set. Both desired and observed constraints already carry physical
-    names. A declaration whose column spelling disagrees with the catalog is
-    rejected as ``ColumnCaseDrift`` before any plan forms.
+    Desired and observed keys compare directly by relational definition; their
+    lifecycle names do not create drift. The comparison runs against raw
+    observed names, not the rename-projected frame used by columns and layout:
+    renaming a constrained column drops the constraint, so a renamed key must
+    surface as an explicit drop and set. A declaration whose column spelling
+    disagrees with the catalog is rejected as ``ColumnCaseDrift`` before any
+    plan forms.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -521,7 +523,7 @@ def _diff_primary_key(
     if desired_key is None:
         if observed_key is None:
             return ()
-        return (DropPrimaryKey(constraint_name=observed_key.constraint_name),)
+        return (DropPrimaryKey(constraint_name=observed_key.catalog_name),)
 
     if observed_key is None:
         return (SetPrimaryKey(primary_key=desired_key),)
@@ -530,7 +532,7 @@ def _diff_primary_key(
         return ()
 
     return (
-        DropPrimaryKey(constraint_name=observed_key.constraint_name),
+        DropPrimaryKey(constraint_name=observed_key.catalog_name),
         SetPrimaryKey(primary_key=desired_key),
     )
 
@@ -539,33 +541,37 @@ def _diff_foreign_keys(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
     """
-    Return set/drop actions converging the table's foreign keys.
+    Return set/drop actions converging foreign-key definitions.
 
-    A constraint is present only when its physical name and definition match.
-    Missing names are added, extra names are dropped, and a definition change
-    under the same name becomes a drop and set. Names use ``Identifier``
-    equality, so spelling case is immaterial. Everything here reads the
-    child's own snapshot; whether the referenced table can hold up its end is
-    the relationship resolver's judgment, not a difference.
+    Each declaration adopts at most one structurally equal catalog occurrence,
+    regardless of its physical name. Sorting observations by exact catalog name
+    makes duplicate-definition adoption deterministic. Everything here reads
+    the child's own snapshot; whether the referenced table can hold up its end
+    is the relationship resolver's judgment, not a difference.
     """
-    desired_by_name = {fk.constraint_name: fk for fk in desired.foreign_keys}
-    observed_by_name = {fk.constraint_name: fk for fk in observed.foreign_keys}
+    unmatched_desired: set[DesiredForeignKey | ObservedForeignKey] = set(desired.foreign_keys)
     drops: list[DropForeignKey] = []
-    sets: list[SetForeignKey] = []
 
-    for name, desired_constraint in desired_by_name.items():
-        observed_constraint = observed_by_name.get(name)
-        if observed_constraint is None:
-            sets.append(SetForeignKey(constraint=desired_constraint))
-        elif desired_constraint != observed_constraint:
+    for observed_constraint in sorted(
+        observed.foreign_keys,
+        key=lambda constraint: (
+            constraint.catalog_name.casefold(),
+            constraint.catalog_name,
+        ),
+    ):
+        if observed_constraint not in unmatched_desired:
             drops.append(DropForeignKey(constraint=observed_constraint))
-            sets.append(SetForeignKey(constraint=desired_constraint))
+            continue
+        unmatched_desired.remove(observed_constraint)
 
-    for name, observed_constraint in observed_by_name.items():
-        if name not in desired_by_name:
-            drops.append(DropForeignKey(constraint=observed_constraint))
-
-    return (*drops, *sets)
+    return (
+        *drops,
+        *(
+            SetForeignKey(constraint=constraint)
+            for constraint in desired.foreign_keys
+            if constraint in unmatched_desired
+        ),
+    )
 
 
 def _diff_table_metadata(

@@ -18,7 +18,11 @@ from delta_engine.domain.model import (
     TableKind,
     Variant,
 )
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    DesiredForeignKey,
+    DesiredPrimaryKey,
+    ObservedForeignKey,
+)
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
@@ -56,8 +60,8 @@ def _observed_column(name: str) -> ObservedColumn:
 
 def _primary_key(
     columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
-) -> PrimaryKeyConstraint:
-    return PrimaryKeyConstraint(columns, constraint_name)
+) -> DesiredPrimaryKey:
+    return DesiredPrimaryKey(columns, constraint_name)
 
 
 def _foreign_key(
@@ -65,13 +69,28 @@ def _foreign_key(
     local_columns: tuple[str, ...] = ("customer_id",),
     referenced_table: QualifiedName = _REFERENCED_TABLE,
     referenced_columns: tuple[str, ...] = ("id",),
-    constraint_name: str = "orders_customer_id_fk",
-) -> ForeignKeyConstraint:
-    return ForeignKeyConstraint(
+    desired_name: str = "orders_customer_id_fk",
+) -> DesiredForeignKey:
+    return DesiredForeignKey(
         local_columns,
         referenced_table,
         referenced_columns,
-        constraint_name,
+        desired_name,
+    )
+
+
+def _observed_foreign_key(
+    *,
+    local_columns: tuple[str, ...] = ("customer_id",),
+    referenced_table: QualifiedName = _REFERENCED_TABLE,
+    referenced_columns: tuple[str, ...] = ("id",),
+    catalog_name: str = "orders_customer_id_fk",
+) -> ObservedForeignKey:
+    return ObservedForeignKey(
+        local_columns,
+        referenced_table,
+        referenced_columns,
+        catalog_name,
     )
 
 
@@ -81,7 +100,7 @@ def _create_table(
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
-    primary_key: PrimaryKeyConstraint | None = None,
+    primary_key: DesiredPrimaryKey | None = None,
 ) -> CreateTable:
     return CreateTable(
         table=DesiredTable(
@@ -291,7 +310,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="tbl_pk"),
+        primary_key=DesiredPrimaryKey(columns=("id",), desired_name="tbl_pk"),
     )
 
     # When compiling
@@ -379,7 +398,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
-            DropForeignKey(constraint=_foreign_key()),
+            DropForeignKey(constraint=_observed_foreign_key()),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`",
         ),
         (
@@ -422,7 +441,7 @@ def test_set_primary_key_renders_composite_primary_key():
 
 def test_set_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
-    action = SetForeignKey(constraint=_foreign_key(constraint_name="tbl_customer_id_fk"))
+    action = SetForeignKey(constraint=_foreign_key(desired_name="tbl_customer_id_fk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -441,7 +460,7 @@ def test_set_foreign_key_renders_composite_fk():
         constraint=_foreign_key(
             local_columns=("tenant_id", "customer_id"),
             referenced_columns=("tenant_id", "id"),
-            constraint_name="tbl_tenant_id_customer_id_fk",
+            desired_name="tbl_tenant_id_customer_id_fk",
         )
     )
 
@@ -536,7 +555,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     AlterColumnType: AlterColumnType("id", Long(), Integer()),
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
-    DropForeignKey: DropForeignKey(constraint=_foreign_key()),
+    DropForeignKey: DropForeignKey(constraint=_observed_foreign_key()),
     DropPrimaryKey: DropPrimaryKey("tbl_pk"),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
@@ -658,7 +677,7 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
 
 def test_set_primary_key_emits_the_exact_bound_spelling():
     action = SetPrimaryKey(
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk")
+        primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="tbl_pk")
     )
     plan = ActionPlan(target=_TARGET, actions=(action,))
 
@@ -673,7 +692,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+        primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="tbl_pk"),
         clustered_by=("requestId",),
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
@@ -687,11 +706,11 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
 
 
 def test_foreign_key_emits_exact_spelling_on_both_sides():
-    constraint = ForeignKeyConstraint(
+    constraint = DesiredForeignKey(
         local_columns=("orderRef",),
         referenced_table=_REFERENCED_TABLE,
         referenced_columns=("OrderId",),
-        constraint_name="tbl_orderref_fk",
+        desired_name="tbl_orderref_fk",
     )
     plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
 
@@ -703,11 +722,11 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
 
 
 def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
-    constraint = ForeignKeyConstraint(
+    constraint = ObservedForeignKey(
         local_columns=("a",),
         referenced_table=_REFERENCED_TABLE,
         referenced_columns=("b",),
-        constraint_name="Legacy_FK_Name",
+        catalog_name="Legacy_FK_Name",
     )
     plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(constraint=constraint),))
 

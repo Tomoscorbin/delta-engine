@@ -17,15 +17,14 @@ desired_key == observed_key
 ```
 
 That expression means the two values describe the same relational constraint.
-Requested creation names and physical catalog names are lifecycle metadata, not
+Desired names and physical catalog names are lifecycle metadata, not
 part of relational identity.
 
 The redesign should make these distinctions explicit without turning every
 concept into a class:
 
 - a **definition** is the relational meaning of a constraint;
-- a **desired constraint** is a declaration plus an optional requested creation
-  name;
+- a **desired constraint** is a declaration plus an optional desired name;
 - an **observed constraint** is a catalog occurrence with a required physical
   name;
 - reconciliation pairs desired and observed values by definition;
@@ -45,7 +44,7 @@ Use the following internal terms consistently:
 | --- | --- |
 | Definition | Relational meaning of a constraint, excluding its physical name |
 | Desired constraint | Constraint the user wants present |
-| Requested name | Optional name to request if the constraint is created |
+| Desired name | Optional name to request if the constraint is created |
 | Observed constraint | Physical constraint occurrence read from the catalog |
 | Catalog name | Actual name assigned to an observed occurrence |
 | Match | Desired and observed constraints have the same definition |
@@ -55,7 +54,7 @@ Use the following internal terms consistently:
 | Replace | A derived drop followed by an add, not a primitive action |
 | Converged | Every desired definition is matched and no managed observation is unmatched |
 
-Avoid an unqualified internal field named `name`. Use `requested_name` and
+Avoid an unqualified internal field named `name`. Use `desired_name` and
 `catalog_name` so creation intent cannot be confused with a physical handle.
 
 ### Domain types
@@ -87,9 +86,8 @@ class ObservedTable:
     foreign_keys: tuple[ObservedForeignKey, ...]
 ```
 
-Private helpers or mixins may share normalization and equality behavior. They
-are implementation mechanisms, not domain entities, and should not appear in
-the public vocabulary.
+Private functions may share normalization and equality mechanics. Avoid base
+classes or mixins that make readers learn another constraint-shaped entity.
 
 ### Equality and identity
 
@@ -120,7 +118,7 @@ FK definition key = referenced table + canonical column pairs
 Other identities remain distinct:
 
 ```text
-creation signature   = definition + requested_name
+creation signature   = definition + desired_name
 occurrence signature = definition + catalog_name
 ```
 
@@ -130,14 +128,14 @@ constraint payloads are relationally equal.
 
 ### Naming policy
 
-- An omitted requested name remains absent through desired state and SQL.
+- An omitted desired name remains absent through desired state and SQL.
 - Databricks generates the physical name.
-- An explicit requested name is used only when an add is compiled.
+- An explicit desired name is used only when an add is compiled.
 - A matching observed definition satisfies the declaration under any catalog
   name.
-- Changing only a requested name is a no-op.
+- Changing only a desired name is a no-op.
 - A structural change becomes a drop followed by an add; the add uses the
-  current requested name.
+  current desired name.
 - Generated names are opaque. The engine observes them but never predicts,
   persists, or reproduces them.
 - `DeltaTable.primary_key_name` exposes only the explicit request, not a future
@@ -178,8 +176,8 @@ class DropForeignKey:
 
 The compiler uses the subset needed by each Databricks operation:
 
-- a primary-key add uses the definition and optional requested name;
-- a foreign-key add uses the definition and optional requested name;
+- a primary-key add uses the definition and optional desired name;
+- a foreign-key add uses the definition and optional desired name;
 - a primary-key drop uses name-independent `DROP PRIMARY KEY` syntax;
 - a foreign-key drop uses the exact observed `catalog_name`.
 
@@ -192,7 +190,7 @@ Each rule should have one owner:
 
 | Process | Responsibilities |
 | --- | --- |
-| Declaration normalization | Freeze public input, resolve conveniences, preserve requested names |
+| Declaration normalization | Freeze public input, resolve conveniences, preserve desired names |
 | Domain construction | Enforce timeless table and constraint invariants |
 | Relationship resolution | Validate registered FK targets, types, dependencies, and cycles |
 | Catalog observation | Read definitions and exact catalog names into observed values |
@@ -200,7 +198,7 @@ Each rule should have one owner:
 | Plan validation | Judge whether a correct transition is safe to execute |
 | SQL compilation | Render Databricks syntax, quoting, and optional names |
 | Execution | Apply already accepted operations and surface platform failures |
-| Reporting | Use requested names, catalog names, or definitions according to lifecycle |
+| Reporting | Use desired names, catalog names, or definitions according to lifecycle |
 
 The table differ should be the deep reconciliation module. Callers provide
 desired and observed tables; they should not need to understand matching,
@@ -223,7 +221,7 @@ refactor: model desired and observed constraints
 #### Scope
 
 - Introduce the final desired and observed constraint type names.
-- Rename lifecycle fields to `requested_name` and `catalog_name`.
+- Rename lifecycle fields to `desired_name` and `catalog_name`.
 - Keep desired names required temporarily because the public API still
   generates its existing defaults in this PR.
 - Store catalog names with exact string identity rather than as
@@ -282,7 +280,7 @@ refactor: use add and drop constraint actions
 - Compile PK drops without a name and FK drops with the exact catalog name.
 - Give action equality operational semantics through creation and occurrence
   signatures.
-- Update reporting to use requested names for additions and catalog names for
+- Update reporting to use desired names for additions and catalog names for
   removals.
 - Update validation, ordering, compiler dispatch, exports, and the action
   extension guide.
@@ -301,7 +299,7 @@ SQL behavior should otherwise remain unchanged.
 #### Acceptance criteria
 
 - Drops still phase before additions.
-- Add actions differing by requested name are operationally unequal.
+- Add actions differing by desired name are operationally unequal.
 - Drop actions differing by catalog name are operationally unequal.
 - Constraint payloads inside those actions retain structural equality.
 - PK drop SQL is name-independent.
@@ -318,13 +316,13 @@ feat: delegate constraint naming to Databricks
 
 #### Scope
 
-- Make desired `requested_name` optional.
+- Make desired `desired_name` optional.
 - Remove primary- and foreign-key name generators.
 - Preserve omitted names through public lowering.
 - Render named or unnamed PK and FK additions from the same compiler helpers.
 - Make `DeltaTable.primary_key_name` return only the explicit request.
 - Report unnamed additions by their structural columns rather than `None`.
-- Document requested names as creation preferences.
+- Document desired names as creation preferences.
 - Preserve compatibility by adopting existing engine-generated and manually
   named occurrences by definition.
 
@@ -334,11 +332,11 @@ feat: delegate constraint naming to Databricks
 | --- | --- | --- |
 | No key | No key | Nothing |
 | Unnamed key | No matching key | Add without `CONSTRAINT name` |
-| Named key | No matching key | Add with requested name |
+| Named key | No matching key | Add with desired name |
 | Any key request | Matching definition under any name | Nothing |
 | No key | Existing key | Drop observed occurrence |
 | Different definition | Existing key | Drop observed, then add desired |
-| Requested name changes only | Matching definition | Nothing |
+| Desired name changes only | Matching definition | Nothing |
 
 #### Primary files
 
@@ -356,7 +354,7 @@ feat: delegate constraint naming to Databricks
 - Databricks assigns non-empty catalog names to unnamed PKs and FKs.
 - A second sync is a no-op.
 - Legacy explicitly named constraints are adopted.
-- Changing only a requested name is a no-op.
+- Changing only a desired name is a no-op.
 - Catalog-generated name shape and stability are not asserted.
 - Schema-wide explicit-name collisions remain clear platform execution errors.
 
@@ -378,11 +376,10 @@ docs: document the constraint lifecycle model
   behavior incorrectly.
 - Remove obsolete generators, compatibility scaffolding, or transitional
   aliases left by the preceding PRs.
-- Ensure internal production fields use `requested_name` or `catalog_name`,
+- Ensure internal production fields use `desired_name` or `catalog_name`,
   never ambiguous `name`.
-- Reassess the private normalization/equality mixins after the final types
-  settle; retain them only if they reduce repetition without exposing another
-  concept.
+- Reassess the private normalization/equality functions after the final types
+  settle; retain them only if they reduce repetition.
 - Note internal import renames in release documentation if necessary.
 
 `PrimaryKeyConstraint` and `ForeignKeyConstraint` are not part of the curated
@@ -412,10 +409,10 @@ boundary.
 
 #### Scope
 
-- Remove unconditional duplicate requested-name validation from individual
+- Remove unconditional duplicate desired-name validation from individual
   desired-table construction.
 - After all tables are planned, collect `AddPrimaryKey` and `AddForeignKey`
-  actions with explicit requested names.
+  actions with explicit desired names.
 - Group requests by catalog, schema, and case-folded name.
 - Reject every group containing multiple planned additions before execution.
 - Surface failures in dry runs.
@@ -447,7 +444,7 @@ Keep that orchestration change isolated in this PR.
 
 #### Acceptance criteria
 
-- Case variants of one requested name collide.
+- Case variants of one desired name collide.
 - PK and FK requests share the same validation namespace.
 - Requests collide across tables in one schema.
 - The same spelling in different schemas does not collide.
@@ -512,5 +509,5 @@ The redesign is complete when:
 - optional naming grammar is confined to the SQL compiler;
 - only readers construct observed constraint occurrences;
 - exact catalog names are available for physical operations and diagnostics;
-- documentation explains requested names as creation preferences; and
+- documentation explains desired names as creation preferences; and
 - unit, static, documentation, and applicable live validation are green.

@@ -45,8 +45,8 @@ from delta_engine.application.failures import (
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     DataType,
+    DesiredForeignKey,
     DesiredTable,
-    ForeignKeyConstraint,
     QualifiedName,
     TableAspect,
 )
@@ -68,7 +68,7 @@ class TableResolution:
     """
 
     desired: DesiredTable
-    dependencies: ListOrTuple[ForeignKeyConstraint]
+    dependencies: ListOrTuple[DesiredForeignKey]
     structural_failures: ListOrTuple[ForeignKeyFailure]
 
     def __post_init__(self) -> None:
@@ -133,7 +133,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     )
 
 
-def _managed_foreign_keys(table: DesiredTable) -> Sequence[ForeignKeyConstraint]:
+def _managed_foreign_keys(table: DesiredTable) -> Sequence[DesiredForeignKey]:
     """Return foreign keys this declaration is responsible for reconciling."""
     if not table.scope.manages(TableAspect.FOREIGN_KEYS):
         return ()
@@ -142,7 +142,7 @@ def _managed_foreign_keys(table: DesiredTable) -> Sequence[ForeignKeyConstraint]
 
 def _foreign_key_failure(
     table: DesiredTable,
-    foreign_key: ForeignKeyConstraint,
+    foreign_key: DesiredForeignKey,
     reason: ForeignKeyFailureReason,
 ) -> ForeignKeyFailure:
     """Build the failure value associated with one managed foreign key."""
@@ -155,7 +155,7 @@ def _foreign_key_failure(
 
 
 def _foreign_key_types_match(
-    foreign_key: ForeignKeyConstraint,
+    foreign_key: DesiredForeignKey,
     *,
     local_types: Mapping[str, DataType],
     referenced_types: Mapping[str, DataType],
@@ -172,7 +172,7 @@ def _foreign_key_types_match(
 def _build_dependencies(
     tables: tuple[DesiredTable, ...],
     registered_names: Set[QualifiedName],
-) -> dict[QualifiedName, tuple[ForeignKeyConstraint, ...]]:
+) -> dict[QualifiedName, tuple[DesiredForeignKey, ...]]:
     """
     Build the dependency edges for every table.
 
@@ -194,7 +194,7 @@ def _build_dependencies(
 
 
 def _build_dependency_graph(
-    dependencies_by_table: dict[QualifiedName, tuple[ForeignKeyConstraint, ...]],
+    dependencies_by_table: dict[QualifiedName, tuple[DesiredForeignKey, ...]],
 ) -> dict[QualifiedName, set[QualifiedName]]:
     """Project dependency edges into the adjacency map used for ordering."""
     return {
@@ -334,7 +334,7 @@ def _classify_structural_failures(
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
     def record(
-        table: DesiredTable, foreign_key: ForeignKeyConstraint, reason: ForeignKeyFailureReason
+        table: DesiredTable, foreign_key: DesiredForeignKey, reason: ForeignKeyFailureReason
     ) -> None:
         failures.setdefault(table.qualified_name, []).append(
             _foreign_key_failure(table, foreign_key, reason)

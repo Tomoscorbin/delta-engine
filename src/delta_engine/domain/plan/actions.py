@@ -10,11 +10,12 @@ from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     DataType,
     DesiredColumn,
+    DesiredForeignKey,
+    DesiredPrimaryKey,
     DesiredTable,
-    ForeignKeyConstraint,
     Identifier,
     ObservedColumn,
-    PrimaryKeyConstraint,
+    ObservedForeignKey,
     QualifiedName,
     TableAspect,
     TableFeature,
@@ -355,35 +356,35 @@ class DropPrimaryKey(Action):
 class SetPrimaryKey(Action):
     """Set the declared primary key."""
 
-    primary_key: PrimaryKeyConstraint
+    primary_key: DesiredPrimaryKey
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
 
     @property
     def subject(self) -> str:
-        return self.primary_key.constraint_name
+        return self.primary_key.desired_name
 
 
 @dataclass(frozen=True, slots=True)
 class DropForeignKey(Action):
     """Drop a complete observed foreign key constraint."""
 
-    constraint: ForeignKeyConstraint
+    constraint: ObservedForeignKey
 
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
     @property
     def subject(self) -> str:
-        return self.constraint.constraint_name
+        return self.constraint.catalog_name
 
 
 @dataclass(frozen=True, slots=True)
 class SetForeignKey(Action):
     """Set a complete declared foreign key constraint."""
 
-    constraint: ForeignKeyConstraint
+    constraint: DesiredForeignKey
 
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
