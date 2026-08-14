@@ -395,63 +395,23 @@ aliases. The public `DeltaTable`, `ForeignKey`, `primary_key_name`, and
   and catalog identity.
 - Documentation builds with warnings treated as errors.
 
-### PR 5: Validate planned creation-name collisions
+### Planned creation-name collision validation — not pursued
 
-Suggested title:
+The original follow-up proposed validating explicit names across every
+constraint addition planned by one sync. The design review rejected that PR on
+2026-08-14. The check would introduce a new cross-table planning boundary and
+special handling for primary keys embedded in `CreateTable`, yet still could
+not validate the authoritative schema namespace: information-schema visibility
+is permission-filtered and the engine does not read every externally managed
+constraint.
 
-```text
-feat: validate planned constraint name collisions
-```
-
-This is a follow-up hardening PR. It should not block the core lifecycle and
-platform-naming redesign because it introduces a new cross-table planning
-boundary.
-
-#### Scope
-
-- Remove unconditional duplicate desired-name validation from individual
-  desired-table construction.
-- After all tables are planned, collect `AddPrimaryKey` and `AddForeignKey`
-  actions with explicit desired names.
-- Group requests by catalog, schema, and case-folded name.
-- Reject every group containing multiple planned additions before execution.
-- Surface failures in dry runs.
-- Prevent partial execution in real runs.
-- Propagate blocking through the existing dependency mechanism.
-
-Only planned additions should participate. Two declarations may request the
-same name harmlessly when both are already satisfied and neither request will
-be used.
-
-The validator must not claim complete schema-wide knowledge. Information
-schema visibility is permission-filtered and the engine does not read every
-constraint in a schema. Collisions with unseen or externally managed catalog
-objects remain Databricks execution failures.
-
-#### Architectural work
-
-This likely requires an explicit plan-set validation step between per-table
-planning and compilation/execution:
-
-```text
-read and plan each table
-    -> validate the set of accepted plans
-    -> compile accepted plans
-    -> execute
-```
-
-Keep that orchestration change isolated in this PR.
-
-#### Acceptance criteria
-
-- Case variants of one desired name collide.
-- PK and FK requests share the same validation namespace.
-- Requests collide across tables in one schema.
-- The same spelling in different schemas does not collide.
-- Unnamed additions never collide locally.
-- Already-satisfied requests do not collide.
-- Dry runs report collisions without execution.
-- Real runs perform no affected addition before reporting the failure.
+Explicit naming is optional and collisions are uncommon when names are
+table-qualified; omitted names are allocated by Databricks. The engine
+therefore leaves this schema-wide admission decision to Databricks. A collision
+is reported as an execution failure. Syncs are not transactional across
+tables, so earlier statements remain applied; users fix or omit the conflicting
+name and rerun, allowing the normal read-plan-execute loop to converge from the
+state that succeeded.
 
 ## Out of scope
 
