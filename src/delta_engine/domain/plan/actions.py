@@ -67,9 +67,6 @@ class Action(ABC):
     ``observed_*`` for transition state). Each subclass declares its managed
     ``aspect``, execution ``phase``, and stable within-phase ``subject``.
 
-    Actions are commands within one plan/compile/execute flow, so concrete
-    dataclasses deliberately use object identity rather than value equality.
-    Their payload values retain their own domain equality independently.
     """
 
     aspect: ClassVar[TableAspect]
@@ -82,7 +79,7 @@ class Action(ABC):
         ...
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class CreateTable(Action):
     """Create a missing table from its complete desired definition."""
 
@@ -95,7 +92,7 @@ class CreateTable(Action):
         return ""
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class EnableTableFeature(Action):
     """
     Enable a Delta table feature the desired schema requires.
@@ -118,7 +115,7 @@ class EnableTableFeature(Action):
         return self.feature.value
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class AddColumn(Action):
     """Add a declared column to an existing table."""
 
@@ -132,7 +129,7 @@ class AddColumn(Action):
         return self.column.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class DropColumn(Action):
     """Remove an observed column from a table."""
 
@@ -146,7 +143,7 @@ class DropColumn(Action):
         return self.column.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class RenameColumn(Action):
     """Rename an observed column in place."""
 
@@ -167,7 +164,7 @@ class RenameColumn(Action):
         return self.old_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetProperty(Action):
     """Set a table property, preserving its desired and observed values."""
 
@@ -187,7 +184,7 @@ class SetProperty(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class UnsetProperty(Action):
     """Remove an observed property the declaration asserts absent."""
 
@@ -202,7 +199,7 @@ class UnsetProperty(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetTableTag(Action):
     """Set a Unity Catalog table tag, preserving both sides of the transition."""
 
@@ -222,7 +219,7 @@ class SetTableTag(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class UnsetTableTag(Action):
     """Remove a Unity Catalog tag from a table."""
 
@@ -236,7 +233,7 @@ class UnsetTableTag(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetColumnComment(Action):
     """Set a column comment, preserving its desired and observed values."""
 
@@ -257,7 +254,7 @@ class SetColumnComment(Action):
         return self.column_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetColumnTag(Action):
     """Set a Unity Catalog column tag, preserving both sides of the transition."""
 
@@ -279,7 +276,7 @@ class SetColumnTag(Action):
         return f"{self.column_name}.{self.name}"
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class UnsetColumnTag(Action):
     """Remove a Unity Catalog tag from a column."""
 
@@ -297,7 +294,7 @@ class UnsetColumnTag(Action):
         return f"{self.column_name}.{self.name}"
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetTableComment(Action):
     """Set a table comment, preserving its desired and observed values."""
 
@@ -316,7 +313,7 @@ class SetTableComment(Action):
         return ""
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class SetColumnNullability(Action):
     """Set a column's nullability, preserving both sides of the transition."""
 
@@ -339,7 +336,7 @@ class SetColumnNullability(Action):
         return self.column_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
@@ -356,7 +353,7 @@ class DropPrimaryKey(Action):
         return self.constraint.catalog_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class AddPrimaryKey(Action):
     """Add the desired primary key."""
 
@@ -373,7 +370,7 @@ class AddPrimaryKey(Action):
         return self.primary_key.desired_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class DropForeignKey(Action):
     """Drop a complete observed foreign key constraint."""
 
@@ -390,7 +387,7 @@ class DropForeignKey(Action):
         return self.constraint.catalog_name
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class AddForeignKey(Action):
     """Add a complete desired foreign key constraint."""
 
@@ -407,7 +404,7 @@ class AddForeignKey(Action):
         return ",".join(self.constraint.local_columns)
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class AlterClustering(Action):
     """Set or clear liquid-clustering keys, preserving desired and observed state."""
 
@@ -434,7 +431,7 @@ class AlterClustering(Action):
         return ""
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class AlterColumnType(Action):
     """Alter a column type, preserving desired and observed data types."""
 

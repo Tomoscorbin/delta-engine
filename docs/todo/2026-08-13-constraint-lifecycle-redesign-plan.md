@@ -122,10 +122,10 @@ creation signature   = definition + desired_name
 occurrence signature = definition + catalog_name
 ```
 
-Actions are immutable commands with object identity, not values that support
-semantic equality. Their lifecycle-correct payloads retain the complete
-creation or occurrence signature needed to compile and report them without
-forcing another meaning onto ``==``.
+Action correctness does not depend on a separate operational equality
+contract. Ordinary dataclass equality composes from each payload's existing
+equality, while lifecycle-correct payloads retain the complete creation or
+occurrence signature needed for compilation and reporting.
 
 ### Naming policy
 
@@ -279,8 +279,6 @@ refactor: use add and drop constraint actions
 - Make add actions carry desired constraints.
 - Make drop actions carry observed constraints.
 - Compile PK drops without a name and FK drops with the exact catalog name.
-- Give every action object identity rather than defining a second equality
-  contract over its payload.
 - Make a compiled plan accept one ordered statement per source-plan action and
   pair them by position, rather than asking adapters to echo action objects.
 - Update reporting to use desired names for additions and catalog names for
@@ -302,10 +300,6 @@ SQL behavior should otherwise remain unchanged.
 #### Acceptance criteria
 
 - Drops still phase before additions.
-- Independently constructed actions do not compare equal, even when their
-  payloads match.
-- Constraint payloads retain structural equality independently of their action
-  instances.
 - A compiled plan rejects missing, additional, or blank statements and keeps
   statements in source-plan order.
 - PK drop SQL is name-independent.

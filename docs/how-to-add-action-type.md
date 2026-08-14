@@ -12,7 +12,7 @@ This guide walks through the steps to add a new `Action` subtype to the engine â
 Add a frozen dataclass to `src/delta_engine/domain/plan/actions.py`:
 
 ```python
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True)
 class UpdateComment(Action):
     """Change the comment on a column or table."""
     column_name: str
@@ -39,10 +39,6 @@ representable. Name each field once, semantically (`desired_*` / `observed_*`
 for transition state); compilers and renderers read those names directly.
 `Action.subject` determines alphabetical sort order within a phase;
 `ActionPhase` is an `IntEnum` â€” lower values run first.
-
-Actions are commands within one plan/compile/execute flow and deliberately use
-object identity (`eq=False`). Their payload values keep their own domain
-equality, but independently constructed action objects are not interchangeable.
 
 ## 2. Add a phase constant if needed
 

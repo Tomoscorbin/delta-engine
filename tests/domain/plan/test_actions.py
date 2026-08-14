@@ -162,12 +162,6 @@ def test_plan_ordering_ignores_non_subject_fields():
     assert [action.subject for action in plan] == ["a_key", "b_key"]
 
 
-@pytest.mark.parametrize("action_type", _concrete_action_types())
-def test_actions_use_object_identity(action_type: type[Action]) -> None:
-    assert action_type.__eq__ is object.__eq__
-    assert action_type.__hash__ is object.__hash__
-
-
 @pytest.mark.parametrize(
     "action",
     [
