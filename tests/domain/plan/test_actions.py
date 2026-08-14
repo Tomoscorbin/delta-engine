@@ -102,16 +102,6 @@ def _create_table_action() -> CreateTable:
     )
 
 
-def _create_table_with_primary_key(name: str) -> CreateTable:
-    return CreateTable(
-        table=DesiredTable(
-            qualified_name=_TARGET,
-            columns=(DesiredColumn("id", Integer(), nullable=False),),
-            primary_key=_primary_key(name),
-        )
-    )
-
-
 def _drop_primary_key() -> DropPrimaryKey:
     return DropPrimaryKey(constraint=_observed_primary_key())
 
@@ -172,37 +162,10 @@ def test_plan_ordering_ignores_non_subject_fields():
     assert [action.subject for action in plan] == ["a_key", "b_key"]
 
 
-@pytest.mark.parametrize(
-    ("first", "second"),
-    [
-        (
-            AddPrimaryKey(_primary_key("first_pk")),
-            AddPrimaryKey(_primary_key("second_pk")),
-        ),
-        (
-            AddForeignKey(_foreign_key("first_fk")),
-            AddForeignKey(_foreign_key("second_fk")),
-        ),
-        (
-            DropPrimaryKey(_observed_primary_key("first_pk")),
-            DropPrimaryKey(_observed_primary_key("second_pk")),
-        ),
-        (
-            DropForeignKey(_observed_foreign_key("first_fk")),
-            DropForeignKey(_observed_foreign_key("second_fk")),
-        ),
-    ],
-)
-def test_constraint_actions_include_lifecycle_names_in_operational_identity(
-    first: Action,
-    second: Action,
-) -> None:
-    assert first != second
-    assert len({first, second}) == 2
-
-
-def test_create_table_identity_includes_the_primary_key_creation_name() -> None:
-    assert _create_table_with_primary_key("first_pk") != _create_table_with_primary_key("second_pk")
+@pytest.mark.parametrize("action_type", _concrete_action_types())
+def test_actions_use_object_identity(action_type: type[Action]) -> None:
+    assert action_type.__eq__ is object.__eq__
+    assert action_type.__hash__ is object.__hash__
 
 
 @pytest.mark.parametrize(

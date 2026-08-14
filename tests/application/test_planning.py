@@ -39,6 +39,7 @@ from delta_engine.domain.plan import (
     TableDrift,
     diff_table,
 )
+from tests.action_assertions import assert_action_sequence
 
 _NAME = QualifiedName("dev", "silver", "test")
 
@@ -97,7 +98,7 @@ def test_plan_changes_accepts_safe_actions():
 
     assert isinstance(result, PlanningAccepted)
     assert result.plan.target == _NAME
-    assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
+    assert_action_sequence(result.plan.actions, (AddColumn(DesiredColumn("age", Integer())),))
 
 
 def test_plan_changes_rejects_unsafe_actions():
@@ -165,7 +166,9 @@ def test_an_accepted_outcome_retains_the_diff_it_planned_from():
     result = plan_changes(desired, observed)
 
     assert isinstance(result, PlanningAccepted)
-    assert result.diff == diff_table(desired, observed)
+    assert result.diff.desired is desired
+    assert result.diff.observed is observed
+    assert result.plan.actions == result.diff.actions
 
 
 def test_a_refused_outcome_retains_the_diff_it_refused():
@@ -180,7 +183,8 @@ def test_a_refused_outcome_retains_the_diff_it_refused():
     result = plan_changes(desired, observed)
 
     assert isinstance(result, PlanningRejected)
-    assert result.diff == diff_table(desired, observed)
+    assert result.diff.desired is desired
+    assert result.diff.observed is observed
 
 
 def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
@@ -232,11 +236,14 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
     # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningAccepted)
     assert result.plan.target == desired.qualified_name
-    assert result.plan.actions == (
-        CreateTable(desired),
-        SetTableTag(name="env", desired_value="dev", observed_value=None),
-        SetColumnTag(column_name="id", name="pii", desired_value="false", observed_value=None),
-        AddForeignKey(constraint=foreign_key),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            CreateTable(desired),
+            SetTableTag(name="env", desired_value="dev", observed_value=None),
+            SetColumnTag(column_name="id", name="pii", desired_value="false", observed_value=None),
+            AddForeignKey(constraint=foreign_key),
+        ),
     )
 
 
@@ -265,9 +272,12 @@ def test_plan_changes_keeps_rename_and_residual_drift_under_the_new_name():
 
     # Then the residual drift lands under the new name
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (
-        RenameColumn(old_name="amt", new_name="amount"),
-        AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer()),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            RenameColumn(old_name="amt", new_name="amount"),
+            AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer()),
+        ),
     )
 
 
@@ -289,10 +299,13 @@ def test_plan_changes_replaces_a_primary_key_explicitly_across_a_rename():
 
     # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (
-        DropPrimaryKey(constraint=observed_key),
-        RenameColumn("customer_nm", "customer_name"),
-        AddPrimaryKey(primary_key=desired_key),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            DropPrimaryKey(constraint=observed_key),
+            RenameColumn("customer_nm", "customer_name"),
+            AddPrimaryKey(primary_key=desired_key),
+        ),
     )
 
 
@@ -352,10 +365,13 @@ def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
 
     # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (
-        DropForeignKey(constraint=observed_key),
-        RenameColumn("parent", "parent_id"),
-        AddForeignKey(constraint=desired_key),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            DropForeignKey(constraint=observed_key),
+            RenameColumn("parent", "parent_id"),
+            AddForeignKey(constraint=desired_key),
+        ),
     )
 
 
@@ -390,10 +406,13 @@ def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_
 
     # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (
-        DropForeignKey(constraint=observed_key),
-        RenameColumn("id", "employee_id"),
-        AddForeignKey(constraint=desired_key),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            DropForeignKey(constraint=observed_key),
+            RenameColumn("id", "employee_id"),
+            AddForeignKey(constraint=desired_key),
+        ),
     )
 
 
@@ -421,9 +440,12 @@ def test_plan_changes_drops_an_observed_only_foreign_key_alongside_a_rename():
 
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (
-        DropForeignKey(constraint=unrelated_key),
-        RenameColumn("customer_nm", "customer_name"),
+    assert_action_sequence(
+        result.plan.actions,
+        (
+            DropForeignKey(constraint=unrelated_key),
+            RenameColumn("customer_nm", "customer_name"),
+        ),
     )
 
 
@@ -537,7 +559,7 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
 
     # Then the accepted plan carries the foreign-key action
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (AddForeignKey(constraint=fk),)
+    assert_action_sequence(result.plan.actions, (AddForeignKey(constraint=fk),))
 
 
 def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():

@@ -46,18 +46,15 @@ Execution is a two-stage boundary. `compile` turns a domain plan into the backen
 
 ```python
 from delta_engine.application.errors import ExecutionError
-from delta_engine.application.ports import CompiledAction, CompiledPlan, PlanExecutor
+from delta_engine.application.ports import CompiledPlan, PlanExecutor
 from delta_engine.domain.plan.actions import ActionPlan
 
 class MyExecutor:
     def compile(self, plan: ActionPlan) -> CompiledPlan:
         return CompiledPlan(
             plan=plan,
-            compiled_actions=tuple(
-                CompiledAction(
-                    action=action,
-                    statement=self._render(plan.target, plan.kind, action),
-                )
+            statements=tuple(
+                self._render(plan.target, plan.kind, action)
                 for action in plan.actions
             ),
         )
@@ -65,9 +62,9 @@ class MyExecutor:
 
 The engine calls `compile` only with the `ActionPlan` carried by a
 `PlanningAccepted` result, on every dry or real run, and records the
-compiled plan on the table's report. Each `CompiledAction` pairs one source
-action with the single statement that applies it; `CompiledPlan` rejects
-missing, additional, or reordered actions. A rejected diff has no plan and
+compiled plan on the table's report. `CompiledPlan` pairs each statement with
+the source-plan action at the same position and rejects missing or additional
+statements. A rejected diff has no plan and
 never reaches this port. `compile` is **not** total: compiling an accepted plan
 is a pure, local operation that cannot fail against a backend, so it may raise
 on a genuine programming error rather than swallowing it. The plan carries

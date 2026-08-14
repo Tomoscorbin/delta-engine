@@ -12,10 +12,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
-from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import Action
 
 # ---------- DesiredTableSource ----------
 
@@ -82,39 +80,22 @@ class CatalogStateReader(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledAction:
-    """One domain action paired with the single statement that applies it."""
-
-    action: Action
-    statement: str
-
-    def __post_init__(self) -> None:
-        if not self.statement.strip():
-            raise ValueError(f"{type(self.action).__name__} compiled to an empty statement")
-
-
-@dataclass(frozen=True, slots=True)
 class CompiledPlan:
-    """An accepted action plan paired exactly with its compiled statements."""
+    """An accepted action plan and one compiled statement per action, in order."""
 
     plan: ActionPlan
-    compiled_actions: ListOrTuple[CompiledAction]
+    statements: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        compiled_actions = tuple(self.compiled_actions)
-        object.__setattr__(self, "compiled_actions", compiled_actions)
-        source_actions = tuple(compiled.action for compiled in compiled_actions)
+        if not isinstance(self.statements, tuple):
+            raise TypeError("CompiledPlan statements must be a tuple")
 
-        if len(source_actions) != len(self.plan.actions) or any(
-            compiled is not planned
-            for compiled, planned in zip(source_actions, self.plan.actions, strict=True)
-        ):
-            raise ValueError("Compiled actions must correspond exactly to plan actions")
+        if len(self.statements) != len(self.plan.actions):
+            raise ValueError("Compiled statements must correspond exactly to plan actions")
 
-    @property
-    def statements(self) -> tuple[str, ...]:
-        """Statements in the source plan's execution order."""
-        return tuple(item.statement for item in self.compiled_actions)
+        for action, statement in zip(self.plan.actions, self.statements, strict=True):
+            if not statement.strip():
+                raise ValueError(f"{type(action).__name__} compiled to an empty statement")
 
 
 @dataclass(frozen=True, slots=True)

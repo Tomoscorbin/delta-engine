@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
@@ -66,6 +66,10 @@ class Action(ABC):
     report, and execute it, with each value named once (``desired_*`` /
     ``observed_*`` for transition state). Each subclass declares its managed
     ``aspect``, execution ``phase``, and stable within-phase ``subject``.
+
+    Actions are commands within one plan/compile/execute flow, so concrete
+    dataclasses deliberately use object identity rather than value equality.
+    Their payload values retain their own domain equality independently.
     """
 
     aspect: ClassVar[TableAspect]
@@ -78,30 +82,20 @@ class Action(ABC):
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class CreateTable(Action):
     """Create a missing table from its complete desired definition."""
 
     table: DesiredTable
-    _primary_key_creation_name: str | None = field(init=False, repr=False)
-
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_EXISTENCE
     phase: ClassVar[ActionPhase] = ActionPhase.CREATE_TABLE
-
-    def __post_init__(self) -> None:
-        primary_key = self.table.primary_key
-        object.__setattr__(
-            self,
-            "_primary_key_creation_name",
-            None if primary_key is None else primary_key.desired_name,
-        )
 
     @property
     def subject(self) -> str:
         return ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class EnableTableFeature(Action):
     """
     Enable a Delta table feature the desired schema requires.
@@ -124,7 +118,7 @@ class EnableTableFeature(Action):
         return self.feature.value
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class AddColumn(Action):
     """Add a declared column to an existing table."""
 
@@ -138,7 +132,7 @@ class AddColumn(Action):
         return self.column.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class DropColumn(Action):
     """Remove an observed column from a table."""
 
@@ -152,7 +146,7 @@ class DropColumn(Action):
         return self.column.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class RenameColumn(Action):
     """Rename an observed column in place."""
 
@@ -173,7 +167,7 @@ class RenameColumn(Action):
         return self.old_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetProperty(Action):
     """Set a table property, preserving its desired and observed values."""
 
@@ -193,7 +187,7 @@ class SetProperty(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class UnsetProperty(Action):
     """Remove an observed property the declaration asserts absent."""
 
@@ -208,7 +202,7 @@ class UnsetProperty(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetTableTag(Action):
     """Set a Unity Catalog table tag, preserving both sides of the transition."""
 
@@ -228,7 +222,7 @@ class SetTableTag(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class UnsetTableTag(Action):
     """Remove a Unity Catalog tag from a table."""
 
@@ -242,7 +236,7 @@ class UnsetTableTag(Action):
         return self.name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetColumnComment(Action):
     """Set a column comment, preserving its desired and observed values."""
 
@@ -263,7 +257,7 @@ class SetColumnComment(Action):
         return self.column_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetColumnTag(Action):
     """Set a Unity Catalog column tag, preserving both sides of the transition."""
 
@@ -285,7 +279,7 @@ class SetColumnTag(Action):
         return f"{self.column_name}.{self.name}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class UnsetColumnTag(Action):
     """Remove a Unity Catalog tag from a column."""
 
@@ -303,7 +297,7 @@ class UnsetColumnTag(Action):
         return f"{self.column_name}.{self.name}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetTableComment(Action):
     """Set a table comment, preserving its desired and observed values."""
 
@@ -322,7 +316,7 @@ class SetTableComment(Action):
         return ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SetColumnNullability(Action):
     """Set a column's nullability, preserving both sides of the transition."""
 
@@ -345,87 +339,75 @@ class SetColumnNullability(Action):
         return self.column_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
     constraint: ObservedPrimaryKey
-    _occurrence_name: str = field(init=False, repr=False)
-
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
         if not isinstance(self.constraint, ObservedPrimaryKey):
             raise TypeError("DropPrimaryKey constraint must be an observed primary key")
-        object.__setattr__(self, "_occurrence_name", self.constraint.catalog_name)
 
     @property
     def subject(self) -> str:
         return self.constraint.catalog_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class AddPrimaryKey(Action):
     """Add the desired primary key."""
 
     primary_key: DesiredPrimaryKey
-    _creation_name: str = field(init=False, repr=False)
-
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.ADD_PRIMARY_KEY
 
     def __post_init__(self) -> None:
         if not isinstance(self.primary_key, DesiredPrimaryKey):
             raise TypeError("AddPrimaryKey primary_key must be a desired primary key")
-        object.__setattr__(self, "_creation_name", self.primary_key.desired_name)
 
     @property
     def subject(self) -> str:
         return self.primary_key.desired_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class DropForeignKey(Action):
     """Drop a complete observed foreign key constraint."""
 
     constraint: ObservedForeignKey
-    _occurrence_name: str = field(init=False, repr=False)
-
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
     def __post_init__(self) -> None:
         if not isinstance(self.constraint, ObservedForeignKey):
             raise TypeError("DropForeignKey constraint must be an observed foreign key")
-        object.__setattr__(self, "_occurrence_name", self.constraint.catalog_name)
 
     @property
     def subject(self) -> str:
         return self.constraint.catalog_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class AddForeignKey(Action):
     """Add a complete desired foreign key constraint."""
 
     constraint: DesiredForeignKey
-    _creation_name: str = field(init=False, repr=False)
-
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.ADD_FOREIGN_KEY
 
     def __post_init__(self) -> None:
         if not isinstance(self.constraint, DesiredForeignKey):
             raise TypeError("AddForeignKey constraint must be a desired foreign key")
-        object.__setattr__(self, "_creation_name", self.constraint.desired_name)
 
     @property
     def subject(self) -> str:
         return ",".join(self.constraint.local_columns)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class AlterClustering(Action):
     """Set or clear liquid-clustering keys, preserving desired and observed state."""
 
@@ -452,7 +434,7 @@ class AlterClustering(Action):
         return ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class AlterColumnType(Action):
     """Alter a column type, preserving desired and observed data types."""
 

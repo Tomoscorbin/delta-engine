@@ -2,7 +2,6 @@ import pytest
 
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
-    CompiledAction,
     CompiledPlan,
     ExecutionResult,
 )
@@ -31,54 +30,37 @@ def _compiled(*statements: str) -> CompiledPlan:
     return build_compiled_plan(plan, statements)
 
 
-def test_compiled_action_rejects_an_empty_statement():
+def test_compiled_plan_rejects_an_empty_statement():
     action = SetTableComment(desired_comment="new", observed_comment="old")
+    plan = ActionPlan(
+        target=QualifiedName("cat", "schema", "table"),
+        actions=(action,),
+    )
 
     with pytest.raises(ValueError, match="SetTableComment compiled to an empty statement"):
-        CompiledAction(action=action, statement="  ")
+        CompiledPlan(plan=plan, statements=("  ",))
 
 
-def test_compiled_plan_rejects_an_omitted_action():
+@pytest.mark.parametrize("statements", [(), ("SQL 0", "SQL 1")])
+def test_compiled_plan_requires_one_statement_per_action(statements: tuple[str, ...]):
     plan = ActionPlan(
         target=QualifiedName("cat", "schema", "table"),
         actions=(SetTableComment(desired_comment="new", observed_comment="old"),),
     )
 
     with pytest.raises(ValueError, match="correspond exactly"):
-        CompiledPlan(plan=plan, compiled_actions=())
+        CompiledPlan(plan=plan, statements=statements)
 
 
-def test_compiled_plan_rejects_an_equal_but_substituted_action():
-    planned = SetTableComment(desired_comment="new", observed_comment="old")
-    substituted = SetTableComment(desired_comment="new", observed_comment="old")
-    plan = ActionPlan(
-        target=QualifiedName("cat", "schema", "table"),
-        actions=(planned,),
-    )
-
-    with pytest.raises(ValueError, match="correspond exactly"):
-        CompiledPlan(
-            plan=plan,
-            compiled_actions=(CompiledAction(action=substituted, statement="SQL"),),
-        )
-
-
-def test_compiled_plan_copies_mutable_compiled_actions_to_a_tuple():
+def test_compiled_plan_rejects_mutable_statements():
     action = SetTableComment(desired_comment="new", observed_comment="old")
     plan = ActionPlan(
         target=QualifiedName("cat", "schema", "table"),
         actions=(action,),
     )
-    compiled_action = CompiledAction(action=action, statement="SQL")
-    compiled_actions = [compiled_action]
 
-    compiled = CompiledPlan(
-        plan=plan,
-        compiled_actions=compiled_actions,  # type: ignore[arg-type]
-    )
-    compiled_actions.clear()
-
-    assert compiled.compiled_actions == (compiled_action,)
+    with pytest.raises(TypeError, match="must be a tuple"):
+        CompiledPlan(plan=plan, statements=["SQL"])  # type: ignore[arg-type]
 
 
 def test_execution_result_success_covers_the_complete_plan():
