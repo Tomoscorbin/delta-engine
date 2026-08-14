@@ -18,7 +18,13 @@ from delta_engine.adapters.databricks.sql.dialect import (
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
 from delta_engine.application.ports import CompiledPlan
-from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
+from delta_engine.domain.model import (
+    DesiredColumn,
+    DesiredForeignKey,
+    DesiredPrimaryKey,
+    QualifiedName,
+    TableKind,
+)
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -101,9 +107,7 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
     column_defs = [_column_definition(column) for column in table.columns]
 
     if table.primary_key is not None:
-        pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = backtick(table.primary_key.desired_name)
-        column_defs.append(f"CONSTRAINT {constraint_name} PRIMARY KEY ({pk_cols})")
+        column_defs.append(_primary_key_definition(table.primary_key))
 
     columns_clause = ", ".join(column_defs)
     table_comment = _table_comment_clause(table.comment)
@@ -246,10 +250,8 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_add_primary_key(action: AddPrimaryKey, target: _Target) -> str:
-    """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
-    column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
-    constraint = backtick(action.primary_key.desired_name)
-    return f"{target.alter_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
+    """Compile ALTER TABLE ... ADD PRIMARY KEY with an optional desired name."""
+    return f"{target.alter_clause} ADD {_primary_key_definition(action.primary_key)}"
 
 
 @_compile_action.register
@@ -262,19 +264,37 @@ def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_add_foreign_key(action: AddForeignKey, target: _Target) -> str:
-    """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    constraint = backtick(action.constraint.desired_name)
-    local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)
-    ref_cols = ", ".join(backtick(col) for col in action.constraint.referenced_columns)
-    backticked_ref = backtick_qualified_name(action.constraint.referenced_table)
-    return (
-        f"{target.alter_clause}"
-        f" ADD CONSTRAINT {constraint}"
-        f" FOREIGN KEY ({local_cols}) REFERENCES {backticked_ref} ({ref_cols})"
-    )
+    """Compile ALTER TABLE ... ADD FOREIGN KEY with an optional desired name."""
+    return f"{target.alter_clause} ADD {_foreign_key_definition(action.constraint)}"
 
 
 # ----------- helpers ------------
+
+
+def _primary_key_definition(primary_key: DesiredPrimaryKey) -> str:
+    """Render a complete PRIMARY KEY definition, including its optional name."""
+    columns = ", ".join(backtick(name) for name in primary_key.columns)
+    name = (
+        f"CONSTRAINT {backtick(primary_key.desired_name)} "
+        if primary_key.desired_name is not None
+        else ""
+    )
+    return f"{name}PRIMARY KEY ({columns})"
+
+
+def _foreign_key_definition(foreign_key: DesiredForeignKey) -> str:
+    """Render a complete FOREIGN KEY definition, including its optional name."""
+    local_columns = ", ".join(backtick(column) for column in foreign_key.local_columns)
+    referenced_columns = ", ".join(backtick(column) for column in foreign_key.referenced_columns)
+    referenced_table = backtick_qualified_name(foreign_key.referenced_table)
+    name = (
+        f"CONSTRAINT {backtick(foreign_key.desired_name)} "
+        if foreign_key.desired_name is not None
+        else ""
+    )
+    return (
+        f"{name}FOREIGN KEY ({local_columns}) REFERENCES {referenced_table} ({referenced_columns})"
+    )
 
 
 def _column_definition(column: DesiredColumn) -> str:

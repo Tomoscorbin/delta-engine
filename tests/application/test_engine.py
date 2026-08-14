@@ -177,16 +177,16 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
             columns=as_observed_columns(desired.columns),
             primary_key=ObservedPrimaryKey(
                 columns=desired.primary_key.columns,
-                catalog_name=desired.primary_key.desired_name,
+                catalog_name=f"{desired.qualified_name.name}_catalog_pk",
             ),
             foreign_keys=tuple(
                 ObservedForeignKey(
                     local_columns=foreign_key.local_columns,
                     referenced_table=foreign_key.referenced_table,
                     referenced_columns=foreign_key.referenced_columns,
-                    catalog_name=foreign_key.desired_name,
+                    catalog_name=f"{desired.qualified_name.name}_catalog_fk_{index}",
                 )
-                for foreign_key in desired.foreign_keys
+                for index, foreign_key in enumerate(desired.foreign_keys)
             ),
         )
     )
@@ -1528,7 +1528,7 @@ def test_foreign_key_failed_table_still_carries_its_planned_sql():
     assert orders.resolution.structural_failures != ()
     assert orders.compiled is not None
     assert orders.compiled.statements != ()
-    assert any("ADD CONSTRAINT" in statement for statement in orders.compiled.statements)
+    assert any("ADD FOREIGN KEY" in statement for statement in orders.compiled.statements)
     assert executor.executed_statements == []
 
 

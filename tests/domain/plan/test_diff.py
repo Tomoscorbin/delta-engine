@@ -78,7 +78,7 @@ def _observed(**overrides) -> ObservedTable:
 
 
 def _foreign_key(
-    constraint_name: str = "test_id_fk",
+    constraint_name: str | None = "test_id_fk",
     local_columns: tuple[str, ...] = ("id",),
     referenced_columns: tuple[str, ...] = ("id",),
     referenced_table: QualifiedName = _PARENT_NAME,
@@ -709,8 +709,8 @@ def test_desired_only_primary_key_produces_added_change():
 
 
 def test_equal_primary_key_definitions_produce_no_change():
-    # Given the same PK definition under different lifecycle names, orders, and casing
-    desired_pk = DesiredPrimaryKey(columns=("a", "b"), desired_name="Other_Name")
+    # Given an unnamed declaration and a named observation with the same columns
+    desired_pk = DesiredPrimaryKey(columns=("a", "b"))
     observed_pk = ObservedPrimaryKey(columns=("b", "a"), catalog_name="catalog_pk")
     columns = (
         DesiredColumn("a", Integer(), nullable=False),
@@ -749,7 +749,7 @@ def test_primary_key_name_only_difference_is_adopted():
 # ---------- constraint changes
 
 
-def test_present_table_diffs_foreign_keys_by_name_and_definition():
+def test_present_table_diffs_foreign_keys_by_definition():
     # Given one FK declared-and-present, one declared-but-absent,
     # and one observed-but-undeclared
     shared = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
@@ -801,10 +801,10 @@ def test_foreign_key_name_only_difference_is_adopted():
     assert drift.actions == ()
 
 
-def test_foreign_key_name_identity_is_case_insensitive():
-    # Given matching definitions whose physical-name spelling differs only by case
-    desired_key = _foreign_key("Orders_Customer_FK", local_columns=("customer_id",))
-    observed_key = _observed_foreign_key("orders_customer_fk", local_columns=("customer_id",))
+def test_unnamed_foreign_key_adopts_a_matching_catalog_occurrence():
+    # Given an unnamed declaration matching a catalog occurrence by definition
+    desired_key = _foreign_key(None, local_columns=("customer_id",))
+    observed_key = _observed_foreign_key("catalog_generated_fk", local_columns=("customer_id",))
     columns = (DesiredColumn("customer_id", String()),)
 
     # When the table is diffed
@@ -813,7 +813,7 @@ def test_foreign_key_name_identity_is_case_insensitive():
         _observed(columns=columns, foreign_keys=(observed_key,)),
     )
 
-    # Then identifier-equivalent names converge without replacement
+    # Then the observed catalog name is adopted without replacement
     assert isinstance(drift, TableDrift)
     assert drift.actions == ()
 

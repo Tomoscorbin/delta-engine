@@ -60,7 +60,7 @@ def _observed_column(name: str) -> ObservedColumn:
 
 
 def _primary_key(
-    columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
+    columns: tuple[str, ...] = ("id",), constraint_name: str | None = "tbl_pk"
 ) -> DesiredPrimaryKey:
     return DesiredPrimaryKey(columns, constraint_name)
 
@@ -76,7 +76,7 @@ def _foreign_key(
     local_columns: tuple[str, ...] = ("customer_id",),
     referenced_table: QualifiedName = _REFERENCED_TABLE,
     referenced_columns: tuple[str, ...] = ("id",),
-    desired_name: str = "orders_customer_id_fk",
+    desired_name: str | None = "orders_customer_id_fk",
 ) -> DesiredForeignKey:
     return DesiredForeignKey(
         local_columns,
@@ -331,6 +331,17 @@ def test_create_table_inlines_primary_key_constraint():
     )
 
 
+def test_create_table_inlines_unnamed_primary_key():
+    action = _create_table(
+        DesiredColumn("id", Integer(), nullable=False),
+        primary_key=DesiredPrimaryKey(columns=("id",)),
+    )
+
+    assert _compile_single(action) == (
+        "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT NOT NULL, PRIMARY KEY (`id`)) USING delta"
+    )
+
+
 def test_create_table_without_primary_key_omits_constraint_clause():
     # Given a CREATE TABLE with no primary key
     action = _create_table(DesiredColumn("id", Integer()))
@@ -446,6 +457,14 @@ def test_add_primary_key_renders_composite_primary_key():
     )
 
 
+def test_add_primary_key_omits_constraint_clause_when_name_is_omitted():
+    action = AddPrimaryKey(primary_key=_primary_key(("tenant_id", "order_id"), None))
+
+    assert _compile_single(action) == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD PRIMARY KEY (`tenant_id`, `order_id`)"
+    )
+
+
 def test_add_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
     action = AddForeignKey(constraint=_foreign_key(desired_name="tbl_customer_id_fk"))
@@ -458,6 +477,15 @@ def test_add_foreign_key_renders_single_column_fk():
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_customer_id_fk`"
         " FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
+    )
+
+
+def test_add_foreign_key_omits_constraint_clause_when_name_is_omitted():
+    action = AddForeignKey(constraint=_foreign_key(desired_name=None))
+
+    assert _compile_single(action) == (
+        "ALTER TABLE `cat`.`sch`.`tbl`"
+        " ADD FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
     )
 
 

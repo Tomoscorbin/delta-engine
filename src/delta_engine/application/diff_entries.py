@@ -205,6 +205,12 @@ def _columns_detail(columns: Sequence[str]) -> tuple[str, ...]:
     return (f"({', '.join(columns)})",)
 
 
+def _key_subject(kind: str, desired_name: str | None, columns: Sequence[str]) -> str:
+    """Identify an addition by its requested name, or its definition when unnamed."""
+    identity = desired_name if desired_name is not None else f"({', '.join(columns)})"
+    return f"{kind} {identity}"
+
+
 @functools.singledispatch
 def action_entries(action: Action) -> tuple[DiffEntry, ...]:
     """Render one plan action as one or more category-tagged diff entries."""
@@ -245,7 +251,11 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
             DiffEntry(
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
-                subject=f"primary key {primary_key.desired_name}",
+                subject=_key_subject(
+                    "primary key",
+                    primary_key.desired_name,
+                    primary_key.columns,
+                ),
                 detail=_columns_detail(primary_key.columns),
             )
         )
@@ -445,7 +455,11 @@ def _(action: AddPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"primary key {action.primary_key.desired_name}",
+            subject=_key_subject(
+                "primary key",
+                action.primary_key.desired_name,
+                action.primary_key.columns,
+            ),
             detail=_columns_detail(action.primary_key.columns),
         ),
     )
@@ -469,7 +483,11 @@ def _(action: AddForeignKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.ADD,
-            subject=f"foreign key {action.constraint.desired_name}",
+            subject=_key_subject(
+                "foreign key",
+                action.constraint.desired_name,
+                action.constraint.local_columns,
+            ),
             detail=(f"({local_columns}) → {action.constraint.referenced_table}",),
         ),
     )

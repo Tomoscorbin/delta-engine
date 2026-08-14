@@ -682,9 +682,8 @@ executing.
 - rejects property keys the engine does not manage (valued or `None`) and
   rejects invalid declared property values
 - lowers the table-level `primary_key` and optional `primary_key_name` into one
-  `PrimaryKeyConstraint`
-- lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
-  values
+  `DesiredPrimaryKey`
+- lowers public `ForeignKey` declarations into `DesiredForeignKey` values
 - validates structural invariants such as non-empty columns, unique column
   names, valid partition columns, valid FK local columns, and non-nullable
   primary-key columns
@@ -752,26 +751,23 @@ declaration shape.
 
 ## Constraint names
 
-Constraint names remain data on the concrete key objects; the domain does not
-introduce separate definition, desired-specification, or physical-occurrence
-wrappers.
+Constraint identity is structural. Primary keys compare by their column set;
+foreign keys compare by their local columns, referenced table, and referenced
+columns. Their lifecycle names are deliberately excluded from equality and
+hashing.
 
-Every `PrimaryKeyConstraint` is complete: it carries its physical name as well
-as its columns. Public `primary_key_name=None` is input shorthand only. When
-the declaration is lowered, the API layer already knows the owning table and
-generates `{table}_pk` once; an explicit name passes through unchanged. The
-reader likewise supplies the catalog name when it constructs an observed key.
-The differ can therefore compare column-set and case-insensitive name identity
-without resolving lifecycle state, and the compiler consumes the same value.
+Desired constraints carry an optional creation preference in `desired_name`.
+`None` makes the compiler omit the name so Databricks allocates one; an
+explicit value requests that name when the constraint is created. Once the
+constraint exists, Databricks owns its physical name. Changing only the
+preference is therefore a no-op rather than an implicit drop and recreate.
 
-Every `ForeignKeyConstraint` is likewise complete: it carries its physical name
-as well as its local-to-referenced definition. Public `ForeignKey.name=None` is
-input shorthand only. When the declaration is attached to a `DeltaTable`, the
-API layer already knows the owner and generates `{table}_{local_columns}_fk`
-once; an explicit name passes through unchanged. Canonicalized column pairs and
-case-insensitive identifiers make normal constraint equality express both
-physical-name and structural identity. The differ and compiler consume that
-same complete value.
+Catalog reads produce `ObservedPrimaryKey` and `ObservedForeignKey` values,
+whose `catalog_name` is required. This keeps physical identity available for
+drop operations without making desired declarations invent a future name.
+Reconciliation stays ordinary: desired and observed constraints compare with
+`==`, unmatched observations are dropped, and unmatched declarations are
+added. Optional naming grammar remains inside the SQL compiler.
 
 ## Reporting and failure semantics
 

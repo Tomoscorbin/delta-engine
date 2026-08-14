@@ -59,9 +59,15 @@ def test_mixed_case_columns_and_name_are_preserved():
     assert str(pk.desired_name) == "Orders_PK"
 
 
+def test_desired_key_accepts_an_omitted_creation_name():
+    key = DesiredPrimaryKey(columns=("id",))
+
+    assert key.desired_name is None
+
+
 def test_desired_and_observed_keys_compare_by_definition():
-    # Given equivalent lifecycle values with different names, casing, and column order
-    desired = DesiredPrimaryKey(columns=("TenantId", "OrderId"), desired_name="Orders_PK")
+    # Given equivalent lifecycle values with an omitted desired name and a catalog name
+    desired = DesiredPrimaryKey(columns=("TenantId", "OrderId"))
     observed = ObservedPrimaryKey(
         columns=("orderid", "tenantid"), catalog_name="catalog_generated_name"
     )

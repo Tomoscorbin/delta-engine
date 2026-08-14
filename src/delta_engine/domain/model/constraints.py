@@ -34,10 +34,10 @@ def _catalog_name(name: str) -> str:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class DesiredPrimaryKey:
-    """A declared primary-key definition and the name desired on creation."""
+    """A declared primary-key definition and optional name desired on creation."""
 
     columns: ListOrTuple[str]
-    desired_name: str
+    desired_name: str | None = None
 
     def matches_columns(self, columns: Iterable[str]) -> bool:
         """Return whether columns identify this key, ignoring order and case."""
@@ -57,7 +57,11 @@ class DesiredPrimaryKey:
             "columns",
             _constraint_columns(self.columns, kind="primary key"),
         )
-        object.__setattr__(self, "desired_name", Identifier(self.desired_name))
+        object.__setattr__(
+            self,
+            "desired_name",
+            Identifier(self.desired_name) if self.desired_name is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -120,12 +124,12 @@ def _foreign_key_columns(
 
 @dataclass(frozen=True, slots=True, eq=False)
 class DesiredForeignKey:
-    """A declared foreign-key definition and the name desired on creation."""
+    """A declared foreign-key definition and optional name desired on creation."""
 
     local_columns: ListOrTuple[str]
     referenced_table: QualifiedName
     referenced_columns: ListOrTuple[str]
-    desired_name: str
+    desired_name: str | None = None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, (DesiredForeignKey, ObservedForeignKey)):
@@ -142,7 +146,11 @@ class DesiredForeignKey:
         )
         object.__setattr__(self, "local_columns", local_columns)
         object.__setattr__(self, "referenced_columns", referenced_columns)
-        object.__setattr__(self, "desired_name", Identifier(self.desired_name))
+        object.__setattr__(
+            self,
+            "desired_name",
+            Identifier(self.desired_name) if self.desired_name is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)

@@ -505,15 +505,15 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
     # When lowering the declaration
     desired = table.to_desired_table()
 
-    # Then the physical name is generated once the owning table is known
+    # Then omission remains explicit so Databricks can choose the physical name
     assert desired.primary_key is not None
     assert desired.primary_key.columns == ("tenant_id", "id")
-    assert desired.primary_key.desired_name == "accounts_pk"
-    assert table.primary_key_name == "accounts_pk"
+    assert desired.primary_key.desired_name is None
+    assert table.primary_key_name is None
 
 
-def test_primary_key_name_is_preserved_as_explicit_managed_state():
-    # Given a primary key with an explicit physical name
+def test_primary_key_name_is_preserved_as_an_explicit_creation_request():
+    # Given a primary key with an explicit desired name
     table = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -523,7 +523,7 @@ def test_primary_key_name_is_preserved_as_explicit_managed_state():
         primary_key_name="Accounts_Business_Key",
     )
 
-    # When reading the declaration's managed primary-key name
+    # When reading the declaration's primary-key creation request
     desired = table.to_desired_table()
 
     # Then both the public API and lowered state preserve its spelling
@@ -674,16 +674,16 @@ def test_delta_table_accepts_foreign_keys_parameter():
         foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
     )
 
-    # Then the FK is lowered to an internal constraint carrying its generated name
+    # Then the FK definition is lowered without inventing a physical name
     [foreign_key] = table.to_desired_table().foreign_keys
     assert foreign_key.local_columns == ("customer_id",)
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.desired_name == "orders_customer_id_fk"
+    assert foreign_key.desired_name is None
 
 
-def test_foreign_key_name_is_preserved_as_explicit_managed_state():
-    # Given a foreign key with an explicit physical name
+def test_foreign_key_name_is_preserved_as_an_explicit_creation_request():
+    # Given a foreign key with an explicit desired name
     customers = _customers()
     declaration = ForeignKey(
         columns="customer_id",
@@ -791,10 +791,10 @@ def test_delta_table_foreign_keys_round_trip_as_declarations():
         foreign_keys=original.foreign_keys,
     )
 
-    # Then the public declarations round-trip and lowering uses the new owner
+    # Then the public declarations round-trip without acquiring an owner-derived name
     assert copy.foreign_keys == original.foreign_keys
     [constraint] = copy.to_desired_table().foreign_keys
-    assert constraint.desired_name == "orders_copy_customer_id_fk"
+    assert constraint.desired_name is None
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
@@ -1650,7 +1650,7 @@ def test_delta_table_rejects_cross_catalog_foreign_key():
         )
 
 
-def _table_with_colliding_generated_foreign_key_names(
+def _table_with_distinct_foreign_keys(
     names: tuple[str | None, str | None] = (None, None),
 ) -> DeltaTable:
     parts = DeltaTable(
@@ -1688,24 +1688,26 @@ def _table_with_colliding_generated_foreign_key_names(
     )
 
 
-def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
-    # Given two FKs whose distinct column sets both derive orders_a_b_c_fk
+def test_delta_table_accepts_multiple_unnamed_foreign_keys():
+    # Given two structurally distinct unnamed FKs
+    orders = _table_with_distinct_foreign_keys()
 
-    # When both are declared, then the collision is rejected
-    with pytest.raises(ValueError):
-        _table_with_colliding_generated_foreign_key_names()
-
-
-def test_explicit_name_disambiguates_generated_foreign_key_name_collision():
-    # Given two structurally distinct FKs whose generated names would collide
-
-    # When one declaration supplies a distinct physical name
-    orders = _table_with_colliding_generated_foreign_key_names((None, "orders_parts_two_fk"))
-
-    # Then construction succeeds with one generated and one explicit name
+    # Then both remain unnamed for Databricks to allocate independently
     assert tuple(
-        str(constraint.desired_name) for constraint in orders.to_desired_table().foreign_keys
-    ) == ("orders_a_b_c_fk", "orders_parts_two_fk")
+        constraint.desired_name for constraint in orders.to_desired_table().foreign_keys
+    ) == (None, None)
+
+
+def test_explicit_and_omitted_foreign_key_names_remain_distinct_requests():
+    # Given one unnamed and one explicitly named foreign key
+
+    # When both declarations are lowered
+    orders = _table_with_distinct_foreign_keys((None, "orders_parts_two_fk"))
+
+    # Then omission stays absent and the explicit request retains its spelling
+    constraints = orders.to_desired_table().foreign_keys
+    assert constraints[0].desired_name is None
+    assert constraints[1].desired_name == "orders_parts_two_fk"
 
 
 def test_foreign_key_rejects_non_table_reference_during_its_construction():
@@ -1881,7 +1883,7 @@ def test_mapping_insertion_order_is_irrelevant():
     one = orders_with({"tenant_id": "tenant_id", "customer_id": "id"})
     two = orders_with({"customer_id": "id", "tenant_id": "tenant_id"})
 
-    # Then the constraints are identical, including the generated name
+    # Then the structural constraints and their omitted names are identical
     assert one == two
     assert one.desired_name == two.desired_name
 
@@ -1999,14 +2001,13 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     observed = ObservedTable(
         qualified_name=before.qualified_name,
         columns=as_observed_columns(before.columns),
-        foreign_keys=tuple(
+        foreign_keys=(
             ObservedForeignKey(
-                local_columns=foreign_key.local_columns,
-                referenced_table=foreign_key.referenced_table,
-                referenced_columns=foreign_key.referenced_columns,
-                catalog_name=foreign_key.desired_name,
-            )
-            for foreign_key in before.foreign_keys
+                local_columns=before.foreign_keys[0].local_columns,
+                referenced_table=before.foreign_keys[0].referenced_table,
+                referenced_columns=before.foreign_keys[0].referenced_columns,
+                catalog_name="databricks_generated_fk",
+            ),
         ),
     )
     diff = diff_table(after, observed)
@@ -2015,7 +2016,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     assert diff.unresolvable == ()
 
 
-def test_generated_foreign_key_name_is_identical_across_declaration_casing():
+def test_omitted_foreign_key_name_remains_absent_across_declaration_casing():
     def declare(local_spelling: str) -> DeltaTable:
         parent = DeltaTable(
             catalog="main",
@@ -2036,8 +2037,9 @@ def test_generated_foreign_key_name_is_identical_across_declaration_casing():
     camel = declare("CustomerId").to_desired_table().foreign_keys[0].desired_name
     lower = declare("customerid").to_desired_table().foreign_keys[0].desired_name
 
-    # Then the generated constraint name is identical and lowercase
-    assert camel == lower == "orders_customerid_fk"
+    # Then neither declaration predicts a physical constraint name
+    assert camel is None
+    assert lower is None
 
 
 def test_layout_and_key_references_resolve_across_casing():
