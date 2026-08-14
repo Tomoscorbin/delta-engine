@@ -122,9 +122,10 @@ creation signature   = definition + desired_name
 occurrence signature = definition + catalog_name
 ```
 
-Operational action equality should use the appropriate complete signature, so
-two actions that compile differently do not compare equal even though their
-constraint payloads are relationally equal.
+Action correctness does not depend on a separate operational equality
+contract. Ordinary dataclass equality composes from each payload's existing
+equality, while lifecycle-correct payloads retain the complete creation or
+occurrence signature needed for compilation and reporting.
 
 ### Naming policy
 
@@ -278,8 +279,8 @@ refactor: use add and drop constraint actions
 - Make add actions carry desired constraints.
 - Make drop actions carry observed constraints.
 - Compile PK drops without a name and FK drops with the exact catalog name.
-- Give action equality operational semantics through creation and occurrence
-  signatures.
+- Make a compiled plan accept one ordered statement per source-plan action and
+  pair them by position, rather than asking adapters to echo action objects.
 - Update reporting to use desired names for additions and catalog names for
   removals.
 - Update validation, ordering, compiler dispatch, exports, and the action
@@ -299,9 +300,8 @@ SQL behavior should otherwise remain unchanged.
 #### Acceptance criteria
 
 - Drops still phase before additions.
-- Add actions differing by desired name are operationally unequal.
-- Drop actions differing by catalog name are operationally unequal.
-- Constraint payloads inside those actions retain structural equality.
+- A compiled plan rejects missing, additional, or blank statements and keeps
+  statements in source-plan order.
 - PK drop SQL is name-independent.
 - FK drop SQL uses exact observed spelling.
 - Reports identify each lifecycle value correctly.
@@ -499,7 +499,7 @@ The redesign is complete when:
 
 - `desired_key == observed_key` directly expresses relational equivalence;
 - equality is symmetric, transitive, hash-compatible, and name-independent;
-- operational actions still distinguish creation requests and catalog handles;
+- actions retain complete creation requests and catalog handles;
 - desired and observed constraint values cannot be confused by type;
 - no internal field ambiguously represents both naming concepts;
 - no engine-generated constraint-name policy remains;

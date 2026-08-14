@@ -26,6 +26,8 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterColumnType,
     ColumnRenameConflict,
     CreateTable,
@@ -33,8 +35,6 @@ from delta_engine.domain.plan import (
     DropPrimaryKey,
     RenameColumn,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetTableTag,
     TableDrift,
     diff_table,
@@ -236,7 +236,7 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
         CreateTable(desired),
         SetTableTag(name="env", desired_value="dev", observed_value=None),
         SetColumnTag(column_name="id", name="pii", desired_value="false", observed_value=None),
-        SetForeignKey(constraint=foreign_key),
+        AddForeignKey(constraint=foreign_key),
     )
 
 
@@ -287,12 +287,12 @@ def test_plan_changes_replaces_a_primary_key_explicitly_across_a_rename():
     # When planning
     result = plan_changes(desired, observed)
 
-    # Then the plan drops the old key, renames, then sets the new key
+    # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
-        DropPrimaryKey("legacy_pk"),
+        DropPrimaryKey(constraint=observed_key),
         RenameColumn("customer_nm", "customer_name"),
-        SetPrimaryKey(primary_key=desired_key),
+        AddPrimaryKey(primary_key=desired_key),
     )
 
 
@@ -350,12 +350,12 @@ def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
     # When planning
     result = plan_changes(desired, observed)
 
-    # Then the plan drops the old key, renames, then sets the new key
+    # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
         DropForeignKey(constraint=observed_key),
         RenameColumn("parent", "parent_id"),
-        SetForeignKey(constraint=desired_key),
+        AddForeignKey(constraint=desired_key),
     )
 
 
@@ -388,12 +388,12 @@ def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_
     # When planning
     result = plan_changes(desired, observed)
 
-    # Then the plan drops the old key, renames, then sets the new key
+    # Then the plan drops the old key, renames, then adds the new key
     assert isinstance(result, PlanningAccepted)
     assert result.plan.actions == (
         DropForeignKey(constraint=observed_key),
         RenameColumn("id", "employee_id"),
-        SetForeignKey(constraint=desired_key),
+        AddForeignKey(constraint=desired_key),
     )
 
 
@@ -490,7 +490,7 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
 
     # Then the referenced spelling passes through planning untouched
     assert isinstance(result, PlanningAccepted)
-    [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
+    [action] = [action for action in result.plan if isinstance(action, AddForeignKey)]
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("parent_id",)
 
 
@@ -537,7 +537,7 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
 
     # Then the accepted plan carries the foreign-key action
     assert isinstance(result, PlanningAccepted)
-    assert result.plan.actions == (SetForeignKey(constraint=fk),)
+    assert result.plan.actions == (AddForeignKey(constraint=fk),)
 
 
 def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
@@ -615,4 +615,4 @@ def test_missing_table_plan_contains_the_declared_foreign_keys():
 
     # Then the accepted plan creates the table and then adds the constraint
     assert isinstance(result, PlanningAccepted)
-    assert [type(action) for action in result.plan.actions] == [CreateTable, SetForeignKey]
+    assert [type(action) for action in result.plan.actions] == [CreateTable, AddForeignKey]

@@ -42,6 +42,7 @@ from delta_engine.domain.model import (
     Map,
     ObservedColumn,
     ObservedForeignKey,
+    ObservedPrimaryKey,
     ObservedTable,
     QualifiedName,
     String,
@@ -61,6 +62,8 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -72,8 +75,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -88,6 +89,12 @@ def _primary_key(
     columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
 ) -> DesiredPrimaryKey:
     return DesiredPrimaryKey(columns, constraint_name)
+
+
+def _observed_primary_key(
+    columns: tuple[str, ...] = ("id",), catalog_name: str = "tbl_pk"
+) -> ObservedPrimaryKey:
+    return ObservedPrimaryKey(columns, catalog_name)
 
 
 def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> DesiredForeignKey:
@@ -215,7 +222,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         (
-            SetPrimaryKey(primary_key=_primary_key(("id", "tenant_id"))),
+            AddPrimaryKey(primary_key=_primary_key(("id", "tenant_id"))),
             (
                 DiffEntry(
                     DiffCategory.KEYS,
@@ -226,11 +233,11 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         (
-            DropPrimaryKey("legacy_pk"),
+            DropPrimaryKey(constraint=_observed_primary_key(catalog_name="legacy_pk")),
             (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key legacy_pk"),),
         ),
         (
-            SetForeignKey(constraint=_foreign_key()),
+            AddForeignKey(constraint=_foreign_key()),
             (
                 DiffEntry(
                     DiffCategory.KEYS,

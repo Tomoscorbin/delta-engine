@@ -19,6 +19,8 @@ from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     ColumnCaseDrift,
@@ -34,8 +36,6 @@ from delta_engine.domain.plan import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -440,7 +440,7 @@ def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
 
 
 @action_entries.register
-def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
+def _(action: AddPrimaryKey) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
             DiffCategory.KEYS,
@@ -457,13 +457,13 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.REMOVE,
-            subject=f"primary key {action.constraint_name}",
+            subject=f"primary key {action.constraint.catalog_name}",
         ),
     )
 
 
 @action_entries.register
-def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
+def _(action: AddForeignKey) -> tuple[DiffEntry, ...]:
     local_columns = ", ".join(action.constraint.local_columns)
     return (
         DiffEntry(

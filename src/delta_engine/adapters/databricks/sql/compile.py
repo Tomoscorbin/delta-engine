@@ -17,12 +17,14 @@ from delta_engine.adapters.databricks.sql.dialect import (
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
-from delta_engine.application.ports import CompiledAction, CompiledPlan
+from delta_engine.application.ports import CompiledPlan
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -34,8 +36,6 @@ from delta_engine.domain.plan import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -82,13 +82,9 @@ def compile_plan(plan: ActionPlan) -> CompiledPlan:
     the relation-kind-specific ALTER dialect from action compilers.
     """
     target = _Target.for_relation(plan.target, plan.kind)
-    compiled_actions = [
-        CompiledAction(action=action, statement=_compile_action(action, target)) for action in plan
-    ]
-
     return CompiledPlan(
         plan=plan,
-        compiled_actions=compiled_actions,
+        statements=tuple(_compile_action(action, target) for action in plan),
     )
 
 
@@ -249,7 +245,7 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 
 
 @_compile_action.register
-def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
+def _compile_add_primary_key(action: AddPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
     constraint = backtick(action.primary_key.desired_name)
@@ -265,7 +261,7 @@ def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
 
 
 @_compile_action.register
-def _compile_set_foreign_key(action: SetForeignKey, target: _Target) -> str:
+def _compile_add_foreign_key(action: AddForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
     constraint = backtick(action.constraint.desired_name)
     local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)

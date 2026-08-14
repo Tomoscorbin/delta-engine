@@ -28,6 +28,8 @@ from delta_engine.domain.model.constraints import (
 )
 from delta_engine.domain.plan.actions import (
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -39,8 +41,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -705,7 +705,7 @@ def test_desired_only_primary_key_produces_added_change():
     )
 
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (SetPrimaryKey(primary_key=pk),)
+    assert diff.actions == (AddPrimaryKey(primary_key=pk),)
 
 
 def test_equal_primary_key_definitions_produce_no_change():
@@ -780,7 +780,7 @@ def test_present_table_diffs_foreign_keys_by_name_and_definition():
     assert isinstance(drift, TableDrift)
     assert drift.actions == (
         DropForeignKey(constraint=observed_only),
-        SetForeignKey(constraint=declared_only),
+        AddForeignKey(constraint=declared_only),
     )
 
 
@@ -859,11 +859,11 @@ def test_foreign_key_definition_drift_under_the_same_name_replaces_the_constrain
     assert isinstance(drift, TableDrift)
     assert drift.actions == (
         DropForeignKey(constraint=observed_key),
-        SetForeignKey(constraint=desired_key),
+        AddForeignKey(constraint=desired_key),
     )
 
 
-def test_set_foreign_key_carries_the_declared_spelling():
+def test_add_foreign_key_carries_the_declared_spelling():
     # Given a declared FK whose catalog columns are spelled differently
     declared = _foreign_key("orders_customer_fk", local_columns=("CustomerId",))
     desired = _desired(
@@ -878,7 +878,7 @@ def test_set_foreign_key_carries_the_declared_spelling():
     # The case drift itself is stated separately (ColumnCaseDrift) and
     # rejected by ColumnSpellingMustMatchCatalog — stating both is the
     # differ's job; judging is validation's.
-    (action,) = [a for a in drift.actions if isinstance(a, SetForeignKey)]
+    (action,) = [a for a in drift.actions if isinstance(a, AddForeignKey)]
     assert tuple(str(c) for c in action.constraint.local_columns) == ("CustomerId",)
 
 
@@ -906,7 +906,7 @@ def test_missing_table_actions_include_every_declared_foreign_key():
     # Then creation is stated first and every declared FK follows
     assert isinstance(diff, TableCreation)
     assert isinstance(diff.actions[0], CreateTable)
-    fk_actions = [a for a in diff.actions if isinstance(a, SetForeignKey)]
+    fk_actions = [a for a in diff.actions if isinstance(a, AddForeignKey)]
     assert {str(a.constraint.desired_name) for a in fk_actions} == {
         "orders_customer_fk",
         "orders_parent_fk",
@@ -926,7 +926,7 @@ def test_foreign_key_drift_is_stated_even_when_unmanaged():
     drift = diff_table(desired, observed)
 
     # Then the difference is stated; rejecting it is the eligibility check's job
-    assert any(isinstance(a, SetForeignKey) for a in drift.actions)
+    assert any(isinstance(a, AddForeignKey) for a in drift.actions)
 
 
 def test_observed_only_primary_key_produces_removed_change():
@@ -941,7 +941,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropPrimaryKey("legacy_pk"),)
+    assert diff.actions == (DropPrimaryKey(constraint=primary_key),)
 
 
 def test_changed_primary_key_produces_drop_and_set_actions():
@@ -959,15 +959,15 @@ def test_changed_primary_key_produces_drop_and_set_actions():
         _observed(columns=columns, primary_key=observed_primary_key),
     )
 
-    # Then the observed key is dropped and the desired key is set
+    # Then the observed key is dropped and the desired key is added
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey("legacy_pk"),
-        SetPrimaryKey(primary_key=desired_primary_key),
+        DropPrimaryKey(constraint=observed_primary_key),
+        AddPrimaryKey(primary_key=desired_primary_key),
     )
 
 
-def test_set_primary_key_carries_the_declared_spelling():
+def test_add_primary_key_carries_the_declared_spelling():
     # Given a PK declared camelCase over a column the catalog spells lowercase
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
@@ -980,13 +980,13 @@ def test_set_primary_key_carries_the_declared_spelling():
 
     # Then the action is a semantic value carrying the declaration verbatim;
     # the case drift itself is stated separately and rejected by validation
-    set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
+    set_actions = [a for a in drift.actions if isinstance(a, AddPrimaryKey)]
     assert len(set_actions) == 1
     assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
     assert any(isinstance(u, ColumnCaseDrift) for u in drift.unresolvable)
 
 
-def test_set_primary_key_keeps_declared_spelling_for_new_columns():
+def test_add_primary_key_keeps_declared_spelling_for_new_columns():
     # Given a PK over a column that does not exist in the catalog yet
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
@@ -998,7 +998,7 @@ def test_set_primary_key_keeps_declared_spelling_for_new_columns():
     drift = diff_table(desired, observed)
 
     # Then the new column keeps its declared spelling
-    set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
+    set_actions = [a for a in drift.actions if isinstance(a, AddPrimaryKey)]
     assert len(set_actions) == 1
     assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
 
@@ -1171,8 +1171,8 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropPrimaryKey("legacy_pk"),
-        SetPrimaryKey(primary_key=desired_key),
+        DropPrimaryKey(constraint=observed_key),
+        AddPrimaryKey(primary_key=desired_key),
     }
 
 

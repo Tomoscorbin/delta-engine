@@ -115,7 +115,7 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     # The key the defining SQL declared is reported, not merely accepted. This
     # corrects the 2026-07-16 assumption that streaming tables return no
     # constraints, and it is what makes mirroring the right advice: were the key
-    # unreported, a declaration that mirrored it would emit SetPrimaryKey and
+    # unreported, a declaration that mirrored it would emit AddPrimaryKey and
     # fail as unmanaged drift instead of matching.
     assert read_live_table(live_connection, table_name)["primary_key"] == ("id",)
 
@@ -157,7 +157,7 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     # The reader must round-trip everything the executor just wrote: a resync
     # finds nothing left to do. This is also what verifies the mirroring
     # contract — had the platform not reported the pipeline's key, mirroring it
-    # would have emitted SetPrimaryKey and failed UnmanagedAspectDrift instead
+    # would have emitted AddPrimaryKey and failed UnmanagedAspectDrift instead
     # of converging.
     assert engine.sync(declaration).has_changes is False
 

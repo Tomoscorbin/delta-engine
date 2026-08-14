@@ -16,6 +16,7 @@ from delta_engine.domain.model import (
     Identifier,
     ObservedColumn,
     ObservedForeignKey,
+    ObservedPrimaryKey,
     QualifiedName,
     TableAspect,
     TableFeature,
@@ -53,8 +54,8 @@ class ActionPhase(IntEnum):
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
-    SET_PRIMARY_KEY = auto()
-    SET_FOREIGN_KEY = auto()
+    ADD_PRIMARY_KEY = auto()
+    ADD_FOREIGN_KEY = auto()
 
 
 class Action(ABC):
@@ -65,6 +66,7 @@ class Action(ABC):
     report, and execute it, with each value named once (``desired_*`` /
     ``observed_*`` for transition state). Each subclass declares its managed
     ``aspect``, execution ``phase``, and stable within-phase ``subject``.
+
     """
 
     aspect: ClassVar[TableAspect]
@@ -82,7 +84,6 @@ class CreateTable(Action):
     """Create a missing table from its complete desired definition."""
 
     table: DesiredTable
-
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_EXISTENCE
     phase: ClassVar[ActionPhase] = ActionPhase.CREATE_TABLE
 
@@ -339,27 +340,30 @@ class SetColumnNullability(Action):
 class DropPrimaryKey(Action):
     """Drop the table's observed primary key."""
 
-    constraint_name: str
-
+    constraint: ObservedPrimaryKey
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
+        if not isinstance(self.constraint, ObservedPrimaryKey):
+            raise TypeError("DropPrimaryKey constraint must be an observed primary key")
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.constraint.catalog_name
 
 
 @dataclass(frozen=True, slots=True)
-class SetPrimaryKey(Action):
-    """Set the declared primary key."""
+class AddPrimaryKey(Action):
+    """Add the desired primary key."""
 
     primary_key: DesiredPrimaryKey
-
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
-    phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
+    phase: ClassVar[ActionPhase] = ActionPhase.ADD_PRIMARY_KEY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.primary_key, DesiredPrimaryKey):
+            raise TypeError("AddPrimaryKey primary_key must be a desired primary key")
 
     @property
     def subject(self) -> str:
@@ -371,9 +375,12 @@ class DropForeignKey(Action):
     """Drop a complete observed foreign key constraint."""
 
     constraint: ObservedForeignKey
-
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.constraint, ObservedForeignKey):
+            raise TypeError("DropForeignKey constraint must be an observed foreign key")
 
     @property
     def subject(self) -> str:
@@ -381,13 +388,16 @@ class DropForeignKey(Action):
 
 
 @dataclass(frozen=True, slots=True)
-class SetForeignKey(Action):
-    """Set a complete declared foreign key constraint."""
+class AddForeignKey(Action):
+    """Add a complete desired foreign key constraint."""
 
     constraint: DesiredForeignKey
-
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
-    phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
+    phase: ClassVar[ActionPhase] = ActionPhase.ADD_FOREIGN_KEY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.constraint, DesiredForeignKey):
+            raise TypeError("AddForeignKey constraint must be a desired foreign key")
 
     @property
     def subject(self) -> str:
