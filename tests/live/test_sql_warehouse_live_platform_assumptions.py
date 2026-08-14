@@ -329,7 +329,7 @@ def test_platform_requires_exact_case_for_foreign_key_constraint_columns(
 ):
     """ADD CONSTRAINT ... FOREIGN KEY resolves local and referenced columns case-sensitively."""
     # The referenced half of this pin is what justifies the catalog-spelling
-    # adoption pass: a child's SetForeignKey can only carry the parent's
+    # adoption pass: a child's AddForeignKey can only carry the parent's
     # physical spelling if adoption can see the parent's snapshot. If the
     # platform accepted `orderid` against the parent's physical `orderId`,
     # declared spelling would suffice on the referenced side and the

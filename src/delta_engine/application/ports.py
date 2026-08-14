@@ -105,7 +105,10 @@ class CompiledPlan:
         object.__setattr__(self, "compiled_actions", compiled_actions)
         source_actions = tuple(compiled.action for compiled in compiled_actions)
 
-        if source_actions != self.plan.actions:
+        if len(source_actions) != len(self.plan.actions) or any(
+            compiled is not planned
+            for compiled, planned in zip(source_actions, self.plan.actions, strict=True)
+        ):
             raise ValueError("Compiled actions must correspond exactly to plan actions")
 
     @property

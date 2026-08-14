@@ -48,6 +48,21 @@ def test_compiled_plan_rejects_an_omitted_action():
         CompiledPlan(plan=plan, compiled_actions=())
 
 
+def test_compiled_plan_rejects_an_equal_but_substituted_action():
+    planned = SetTableComment(desired_comment="new", observed_comment="old")
+    substituted = SetTableComment(desired_comment="new", observed_comment="old")
+    plan = ActionPlan(
+        target=QualifiedName("cat", "schema", "table"),
+        actions=(planned,),
+    )
+
+    with pytest.raises(ValueError, match="correspond exactly"):
+        CompiledPlan(
+            plan=plan,
+            compiled_actions=(CompiledAction(action=substituted, statement="SQL"),),
+        )
+
+
 def test_compiled_plan_copies_mutable_compiled_actions_to_a_tuple():
     action = SetTableComment(desired_comment="new", observed_comment="old")
     plan = ActionPlan(

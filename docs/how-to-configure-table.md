@@ -551,10 +551,10 @@ construction; use `primary_key_name` to adopt a differently named live key.
 
 | Change                                   | Actions emitted                       |
 | ---------------------------------------- | ------------------------------------- |
-| Primary key added                        | `SetPrimaryKey`                       |
+| Primary key added                        | `AddPrimaryKey`                       |
 | Primary key removed                      | `DropPrimaryKey`                      |
-| Primary key columns changed              | `DropPrimaryKey` then `SetPrimaryKey` |
-| Same columns, physical name changed      | `DropPrimaryKey` then `SetPrimaryKey` |
+| Primary key columns changed              | `DropPrimaryKey` then `AddPrimaryKey` |
+| Same columns, physical name changed      | `DropPrimaryKey` then `AddPrimaryKey` |
 
 Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
 as equal.
@@ -743,10 +743,10 @@ for SQL and previews.
 
 | Change                                      | Actions emitted                       |
 | ------------------------------------------- | ------------------------------------- |
-| Foreign key added                           | `SetForeignKey`                       |
+| Foreign key added                           | `AddForeignKey`                       |
 | Foreign key removed                         | `DropForeignKey`                      |
-| Foreign key definition changed              | `DropForeignKey` then `SetForeignKey` |
-| Same definition, physical name changed      | `DropForeignKey` then `SetForeignKey` |
+| Foreign key definition changed              | `DropForeignKey` then `AddForeignKey` |
+| Same definition, physical name changed      | `DropForeignKey` then `AddForeignKey` |
 | No change                                   | nothing                               |
 
 ### Constraints are informational

@@ -33,6 +33,8 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -44,8 +46,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -211,7 +211,7 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
 
     CREATE TABLE establishes columns, comment, properties, layout, and the
     primary key. Unity Catalog tags and foreign keys need follow-up actions;
-    ``SET_FOREIGN_KEY`` phases after ``CREATE_TABLE``, so a self-referential
+    ``ADD_FOREIGN_KEY`` phases after ``CREATE_TABLE``, so a self-referential
     key sequences correctly by action phasing alone.
     """
     table_tag_actions = tuple(
@@ -232,7 +232,7 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
         CreateTable(desired),
         *table_tag_actions,
         *column_tag_actions,
-        *(SetForeignKey(constraint=foreign_key) for foreign_key in desired.foreign_keys),
+        *(AddForeignKey(constraint=foreign_key) for foreign_key in desired.foreign_keys),
     )
 
 
@@ -505,15 +505,15 @@ def _diff_layout(
 
 def _diff_primary_key(
     desired: DesiredTable, observed: ObservedTable
-) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
+) -> tuple[DropPrimaryKey | AddPrimaryKey, ...]:
     """
-    Return primary-key actions; a changed key becomes a drop and a set.
+    Return primary-key actions; a changed key becomes a drop and an add.
 
     Desired and observed keys compare directly by relational definition; their
     lifecycle names do not create drift. The comparison runs against raw
     observed names, not the rename-projected frame used by columns and layout:
     renaming a constrained column drops the constraint, so a renamed key must
-    surface as an explicit drop and set. A declaration whose column spelling
+    surface as an explicit drop and add. A declaration whose column spelling
     disagrees with the catalog is rejected as ``ColumnCaseDrift`` before any
     plan forms.
     """
@@ -523,25 +523,25 @@ def _diff_primary_key(
     if desired_key is None:
         if observed_key is None:
             return ()
-        return (DropPrimaryKey(constraint_name=observed_key.catalog_name),)
+        return (DropPrimaryKey(constraint=observed_key),)
 
     if observed_key is None:
-        return (SetPrimaryKey(primary_key=desired_key),)
+        return (AddPrimaryKey(primary_key=desired_key),)
 
     if desired_key == observed_key:
         return ()
 
     return (
-        DropPrimaryKey(constraint_name=observed_key.catalog_name),
-        SetPrimaryKey(primary_key=desired_key),
+        DropPrimaryKey(constraint=observed_key),
+        AddPrimaryKey(primary_key=desired_key),
     )
 
 
 def _diff_foreign_keys(
     desired: DesiredTable, observed: ObservedTable
-) -> tuple[SetForeignKey | DropForeignKey, ...]:
+) -> tuple[AddForeignKey | DropForeignKey, ...]:
     """
-    Return set/drop actions converging foreign-key definitions.
+    Return add/drop actions converging foreign-key definitions.
 
     Each declaration adopts at most one structurally equal catalog occurrence,
     regardless of its physical name. Sorting observations by exact catalog name
@@ -567,7 +567,7 @@ def _diff_foreign_keys(
     return (
         *drops,
         *(
-            SetForeignKey(constraint=constraint)
+            AddForeignKey(constraint=constraint)
             for constraint in desired.foreign_keys
             if constraint in unmatched_desired
         ),

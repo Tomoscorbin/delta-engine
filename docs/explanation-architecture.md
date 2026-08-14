@@ -558,7 +558,7 @@ these aspects:
 Each dimension produces canonical actions directly. For example, column
 additions produce `AddColumn` plus any `SetColumnTag` actions, table tag
 removals produce `UnsetTableTag`, and foreign-key additions produce
-`SetForeignKey`. Unsupported or ambiguous states use one of the four
+`AddForeignKey`. Unsupported or ambiguous states use one of the four
 unresolvable difference types, which the current default policy rejects.
 
 `validate_diff` is where policy lives. `ELIGIBILITY_CHECKS` lists the laws that
@@ -609,7 +609,7 @@ The phase ordering exists because backend DDL has dependencies:
   not drop it while it is still the active key.
 - Column types are widened after properties are set, so a declaration enabling
   `delta.enableTypeWidening` in the same sync takes effect before the widen —
-  and between the primary-key drop and set, so a key whose column widens is
+  and between the primary-key drop and add, so a key whose column widens is
   dropped before and re-added after.
 
 The domain plan describes intent. The adapter compiler decides how each action

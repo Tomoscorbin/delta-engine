@@ -23,6 +23,8 @@ from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -34,8 +36,6 @@ from delta_engine.domain.plan import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -249,7 +249,7 @@ def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
 
 
 @_compile_action.register
-def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
+def _compile_add_primary_key(action: AddPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
     constraint = backtick(action.primary_key.desired_name)
@@ -265,7 +265,7 @@ def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
 
 
 @_compile_action.register
-def _compile_set_foreign_key(action: SetForeignKey, target: _Target) -> str:
+def _compile_add_foreign_key(action: AddForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
     constraint = backtick(action.constraint.desired_name)
     local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)

@@ -12,6 +12,7 @@ from delta_engine.domain.model import (
     Long,
     ObservedColumn,
     ObservedForeignKey,
+    ObservedPrimaryKey,
     QualifiedName,
     TableAspect,
     TableFeature,
@@ -22,6 +23,8 @@ from delta_engine.domain.plan.actions import (
     ActionPhase,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -33,8 +36,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -61,6 +62,12 @@ def _plan(*plan_actions: Action) -> ActionPlan:
 
 def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
     return DesiredPrimaryKey(columns=columns, desired_name=name)
+
+
+def _observed_primary_key(
+    name: str = "table_pk", columns: tuple[str, ...] = ("id",)
+) -> ObservedPrimaryKey:
+    return ObservedPrimaryKey(columns=columns, catalog_name=name)
 
 
 def _foreign_key(
@@ -95,8 +102,18 @@ def _create_table_action() -> CreateTable:
     )
 
 
+def _create_table_with_primary_key(name: str) -> CreateTable:
+    return CreateTable(
+        table=DesiredTable(
+            qualified_name=_TARGET,
+            columns=(DesiredColumn("id", Integer(), nullable=False),),
+            primary_key=_primary_key(name),
+        )
+    )
+
+
 def _drop_primary_key() -> DropPrimaryKey:
-    return DropPrimaryKey("table_pk")
+    return DropPrimaryKey(constraint=_observed_primary_key())
 
 
 def _concrete_action_types() -> list[type[Action]]:
@@ -156,6 +173,53 @@ def test_plan_ordering_ignores_non_subject_fields():
 
 
 @pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            AddPrimaryKey(_primary_key("first_pk")),
+            AddPrimaryKey(_primary_key("second_pk")),
+        ),
+        (
+            AddForeignKey(_foreign_key("first_fk")),
+            AddForeignKey(_foreign_key("second_fk")),
+        ),
+        (
+            DropPrimaryKey(_observed_primary_key("first_pk")),
+            DropPrimaryKey(_observed_primary_key("second_pk")),
+        ),
+        (
+            DropForeignKey(_observed_foreign_key("first_fk")),
+            DropForeignKey(_observed_foreign_key("second_fk")),
+        ),
+    ],
+)
+def test_constraint_actions_include_lifecycle_names_in_operational_identity(
+    first: Action,
+    second: Action,
+) -> None:
+    assert first != second
+    assert len({first, second}) == 2
+
+
+def test_create_table_identity_includes_the_primary_key_creation_name() -> None:
+    assert _create_table_with_primary_key("first_pk") != _create_table_with_primary_key("second_pk")
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        lambda: AddPrimaryKey(_observed_primary_key()),  # type: ignore[arg-type]
+        lambda: DropPrimaryKey(_primary_key()),  # type: ignore[arg-type]
+        lambda: AddForeignKey(_observed_foreign_key()),  # type: ignore[arg-type]
+        lambda: DropForeignKey(_foreign_key()),  # type: ignore[arg-type]
+    ],
+)
+def test_constraint_actions_reject_the_wrong_lifecycle(action) -> None:
+    with pytest.raises(TypeError):
+        action()
+
+
+@pytest.mark.parametrize(
     "action, expected_subject",
     [
         (_create_table_action(), ""),
@@ -172,9 +236,9 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
         (_drop_primary_key(), "table_pk"),
-        (SetPrimaryKey(_primary_key()), "table_pk"),
+        (AddPrimaryKey(_primary_key()), "table_pk"),
         (DropForeignKey(_observed_foreign_key()), "table_customer_id_fk"),
-        (SetForeignKey(_foreign_key()), "customer_id"),
+        (AddForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),
         (AlterColumnType("id", Long(), Integer()), "id"),
     ],
@@ -200,9 +264,9 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
         (SetTableComment("new", "old"), TableAspect.TABLE_COMMENT),
         (SetColumnNullability("email", False, True), TableAspect.COLUMN_STRUCTURE),
         (_drop_primary_key(), TableAspect.PRIMARY_KEY),
-        (SetPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
+        (AddPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
         (DropForeignKey(_observed_foreign_key()), TableAspect.FOREIGN_KEYS),
-        (SetForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
+        (AddForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
         (AlterClustering(("region",), ()), TableAspect.CLUSTERING),
         (AlterColumnType("id", Long(), Integer()), TableAspect.COLUMN_STRUCTURE),
     ],
@@ -231,8 +295,8 @@ def test_actionplan_order_is_independent_of_input_permutation(shuffled: list[Act
 def test_plan_full_phase_order_with_all_action_types():
     # Given one action of every type, declared in a jumbled order
     plan = _plan(
-        SetPrimaryKey(_primary_key()),
-        SetForeignKey(_foreign_key()),
+        AddPrimaryKey(_primary_key()),
+        AddForeignKey(_foreign_key()),
         SetTableComment("new", "old"),
         AddColumn(_column("a_col")),
         SetProperty("p_set", "1", None),
@@ -271,8 +335,8 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnComment,
         SetTableComment,
         SetColumnNullability,
-        SetPrimaryKey,
-        SetForeignKey,
+        AddPrimaryKey,
+        AddForeignKey,
     ]
 
 
@@ -294,14 +358,14 @@ def test_plan_orders_constraint_drops_before_column_work():
     ]
 
 
-def test_plan_orders_property_before_type_widen_and_key_set():
+def test_plan_orders_property_before_type_widen_and_key_add():
     plan = _plan(
-        SetPrimaryKey(_primary_key()),
+        AddPrimaryKey(_primary_key()),
         AlterColumnType("id", Long(), Integer()),
         SetProperty("delta.enableTypeWidening", "true", None),
     )
 
-    assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
+    assert [type(action) for action in plan] == [SetProperty, AlterColumnType, AddPrimaryKey]
 
 
 def test_plan_reclusters_after_add_and_before_drop():

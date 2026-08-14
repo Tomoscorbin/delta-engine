@@ -22,12 +22,15 @@ from delta_engine.domain.model.constraints import (
     DesiredForeignKey,
     DesiredPrimaryKey,
     ObservedForeignKey,
+    ObservedPrimaryKey,
 )
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    AddForeignKey,
+    AddPrimaryKey,
     AlterClustering,
     AlterColumnType,
     CreateTable,
@@ -39,8 +42,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
@@ -62,6 +63,12 @@ def _primary_key(
     columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
 ) -> DesiredPrimaryKey:
     return DesiredPrimaryKey(columns, constraint_name)
+
+
+def _observed_primary_key(
+    columns: tuple[str, ...] = ("id",), catalog_name: str = "tbl_pk"
+) -> ObservedPrimaryKey:
+    return ObservedPrimaryKey(columns, catalog_name)
 
 
 def _foreign_key(
@@ -394,7 +401,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey("tbl_pk"),
+            DropPrimaryKey(constraint=_observed_primary_key()),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
@@ -425,9 +432,9 @@ def test_simple_actions_compile_to_expected_sql(action: Action, expected: str):
     assert _compile_single(action) == expected
 
 
-def test_set_primary_key_renders_composite_primary_key():
+def test_add_primary_key_renders_composite_primary_key():
     # Given a composite primary-key action
-    action = SetPrimaryKey(primary_key=_primary_key(("tenant_id", "order_id"), "tbl_pk"))
+    action = AddPrimaryKey(primary_key=_primary_key(("tenant_id", "order_id"), "tbl_pk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -439,9 +446,9 @@ def test_set_primary_key_renders_composite_primary_key():
     )
 
 
-def test_set_foreign_key_renders_single_column_fk():
+def test_add_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
-    action = SetForeignKey(constraint=_foreign_key(desired_name="tbl_customer_id_fk"))
+    action = AddForeignKey(constraint=_foreign_key(desired_name="tbl_customer_id_fk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -454,9 +461,9 @@ def test_set_foreign_key_renders_single_column_fk():
     )
 
 
-def test_set_foreign_key_renders_composite_fk():
+def test_add_foreign_key_renders_composite_fk():
     # Given a composite foreign-key action
-    action = SetForeignKey(
+    action = AddForeignKey(
         constraint=_foreign_key(
             local_columns=("tenant_id", "customer_id"),
             referenced_columns=("tenant_id", "id"),
@@ -556,14 +563,14 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
     DropForeignKey: DropForeignKey(constraint=_observed_foreign_key()),
-    DropPrimaryKey: DropPrimaryKey("tbl_pk"),
+    DropPrimaryKey: DropPrimaryKey(constraint=_observed_primary_key()),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),
     SetColumnNullability: SetColumnNullability("id", False, True),
     SetColumnTag: SetColumnTag("id", "pii", "low", None),
-    SetForeignKey: SetForeignKey(constraint=_foreign_key()),
-    SetPrimaryKey: SetPrimaryKey(primary_key=_primary_key()),
+    AddForeignKey: AddForeignKey(constraint=_foreign_key()),
+    AddPrimaryKey: AddPrimaryKey(primary_key=_primary_key()),
     SetProperty: SetProperty("k", "v", None),
     SetTableComment: SetTableComment("new", "old"),
     SetTableTag: SetTableTag("env", "dev", None),
@@ -675,8 +682,8 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
     )
 
 
-def test_set_primary_key_emits_the_exact_bound_spelling():
-    action = SetPrimaryKey(
+def test_add_primary_key_emits_the_exact_bound_spelling():
+    action = AddPrimaryKey(
         primary_key=DesiredPrimaryKey(columns=("requestId",), desired_name="tbl_pk")
     )
     plan = ActionPlan(target=_TARGET, actions=(action,))
@@ -712,7 +719,7 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
         referenced_columns=("OrderId",),
         desired_name="tbl_orderref_fk",
     )
-    plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
+    plan = ActionPlan(target=_TARGET, actions=(AddForeignKey(constraint=constraint),))
 
     [statement] = compile_plan(plan).statements
 

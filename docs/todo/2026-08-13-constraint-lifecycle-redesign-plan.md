@@ -280,6 +280,10 @@ refactor: use add and drop constraint actions
 - Compile PK drops without a name and FK drops with the exact catalog name.
 - Give action equality operational semantics through creation and occurrence
   signatures.
+- Include the desired primary-key name in `CreateTable` equality because it is
+  rendered into the create statement.
+- Make compiled-plan correspondence require the exact source action objects,
+  independent of value equality.
 - Update reporting to use desired names for additions and catalog names for
   removals.
 - Update validation, ordering, compiler dispatch, exports, and the action
@@ -301,7 +305,11 @@ SQL behavior should otherwise remain unchanged.
 - Drops still phase before additions.
 - Add actions differing by desired name are operationally unequal.
 - Drop actions differing by catalog name are operationally unequal.
+- Create-table actions differing by the desired primary-key name are
+  operationally unequal.
 - Constraint payloads inside those actions retain structural equality.
+- A compiled plan rejects an equal-valued action substituted for its source
+  plan action.
 - PK drop SQL is name-independent.
 - FK drop SQL uses exact observed spelling.
 - Reports identify each lifecycle value correctly.

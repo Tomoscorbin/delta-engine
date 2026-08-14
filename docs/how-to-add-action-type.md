@@ -40,6 +40,12 @@ for transition state); compilers and renderers read those names directly.
 `Action.subject` determines alphabetical sort order within a phase;
 `ActionPhase` is an `IntEnum` — lower values run first.
 
+Action equality must distinguish operations that can compile differently. If
+a payload deliberately has narrower equality—constraint values ignore their
+lifecycle names, for example—add a private, derived comparison field carrying
+the missing creation or occurrence identity. Keep it `init=False` and
+`repr=False` so callers still construct and read one canonical payload.
+
 ## 2. Add a phase constant if needed
 
 If the action belongs to a new execution phase, add it to the `ActionPhase` enum in the same file:
@@ -64,8 +70,8 @@ class ActionPhase(IntEnum):
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
-    SET_PRIMARY_KEY = auto()
-    SET_FOREIGN_KEY = auto()
+    ADD_PRIMARY_KEY = auto()
+    ADD_FOREIGN_KEY = auto()
     # ADD_YOUR_NEW_PHASE = auto()
 ```
 
@@ -118,10 +124,10 @@ renders the backticked table name (`target.name`) and a relation-correct
 `target.alter_clause` without exposing relation kind. The latter is
 pre-rendered with `ALTER TABLE ...` or `ALTER STREAMING TABLE ...` as
 appropriate. Planning has already accepted the action before compilation. A
-constraint action carries its complete constraint (named when the
-`DesiredTable` was built, or read from the catalog for an observed one), so
-the handler renders
-`action.constraint.constraint_name` directly rather than computing it.
+constraint-add action carries its complete desired constraint, while a drop
+action carries the observed catalog occurrence. The compiler renders
+`desired_name` for an addition and the exact `catalog_name` for a named drop;
+it never reconstructs either lifecycle value.
 
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).
 
