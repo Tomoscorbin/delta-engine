@@ -1,12 +1,14 @@
 """
 Diff and grid rendering for table and sync run reports.
 
-The report value types in report.py are pure data; all human-readable
-formatting lives here. Action interpretation (what each action means) lives
-in diff_entries.py, the shared meaning layer this module and to_dict()
-consume. The public entry points are render_report (status grid plus summary
-footer) and render_diff (per-table change blocks); render_grid,
-render_diff_block, and run_summary_footer are the building blocks they compose.
+The report value types in report.py contain run facts; all human-readable
+formatting lives here. SyncReport.render() and SyncReport.render_diff() are
+convenience views that delegate to this module. Action interpretation (what
+each action means) lives in diff_entries.py, the shared meaning layer this
+module and to_dict() consume. The public function entry points are
+render_report (status grid plus summary footer) and render_diff (per-table
+change blocks); render_grid, render_diff_block, and run_summary_footer are the
+building blocks they compose.
 """
 
 from collections import Counter

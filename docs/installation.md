@@ -77,7 +77,6 @@ OAuth credential providers for production workloads.
 import os
 
 from databricks import sql
-from delta_engine import render_report
 from delta_engine.databricks import build_sql_engine
 
 from myproject.tables import customers
@@ -90,7 +89,7 @@ with sql.connect(
     engine = build_sql_engine(connection)
     report = engine.sync(customers)
 
-print(render_report(report))
+print(report.render())
 ```
 
 The server hostname and HTTP path are available from the SQL warehouse's

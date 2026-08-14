@@ -22,15 +22,42 @@ or foreign-key failure — the point is to return the complete preview report.
 
 ## See what would change
 
-`render_diff` shows every table's planned changes as `+`/`-`/`~` blocks;
-`render_report` shows the per-table statuses and any failures:
+`report.render_diff()` shows every table's planned changes as `+`/`-`/`~`
+blocks; `report.render()` shows the per-table statuses and any failures:
 
 ```python
-from delta_engine import render_diff, render_report
-
-print(render_diff(report))
-print(render_report(report))
+print(report.render_diff())
+print(report.render())
 ```
+
+For example, previewing creation of the `customers` declaration from the
+[getting-started tutorial](tutorial-getting-started.md) produces:
+
+```text
+DIFF
+====
+
+dev.silver.customers  (CREATE)
+  columns
+    + id    Integer  NOT NULL
+    + name  String
+```
+
+```text
+SYNC REPORT
+===========
+
+PLAN — no planned SQL executed
+
+TABLE                 STATUS   STATEMENTS  DETAIL
+dev.silver.customers  SUCCESS  1           2 columns
+
+1 table: 1 changed, 0 unchanged, 0 failed (0.0s)
+```
+
+Elapsed time varies. `sync` returns the report object and neither renderer is
+called automatically. The diff answers *what would change*; the report answers
+*whether the plan succeeded and how much SQL it contains*.
 
 Each table's `plan` records the DDL actions compiled for that observed snapshot.
 The `execution` field stays `None` on every table, because nothing ran.
@@ -46,7 +73,7 @@ gate is "no failures":
 report = engine.sync(customers, orders, dry_run=True)
 
 if report.has_failures:
-    raise SystemExit(render_report(report))
+    raise SystemExit(report.render())
 ```
 
 `report.has_changes` reports whether any table has a planned change, and

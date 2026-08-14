@@ -65,7 +65,7 @@ through a sync.
 | `CatalogState`     | A known catalog answer: `TablePresent` or `TableAbsent`. An unreadable state crosses the port as `ReadError`.                                               |
 | `ReadResult`       | The persistent read outcome retained by a table run: a `CatalogState` or the engine-created `ReadFailure`.                                                  |
 | `TableDiff`        | Typed desired/observed drift. It is either `TableCreation` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
-| `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
+| `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnCaseDrift`, `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                   |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `TableScope`       | The closed ownership policy carried by a desired table. It answers whether an aspect is managed and whether one scope fits within another.                  |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
@@ -147,13 +147,15 @@ remain outside the user-managed property set.
 foreign keys (the JSON document's embedded `table_constraints` string is left
 unread) — which the shared read attaches during assembly. The whole read is one
 entry point, `read.read_catalog_state`, and each backend supplies only how a
-query runs. The read admits only the relations the engine manages — managed
-or external Delta tables, judged from the relation kind and provider the
-description carries — so a view, streaming table, foreign table, or non-Delta
-format fails the read instead of being modelled as a table and planned
-against. (Existing external tables are read and altered like managed ones;
-creating one is not yet supported.) The read also decides which observed
-property keys become engine state: only the keys the property policy
+query runs. The read admits only the relations the engine manages — managed,
+external, and streaming Delta tables, judged from the relation kind and
+provider the description carries — so a view, materialized view, foreign
+table, or non-Delta format fails the read instead of being modelled as a table
+and planned against. Existing external tables are read and altered like
+managed ones, but creating one is not yet supported. Streaming tables retain
+their own relation kind so validation can restrict them to comments and tags
+and the compiler can use `ALTER STREAMING TABLE`. The read also decides which
+observed property keys become engine state: only the keys the property policy
 manages are kept, so the protocol internals every Delta table carries do not
 read as drift. The
 per-column read policy is shared and fails closed the same way: a column whose type
@@ -204,13 +206,11 @@ The model is also a pinned vocabulary while the catalog's keeps growing:
 `TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column
 types within the life of running tools, and the next addition will reach
 tables before it reaches engines that pin a type model. An observed type
-outside the model is therefore a routine lifecycle condition, not a defect,
-and the reader handles it by how much the omission would distort the
-snapshot: an ordinary unmappable column is skipped and left unmanaged (the
-snapshot stays honest about everything else), but an unmappable partition
-column fails the whole read — an incomplete `partitioned_by` would fabricate
-partitioning drift, and a false blocked change is worse than an honest
-`READ_FAILED`.
+outside the model is therefore a routine lifecycle condition, not a defect.
+The reader fails the whole table read when any column type is unmappable. The
+declaration owns the complete column set, so skipping even an ordinary column
+would hide drift and could make a partial snapshot look converged. An honest
+`READ_FAILED` is safer than planning from incomplete state.
 
 ### Import purity versus semantic coupling
 
@@ -365,7 +365,7 @@ phase each one failed in.
 | -------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
 | `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
-| `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`, `Property`                                               |
+| `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`                                                           |
 | `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_changes`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |
 | `delta_engine.adapters`    | Backend integration and translation                                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler |
@@ -476,9 +476,10 @@ would drop those constraints implicitly as part of `RENAME COLUMN`; the
 engine states the drops instead of relying on that, so the plan is a
 complete transcript of what executes.
 
-Only three unresolvable differences exist: `ColumnRenameConflict`,
-`PropertyUndeclared`, and `PartitioningChanged`. Each states an ambiguity or
-unsupported transition without deciding its policy outcome. The
+Only four unresolvable differences exist: `ColumnCaseDrift`,
+`ColumnRenameConflict`, `PropertyUndeclared`, and `PartitioningChanged`. Each
+states an ambiguity or unsupported transition without deciding its policy
+outcome. The
 `Unresolvable` union names them, they live structurally apart from the
 actions, and the application default rules decide to reject each one.
 
@@ -528,9 +529,9 @@ difference belongs to a managed aspect and the plan holds executable actions
 only.
 
 The public API exposes named scopes only: `DeltaTable`'s `scope` parameter
-maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
-and `"tags"` to table and column tags only. The `TableAspect` enum stays
-internal.
+maps `"full"` to every aspect, `"metadata"` to comments, tags, and key
+constraints, `"annotations"` to comments and tags, and `"tags"` to table and
+column tags only. The `TableAspect` enum stays internal.
 
 `CLUSTERING` is not one of the metadata aspects: liquid clustering keys
 change how data files are laid out on storage, so a `scope="metadata"` sync
@@ -557,7 +558,7 @@ these aspects:
 Each dimension produces canonical actions directly. For example, column
 additions produce `AddColumn` plus any `SetColumnTag` actions, table tag
 removals produce `UnsetTableTag`, and foreign-key additions produce
-`SetForeignKey`. Unsupported or ambiguous states use one of the three
+`SetForeignKey`. Unsupported or ambiguous states use one of the four
 unresolvable difference types, which the current default policy rejects.
 
 `validate_diff` is where policy lives. `ELIGIBILITY_CHECKS` lists the laws that
@@ -845,6 +846,8 @@ the backend it needs when called:
 
 - `build_spark_engine` imports `delta_engine.adapters.databricks.spark` on
   demand, which requires PySpark.
+- `to_spark_schema` imports the Spark schema converter on demand and translates
+  a backend-neutral desired table to PySpark's native `StructType`.
 - `build_sql_engine` imports `delta_engine.adapters.databricks.warehouse` on
   demand. That backend runs without PySpark entirely, and does not import
   `databricks-sql-connector` either — it only takes a connection the caller

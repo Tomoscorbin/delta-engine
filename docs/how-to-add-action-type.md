@@ -47,6 +47,7 @@ If the action belongs to a new execution phase, add it to the `ActionPhase` enum
 ```python
 class ActionPhase(IntEnum):
     CREATE_TABLE = auto()
+    ENABLE_TABLE_FEATURE = auto()
     SET_PROPERTY = auto()
     UNSET_PROPERTY = auto()
     SET_TABLE_TAG = auto()
@@ -57,9 +58,9 @@ class ActionPhase(IntEnum):
     ADD_COLUMN = auto()
     ALTER_COLUMN_TYPE = auto()
     SET_CLUSTERING = auto()
-    DROP_COLUMN = auto()
     SET_COLUMN_TAG = auto()
     UNSET_COLUMN_TAG = auto()
+    DROP_COLUMN = auto()
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
@@ -96,7 +97,7 @@ Actions join the diff's `actions` tuple, so no union edit is needed. If the
 comparison cannot be represented as an action, add a frozen difference type in
 `unresolvable.py`, name it in `Unresolvable`, and emit it into the diff's
 `unresolvable` tuple from `diff.py`. Decide whether it is accepted or
-rejected in application validation; the current three unresolvable
+rejected in application validation; all four current unresolvable
 differences are rejected by the default policy. Successful `plan_changes`
 results must contain actions only.
 
@@ -129,14 +130,22 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 In `src/delta_engine/application/diff_entries.py`, register a `singledispatch`
 arm on `action_entries` so the action shows up in reports. Return one or more
 `DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys,
-clustering, partitioning, features, properties, tags, comments), a
-`+`/`-`/`~` symbol, and its aligned cells:
+clustering, partitioning, features, properties, tags, comments) and a
+`DiffOperation` (rendered `+`/`-`/`~`), names the target in `subject`, and
+carries each descriptive phrase as a separate `detail` element so the text
+renderer can align them into columns:
 
 ```python
 @action_entries.register
 def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
-    text = f"column {action.column_name}: '{action.desired_comment}'"
-    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
+    return (
+        DiffEntry(
+            DiffCategory.COMMENTS,
+            DiffOperation.CHANGE,
+            subject=f"column {action.column_name}",
+            detail=(f"'{action.desired_comment}'",),
+        ),
+    )
 ```
 
 An action may emit several entries across categories (`CreateTable` lists its columns and its primary key), and category grouping in the diff is display-only — it never changes execution order. `test_every_action_type_has_registered_diff_entries` fails if an action has no arm.

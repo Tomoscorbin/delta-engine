@@ -5,6 +5,19 @@ the state a table should have; the engine reads the state it actually has,
 computes the difference, checks that the difference is safe to apply, and runs
 exactly the DDL needed to close the gap.
 
+## What it is for
+
+Delta Engine turns a table's physical schema and Unity Catalog metadata into a
+version-controlled contract. It is useful when tables are long-lived and a team
+wants the same columns, properties, comments, tags, and constraints across
+environments, with drift and unsafe changes visible before DDL runs.
+
+It does not transform or load data. Existing PySpark jobs, declarative
+pipelines, dbt models, or other systems can keep producing the rows while Delta
+Engine reconciles the catalog state around them. A one-off DDL statement is
+usually simpler for a one-off change; the value here comes from keeping the
+declarations and re-running them in CI or deployment workflows.
+
 ```python
 from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
@@ -20,11 +33,21 @@ customers = DeltaTable(
 )
 
 engine = build_spark_engine(spark)
-engine.sync(customers)  # creates the table, or no-ops if it already matches
+report = engine.sync(customers)  # creates the table, or no-ops if it already matches
 ```
 
 There is no migration script to write and no DDL to hand-order. The declaration
-is the source of truth; `sync` reconciles the catalog to it, every run.
+is the source of truth; `sync` reconciles the catalog to it, every run. It
+returns a structured report rather than printing output. The
+[getting-started tutorial](tutorial-getting-started.md) shows the report, diff,
+and exact planned SQL and explains where to keep the declaration.
+
+## Choose how to run it
+
+Delta Engine runs where your release or data workflow calls it. See
+[Ways to use Delta Engine](explanation-ways-to-use-delta-engine.md) for
+release-time reconciliation, ETL readiness checks, and restricted governance
+deployments.
 
 ## Install
 
@@ -65,6 +88,7 @@ for what is and isn't backend-neutral, and
 | You want to…                                   | Read                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------- |
 | Install the package and sync your first table  | [Installation](installation.md), [Getting started](tutorial-getting-started.md) |
+| Choose a release or workflow pattern           | [Ways to use Delta Engine](explanation-ways-to-use-delta-engine.md)             |
 | Run read-only schema plans in GitHub Actions    | [CLI reference](reference-cli.md)                                              |
 | Understand what a sync does before running one | [How a sync works](explanation-sync-lifecycle.md)                               |
 | Check whether the engine supports something    | [Capabilities and limitations](reference-limitations.md)                        |
@@ -88,6 +112,7 @@ tutorial-getting-started
 explanation-sync-lifecycle
 explanation-safety-model
 explanation-runtime-compatibility
+explanation-ways-to-use-delta-engine
 ```
 
 ```{toctree}

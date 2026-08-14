@@ -935,6 +935,22 @@ def test_a_single_table_run_uses_the_singular_noun():
 # ---------- whole-report rendering ----------
 
 
+def test_sync_report_exposes_both_human_readable_views():
+    table = _grid_report(
+        "orders",
+        plan=_plan("orders", SetTableComment(desired_comment="new", observed_comment="old")),
+    )
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_runs=(table,),
+        dry_run=True,
+    )
+
+    assert sync.render() == render_report(sync)
+    assert sync.render_diff() == render_diff(sync)
+
+
 def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     # Given a run over one changed and one failed table
     changed = _grid_report(

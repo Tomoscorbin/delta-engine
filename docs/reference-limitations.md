@@ -145,8 +145,8 @@ partitioning:
 | Mutual exclusivity       | A table cannot declare both `partitioned_by` and `clustered_by`, rejected at declaration                                                                       |
 | Unsupported key types    | `Array`, `Map`, `Struct`, `Variant`, `Boolean`, and `Binary` columns cannot be clustering keys, rejected at declaration; `Boolean` and `Binary` remain valid partition columns |
 | Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be named in `clustered_by`                     |
-| Stats and column order   | Databricks only collects the file statistics clustering relies on for a table's first 32 columns; a clustering key outside that range gets no skipping benefit |
-| Runtime compatibility    | Liquid clustering requires Databricks Runtime 13.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features)              |
+| Statistics              | Clustering keys need collected file statistics. Unity Catalog external tables default to the first 32 columns; managed tables with predictive optimization choose statistics automatically. Verify that every declared key has statistics. |
+| Runtime compatibility   | Liquid clustering is available in Databricks SQL and Databricks Runtime 13.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features) |
 
 ## Concurrent catalog changes
 

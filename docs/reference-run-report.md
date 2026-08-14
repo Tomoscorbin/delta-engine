@@ -9,7 +9,9 @@ tags:
 `dict`, `list`, `str`, `int`, `bool`, and `None` only, so
 `json.dumps(report.to_dict())` works directly. It is the machine-readable view
 of a run, for CI gates, run-history persistence, and structured logging. The
-human-readable views are `render_report` and `render_diff`.
+human-readable views are `report.render()` and `report.render_diff()`. The
+equivalent `render_report(report)` and `render_diff(report)` functions remain
+available for callers that prefer function-style composition.
 
 `TableRun.to_dict()` projects a single table's record, the same object
 that appears in the run-level `tables` list.
@@ -74,9 +76,9 @@ table can therefore be `EXECUTION_FAILED` with either `NOT_APPLIED` or
 `PARTIALLY_APPLIED`, and an unchanged table can still carry a foreign-key
 failure. Import the enum with `from delta_engine import TableChangeState`.
 
-The human-readable renderers use these states on real runs. `render_diff`
+The human-readable views use these states on real runs. `report.render_diff()`
 marks non-empty plans that were not applied or only partially applied, while
-the `render_report` footer counts catalog outcomes. A compiled plan blocked
+the `report.render()` footer counts catalog outcomes. A compiled plan blocked
 before execution shows statement progress as `0/n`. Dry-run diff blocks and
 their changed/unchanged/failed footer keep describing planned work instead.
 
@@ -141,6 +143,11 @@ change). It is always empty for a table that planned successfully.
 ### Failure records
 
 Each entry in `failures`:
+
+Failures follow lifecycle order: structural foreign-key resolution, read,
+planning, then execution. A `BLOCKED_BY_FAILED_DEPENDENCY` foreign-key failure
+appears where execution would have occurred because it records why the table
+was skipped.
 
 | Field     | Type  | Meaning                                                                      |
 | --------- | ----- | ---------------------------------------------------------------------------- |
