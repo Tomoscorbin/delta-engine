@@ -348,10 +348,14 @@ stays hidden behind `matches_columns`.
 
 ### Implemented
 
-`PrimaryKeyConstraint` now owns semantic equality, hashing, and column-set
-matching. API lowering carries the referenced primary-key value, and
-relationship validation indexes those values directly. No signature type or
-projection escapes the constraint module.
+The final lifecycle model supersedes the shared `PrimaryKeyConstraint` shape.
+`DesiredPrimaryKey` and `ObservedPrimaryKey` now own structural equality,
+hashing, and column-set matching across both lifecycle variants. Names are
+excluded from relational equality: desired values carry an optional creation
+request, while observed values retain the exact catalog handle. API lowering
+carries the desired primary-key value, and relationship validation indexes
+those values directly. No signature type or projection escapes the constraint
+module.
 
 ## 6. Contain physical SQL invocation per backend
 

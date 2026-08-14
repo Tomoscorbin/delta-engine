@@ -231,7 +231,7 @@ That mismatch leaks into policy:
 - Multi-table FK cycles fail during declaration resolution. The scheduler
   cannot distinguish an already-satisfied cycle from one that could be staged
   as “create all tables, then add constraints,” even though creation and
-  `SetForeignKey` are already separate actions.
+  `AddForeignKey` are already separate actions.
 - Dependency failure blocks a whole table, including no-op or unrelated work,
   because the dependency unit is the table rather than the action that needs
   the parent.
@@ -913,8 +913,10 @@ canonical across consumers.
 The focused constraint-value work from PR #341 completed several instances of
 this pattern:
 
-- [x] [PR #342](https://github.com/Tomoscorbin/delta-engine/pull/342) made
-  `PrimaryKeyConstraint` own managed equality, hashing, and column matching.
+- [x] [PR #342](https://github.com/Tomoscorbin/delta-engine/pull/342) first
+  centralized primary-key equality, hashing, and column matching. The later
+  lifecycle redesign moved that structural contract to `DesiredPrimaryKey`
+  and `ObservedPrimaryKey`, excluding names from relational equality.
 - [x] [PR #343](https://github.com/Tomoscorbin/delta-engine/pull/343) removed
   the signature types and projections that made callers reconstruct key
   identity.
@@ -923,10 +925,11 @@ this pattern:
   invariants.
 - [x] `DiffOperation` now owns both its stable machine value and rendered
   symbol, removing the former string-to-operation lookup.
-- [ ] `ForeignKeyConstraint` still exposes two parallel column projections to
-  the one pair-oriented relationship type check. A `column_pairs` projection
-  remains a small, low-priority option; with only one production consumer, it
-  should be added only if it makes that contract materially clearer.
+- [ ] `DesiredForeignKey` and `ObservedForeignKey` still expose parallel local
+  and referenced column projections to the one pair-oriented relationship type
+  check. A `column_pairs` projection remains a small, low-priority option; with
+  only one production consumer, it should be added only if it makes that
+  contract materially clearer.
 
 The original `ActionPlan.creates_table`, nullability-polarity,
 `DiffEntry` diagnostic, `DiffCategory` wire identity, and layout-error type
@@ -967,7 +970,7 @@ recommendations do not become parallel sources of truth.
 | --- | --- |
 | Resolve foreign keys at the declaration-set boundary | Open as findings 1 and 2; the review repeated the same split-authority evidence. |
 | Hide property-dependent capabilities behind property policy | Open as finding 17, the one distinct recommendation from that review. |
-| Separate desired constraint intent from observed physical identity | Superseded. PRs #338–#340 established and verified physical names as managed desired state, allowed explicit PK/FK names, and retained shared complete desired/observed constraint values. Schema-wide collision admission remains separate correctness debt. |
+| Separate desired constraint intent from observed physical identity | Implemented by PRs #355, #356, and #358. Desired values carry optional creation names, observed values carry exact catalog names, and reconciliation matches relational definitions. Planned explicit-name collision admission remains separate correctness debt. |
 | Give dependency convergence one owner | Not retained as a separate finding. The second whole-codebase pass found the shared rule already lives in `TableResolution.blocked_by`; execution and report assembly fold it for different purposes. A sync-wide schedule remains finding 3. |
 
 ### PR #341: constraint value depth

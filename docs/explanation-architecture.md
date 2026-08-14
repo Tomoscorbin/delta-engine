@@ -77,10 +77,10 @@ through a sync.
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
-For example, the domain has `DesiredColumn`, `QualifiedName`, `PrimaryKeyConstraint`,
-`ForeignKeyConstraint`, and `DataType` values. The Databricks adapter is
-responsible for translating Spark catalog objects and SQL type names into those
-values before the engine sees them.
+For example, the domain has `DesiredColumn`, `QualifiedName`,
+`DesiredPrimaryKey`, `ObservedPrimaryKey`, and `DataType` values. The
+Databricks adapter is responsible for translating Spark catalog objects and SQL
+type names into those values before the engine sees them.
 
 ## The hexagonal boundary
 
@@ -749,25 +749,69 @@ physical layout is a table-level list (`partitioned_by`, `clustered_by`), and
 whether order is significant is a property of the differ, not of the
 declaration shape.
 
-## Constraint names
+## Constraint lifecycle
 
-Constraint identity is structural. Primary keys compare by their column set;
-foreign keys compare by their local columns, referenced table, and referenced
-columns. Their lifecycle names are deliberately excluded from equality and
-hashing.
+A primary or foreign key has one relational definition but two lifecycle
+representations:
 
-Desired constraints carry an optional creation preference in `desired_name`.
-`None` makes the compiler omit the name so Databricks allocates one; an
-explicit value requests that name when the constraint is created. Once the
-constraint exists, Databricks owns its physical name. Changing only the
-preference is therefore a no-op rather than an implicit drop and recreate.
+| Concept | Meaning | Used for |
+| --- | --- | --- |
+| **Definition** | The key's relational meaning, excluding names | Equality and reconciliation |
+| **Creation signature** | Definition plus optional `desired_name` | Compiling and reporting an add |
+| **Catalog identity (occurrence signature)** | Definition plus required `catalog_name` | Identifying and reporting an observed constraint |
 
-Catalog reads produce `ObservedPrimaryKey` and `ObservedForeignKey` values,
-whose `catalog_name` is required. This keeps physical identity available for
-drop operations without making desired declarations invent a future name.
-Reconciliation stays ordinary: desired and observed constraints compare with
-`==`, unmatched observations are dropped, and unmatched declarations are
-added. Optional naming grammar remains inside the SQL compiler.
+For a primary key, the definition is the case-insensitive set of key columns.
+For a foreign key, it is the referenced table and the case-insensitive set of
+local-to-referenced column pairs. Declaration order and lifecycle names are not
+part of either definition.
+
+`DesiredPrimaryKey` and `DesiredForeignKey` carry the definition and an
+optional `desired_name`. This is only a creation preference. `None` makes the
+SQL compiler omit `CONSTRAINT name`, so Databricks allocates a name; an
+explicit value is included if the engine adds the constraint.
+
+Catalog reads create `ObservedPrimaryKey` and `ObservedForeignKey` values.
+Their required `catalog_name` is the exact handle Databricks assigned. The
+engine retains it for operations such as dropping a foreign key, but it does
+not copy it into desired state.
+
+Constraint `==` means that the definitions match, including when one value is
+desired and the other is observed. Reconciliation therefore adopts an
+existing matching constraint under any catalog name. An unmatched desired
+constraint produces an add; an unmatched catalog occurrence produces a drop.
+Changing only `desired_name` is a no-op rather than an implicit drop and
+recreate.
+
+For example, these values compare equal because both define a primary key on
+`id`, even though their lifecycle names answer different questions:
+
+```python
+from delta_engine.domain.model import DesiredPrimaryKey, ObservedPrimaryKey
+
+desired = DesiredPrimaryKey(columns=("id",), desired_name="orders_pk")
+observed = ObservedPrimaryKey(columns=("ID",), catalog_name="pk_8f3c2a")
+
+assert desired == observed
+```
+
+Because they match, the engine emits no action: it does not try to rename the
+catalog occurrence to `orders_pk`. If no matching occurrence existed, an add
+would request `orders_pk`. If the observed occurrence had to be dropped, its
+`pk_8f3c2a` catalog name would remain available for reporting even though
+Databricks' primary-key drop syntax does not need it.
+
+The creation signature and catalog occurrence remain available as complete
+values for SQL and reporting even though neither lifecycle name participates
+in constraint equality. This keeps three different questions separate:
+
+- "Does the requested relational constraint already exist?" uses the
+  definition.
+- "What name should a new constraint request?" uses `desired_name`.
+- "What exact catalog occurrence did Databricks return?" uses `catalog_name`.
+
+The SQL adapter alone handles the difference between named and unnamed add
+syntax. The domain and differ do not predict, persist, or reproduce names that
+Databricks generates.
 
 ## Reporting and failure semantics
 

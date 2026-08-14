@@ -170,10 +170,10 @@ without abandoning the tool for that table.
 - Validation: identity change or addition to an existing column is blocked
   with a recreate message, mirroring `PartitioningChangeNotSupported`.
 
-### 7. Adoption tooling: declaration codegen and explicit constraint names
+### 7. Adoption tooling: declaration codegen
 
-**Status.** Explicit primary- and foreign-key names shipped in 2026-08.
-Declaration code generation remains unimplemented.
+**Status.** Constraint declarations adopt matching catalog definitions under
+any physical name. Declaration code generation remains unimplemented.
 
 **Why.** The biggest barrier to adopting the tool is an existing estate of
 hundreds of tables nobody wants to hand-transcribe. The hard half — parsing
@@ -184,9 +184,10 @@ observed state into a typed model — already exists in the reader.
 - A helper that introspects a table (or a whole schema) and emits
   `DeltaTable(...)` declaration source using public import paths. Terraform's
   `import`, but generating code.
-- Explicit PK/FK constraint names on `DeltaTable` are already available, so a
-  generator can reproduce pre-existing names and avoid generated-name
-  collisions.
+- A generator should emit each PK/FK definition. It should not copy an
+  observed `catalog_name` merely to adopt the constraint: structural matching
+  already does that, while `primary_key_name` and `ForeignKey(name=...)` are
+  only optional preferences for a future creation.
 - FK declarations reference `DeltaTable` objects, so whole-schema generation
   must emit tables in dependency order and wire the references; single-table
   generation can emit a commented placeholder.

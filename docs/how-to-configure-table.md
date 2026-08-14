@@ -505,6 +505,8 @@ that whole schema. A collision is reported as a Databricks execution failure.
 `DeltaTable.primary_key_name` returns only the explicit creation request, or
 `None` when the name was omitted (including when a primary key exists);
 `DeltaTable.primary_key` continues to return the tuple of key columns.
+See [Constraint lifecycle](explanation-architecture.md#constraint-lifecycle)
+for how definitions, desired names, and catalog names serve different roles.
 
 ### Composite primary keys
 

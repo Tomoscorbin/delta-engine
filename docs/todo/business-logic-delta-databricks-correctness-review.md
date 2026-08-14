@@ -1,14 +1,14 @@
 # Business logic, Delta, and Databricks correctness review
 
-**Status:** 13 of 15 findings resolved (updated against `main`, 2026-08-11);
-items 11 and 13 remain open
+**Status:** 14 of 15 findings resolved (updated against the constraint lifecycle
+redesign stack, 2026-08-14); item 11 remains open
 
 **Original review:** 2026-07-14
 
 **Fresh sweep:** 2026-07-20
 
 **Fresh-sweep implementation:** landed piecemeal — see each finding's
-resolution note; items 11 and 13 have no complete implementation PR yet
+resolution note; item 11 has no complete implementation PR yet
 
 This began as the second phase of the codebase review. All eight original
 findings have since been implemented, as recorded in their resolution
@@ -49,7 +49,7 @@ path currently produces an incorrect result.
 | 10 ✅ | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
 | 12 ✅ | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
-| 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
+| 13 ✅ | Medium | Engine-synthesized constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
 | 14 ✅ | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
 | 15 ✅ | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
 
@@ -619,11 +619,11 @@ index columns by `identifier_key` while preserving the input spelling. The
 mixed-case layout and foreign-key matrices cover the former bypasses, and
 planning binds accepted references to the resulting physical schema.
 
-## 13. Stop synthesizing unsafe physical constraint names
+## 13. Stop synthesizing unsafe physical constraint names ✅
 
 ### Cause
 
-Primary-key and foreign-key names are synthesized by concatenating table and
+Primary-key and foreign-key names were synthesized by concatenating table and
 column names:
 
 - `{table_name}_pk`; and
@@ -660,18 +660,21 @@ identifier limits are described in
 4. Confirm live that generated platform names can be observed and subsequently
    used for drop/reconciliation.
 
-### Partial mitigation (2026-08-07)
+### Resolved (2026-08-14)
 
-[PR #338](https://github.com/Tomoscorbin/delta-engine/pull/338) pinned the live
-Databricks naming and drop behaviour. [PR #339](https://github.com/Tomoscorbin/delta-engine/pull/339)
-and [PR #340](https://github.com/Tomoscorbin/delta-engine/pull/340) added
-explicit primary- and foreign-key names, so declarations can adopt existing
-names and escape an ambiguous generated foreign-key name.
+[PR #338](https://github.com/Tomoscorbin/delta-engine/pull/338) first pinned the
+live Databricks naming and drop behaviour. PRs
+[#355](https://github.com/Tomoscorbin/delta-engine/pull/355) and
+[#356](https://github.com/Tomoscorbin/delta-engine/pull/356) then separated
+desired declarations from observed catalog occurrences and made add/drop
+actions lifecycle-explicit. [PR #358](https://github.com/Tomoscorbin/delta-engine/pull/358)
+removed both name generators and delegates every omitted name to Databricks.
 
-The default generators can still produce an invalid name, and the engine does
-not validate Databricks' schema-wide, case-insensitive constraint namespace.
-The finding therefore remains open; schema-wide collision admission is tracked
-separately in `todo.md`.
+Constraint definitions now reconcile structurally, so an existing occurrence
+is adopted under any catalog name. Explicit names remain optional creation
+preferences. Collisions among planned explicit additions are separate
+pre-execution hardening tracked in `todo.md`; collisions with constraints the
+engine cannot observe remain Databricks execution failures.
 
 ## 14. Make dependency-cycle detection iterative
 
@@ -788,12 +791,11 @@ were instead compared with the official documentation linked above as retrieved
 on 2026-07-20. The new platform-sensitive cases remain required live coverage
 for their implementation PR.
 
-## Fresh-sweep implementation boundary
+## Historical fresh-sweep implementation boundary
 
-The next correctness work should cover original item 3 and fresh items 9–15.
-It may be split into reviewable PRs, but no item should be marked resolved
-without its observation, planning, compilation, and ordering consequences being
-handled together.
+The original implementation grouping covered original item 3 and fresh items
+9–15. It was split into reviewable PRs; the resolution notes above are the
+current source of truth for each item.
 
 Recommended grouping:
 
@@ -831,9 +833,8 @@ Before an implementation PR is ready for merge, run:
       declarations are intentionally added.
 - [ ] Governed column tags will be unset before drops, and declarations will
       enforce the documented tag constraints.
-- [ ] API identifiers will be canonicalized before validation, and physical
-      constraint names will be delegated to Databricks unless a safe generator
-      is demonstrated.
+- [x] API identifiers are canonicalized before validation, and omitted
+      constraint names are delegated to Databricks.
 - [x] Dependency traversal will be iterative and `Decimal` will enforce runtime
       integer inputs.
 - [ ] The concurrency contract and success postcondition will be documented
