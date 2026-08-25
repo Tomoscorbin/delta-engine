@@ -54,8 +54,7 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     """
     Render ``observed`` as an importable declaration module.
 
-    The module binds one ``DeltaTable`` and an ``all_tables`` collection ready
-    for ``delta-engine plan``.
+    The module binds one ``DeltaTable`` ready for ``delta-engine plan``.
 
     Args:
         observed: The observed catalog state of one table.
@@ -134,8 +133,6 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
         f"{variable} = DeltaTable(",
         *argument_lines,
         ")",
-        "",
-        f"all_tables = ({variable},)",
     ]
     warnings = tuple(_foreign_key_warning(constraint) for constraint in observed.foreign_keys)
     if observed.kind is TableKind.STREAMING_TABLE:

@@ -41,8 +41,7 @@ def test_a_generated_declaration_matches_the_live_table_exactly(
 
     namespace: dict[str, object] = {}
     exec(compile(module.source, "<generated>", "exec"), namespace)
-    (declared,) = namespace["all_tables"]  # type: ignore[misc]
-    assert isinstance(declared, DeltaTable)
+    (declared,) = (value for value in namespace.values() if isinstance(value, DeltaTable))
 
     # Then the declaration matches the live table exactly
     diff = diff_table(declared.to_desired_table(), state.table)

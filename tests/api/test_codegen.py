@@ -58,8 +58,7 @@ def _sample_data_types() -> tuple[DataType, ...]:
 def _import_declaration(source: str) -> DeltaTable:
     namespace: dict[str, object] = {}
     exec(compile(source, "<generated>", "exec"), namespace)
-    (declared,) = namespace["all_tables"]  # type: ignore[misc]
-    assert isinstance(declared, DeltaTable)
+    (declared,) = (value for value in namespace.values() if isinstance(value, DeltaTable))
     return declared
 
 
@@ -90,8 +89,6 @@ def test_minimal_table_renders_an_importable_declaration_module() -> None:
         '        Column("note", String()),\n'
         "    ],\n"
         ")\n"
-        "\n"
-        "all_tables = (orders,)\n"
     )
     assert module.warnings == ()
 
@@ -134,8 +131,6 @@ def test_full_featured_table_renders_every_argument() -> None:
         '    primary_key=["id"],\n'
         '    primary_key_name="orders_pk",\n'
         ")\n"
-        "\n"
-        "all_tables = (orders,)\n"
     )
     assert module.warnings == ()
 
@@ -296,7 +291,6 @@ def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable() -
 
     # Then the module binds a valid identifier while declaring the real name
     assert "_2024_orders = DeltaTable(" in module.source
-    assert "all_tables = (_2024_orders,)" in module.source
     assert declared.name == "2024-orders"
 
 

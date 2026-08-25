@@ -43,13 +43,13 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
     """
     Resolve ``reference`` into one non-empty ordered sequence of tables.
 
-    A single table is rejected: the selected attribute is always a collection,
-    even when the collection currently contains only one declaration. Duplicate
+    A bare ``DeltaTable`` attribute loads as a one-table collection. Duplicate
     qualified names fail before authentication or catalog access begins.
 
     Raises:
         ConfigError: If the target module or attribute is missing, or the
-            attribute is not a non-empty ordered sequence of ``DeltaTable``.
+            attribute is neither a ``DeltaTable`` nor a non-empty ordered
+            sequence of ``DeltaTable``.
         DuplicateTableDefinitionError: If the sequence defines one qualified
             table more than once.
         Exception: Any exception raised by imported user code is allowed to
@@ -112,9 +112,7 @@ def _tables_from_attribute(
     """Validate and freeze the selected ordered declaration collection."""
     reference_text = str(reference)
     if isinstance(value, DeltaTable):
-        raise ConfigError(
-            f"'{reference_text}' is one DeltaTable; expected a non-empty ordered sequence"
-        )
+        return (value,)
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise ConfigError(
             f"'{reference_text}' is {type(value).__name__}; "

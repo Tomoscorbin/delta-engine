@@ -35,8 +35,6 @@ def test_generate_prints_an_importable_module_and_exits_cleanly(runner, fake_rea
         '        Column("id", String()),\n'
         "    ],\n"
         ")\n"
-        "\n"
-        "all_tables = (orders,)\n"
     )
 
 
@@ -68,7 +66,7 @@ def test_generate_reports_dropped_foreign_keys_on_stderr_only(runner, fake_reade
     assert result.exit_code == 0
     assert "warning: foreign key fk_orders_customer" in result.stderr
     assert "warning" not in result.stdout
-    assert "all_tables = (orders,)\n" in result.stdout
+    assert "orders = DeltaTable(\n" in result.stdout
 
 
 def test_generate_fails_when_the_table_does_not_exist(runner, fake_reader) -> None:

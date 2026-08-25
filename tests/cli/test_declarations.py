@@ -68,11 +68,12 @@ def test_non_empty_ordered_sequence_loads_in_declared_order(write_module):
     assert _dotted_names(tables) == ["dev.silver.orders", "dev.silver.customers"]
 
 
-def test_single_table_is_rejected_even_for_one_declaration(write_module):
+def test_a_bare_delta_table_loads_as_a_one_table_collection(write_module):
     module = write_module("decl_single", _TWO_TABLES)
 
-    with pytest.raises(ConfigError, match="one DeltaTable"):
-        _load(f"{module}:orders")
+    tables = _load(f"{module}:orders")
+
+    assert _dotted_names(tables) == ["dev.silver.orders"]
 
 
 def test_empty_sequence_is_a_configuration_error(write_module):

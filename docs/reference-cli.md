@@ -56,8 +56,8 @@ command can incur compute cost despite being read-only.
 
 ## Declaration reference
 
-The argument is always one `MODULE:ATTRIBUTE` reference. The attribute must be
-a non-empty ordered sequence, such as a list or tuple:
+The argument is always one `MODULE:ATTRIBUTE` reference. The attribute is a
+non-empty ordered sequence, such as a list or tuple:
 
 ```python
 from delta_engine.schema import Column, DeltaTable, Integer
@@ -72,16 +72,16 @@ orders = DeltaTable(
 all_tables = [orders]
 ```
 
-Point the command at the collection, even when it currently holds one table:
+A bare `DeltaTable` attribute is also accepted and loads as a one-table
+collection, so a single declaration plans without a wrapper list:
 
 ```bash
-delta-engine plan myproject.tables:all_tables
+delta-engine plan myproject.tables:orders
 ```
 
-A single `DeltaTable`, an empty collection, an unordered collection such as a
-set, a mixed sequence, or duplicate qualified table names is a configuration
-error. The CLI does not scan module globals and does not accept multiple
-declaration references.
+An empty collection, an unordered collection such as a set, a mixed sequence,
+or duplicate qualified table names is a configuration error. The CLI does not
+scan module globals and does not accept multiple declaration references.
 
 Declaration order never changes the plan: the engine reports tables in
 sorted qualified-name order and derives execution order from foreign-key
@@ -102,13 +102,17 @@ delta-engine generate CATALOG.SCHEMA.TABLE
 
 The command reads one live table's observed state and prints a Python module
 to stdout. The module declares the table through `delta_engine.schema`
-vocabulary and ends with `all_tables = (<table>,)`, so its output is
+vocabulary, bound to a variable named after the table, so its output is
 immediately usable:
 
 ```bash
 delta-engine generate dev.silver.orders > orders.py
-delta-engine plan orders:all_tables
+delta-engine plan orders:orders
 ```
+
+A table name that is not a valid Python identifier is sanitised for the
+variable binding (`2024-orders` becomes `_2024_orders`); the declared table
+name is always the real one.
 
 A correctly generated module plans no changes against its source table, with
 one exception: foreign keys, which plan as drops until wired up by hand (see
