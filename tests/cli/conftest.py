@@ -101,6 +101,26 @@ def fake_engine(monkeypatch):
 
 
 @pytest.fixture
+def fake_reader(monkeypatch):
+    """Route the CLI's reader boundary to a fake; yield it to preload states."""
+    reader = FakeReader()
+
+    @contextmanager
+    def fake_connection():
+        yield (
+            Target(
+                host="https://test.cloud.databricks.com",
+                warehouse_id="test-warehouse",
+            ),
+            _StubConnection(),
+        )
+
+    monkeypatch.setattr(cli_app, "open_connection", fake_connection)
+    monkeypatch.setattr(cli_app, "build_reader", lambda connection: reader)
+    return reader
+
+
+@pytest.fixture
 def databricks_env(monkeypatch):
     monkeypatch.setenv("DATABRICKS_SQL_WAREHOUSE_ID", "test-warehouse")
 

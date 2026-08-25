@@ -15,7 +15,7 @@ this document supersedes their prioritisation but not their detail.
 | 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped        |
 | 5   | Delta-format / view guard in the reader           | 2    | S      | shipped        |
 | 6   | Identity columns                                  | 2    | M      | not tracked    |
-| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | names shipped  |
+| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | single-table shipped |
 | 8   | CHECK constraints                                 | 2    | M      | not tracked    |
 | 9   | `RELY` on PK/FK constraints                       | 2    | S      | tracked        |
 | 10  | External-table (LOCATION) policy                  | 3    | S–M    | tracked        |
@@ -173,7 +173,12 @@ without abandoning the tool for that table.
 ### 7. Adoption tooling: declaration codegen and explicit constraint names
 
 **Status.** Explicit primary- and foreign-key names shipped in 2026-08.
-Declaration code generation remains unimplemented.
+Single-table generation shipped in 2026-08 as `delta-engine generate
+CATALOG.SCHEMA.TABLE`: it reads one live table and prints a ready-to-plan
+declaration module, with foreign keys emitted as commented placeholders and
+streaming tables scoped to annotations. Whole-schema generation — emitting
+tables in dependency order and wiring `ForeignKey` references — remains the
+follow-on.
 
 **Why.** The biggest barrier to adopting the tool is an existing estate of
 hundreds of tables nobody wants to hand-transcribe. The hard half — parsing
