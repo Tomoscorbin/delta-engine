@@ -148,7 +148,6 @@ def test_eligibility_checks_cover_all_laws_in_evaluation_order():
 
     assert check_names == (
         "ColumnSpellingMustMatchCatalog",
-        "MissingTableUnmanaged",
         "StreamingTableAnnotationsOnly",
         "UnmanagedAspectDrift",
     )
@@ -271,20 +270,6 @@ def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_
     assert not validate_diff(diff_table(desired, None))
 
 
-def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
-    # Given a metadata-only definition for a table that does not exist
-    desired = _desired_table(
-        scope=TableScope.ANNOTATIONS,
-    )
-
-    # When validating
-    failures = validate_diff(diff_table(desired, None))
-
-    # Then the missing table cannot be created
-    assert failures[0].rule_name == "MissingTableUnmanaged"
-    assert "does not exist" in failures[0].message
-
-
 def test_validate_diff_passes_table_missing_when_table_existence_managed():
     # Given a fully managed definition for a missing table
     desired = _desired_table(scope=TableScope.FULL)
@@ -294,19 +279,6 @@ def test_validate_diff_passes_table_missing_when_table_existence_managed():
 
     # Then creation is allowed
     assert not failures
-
-
-def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
-    # Given a missing table whose declaration does not manage table existence
-    desired = _desired_table(
-        scope=TableScope.ANNOTATIONS,
-    )
-
-    # When validating with no safety rules
-    failures = validate_diff(diff_table(desired, None), rules=())
-
-    # Then the eligibility check still fails
-    assert failures[0].rule_name == "MissingTableUnmanaged"
 
 
 # ---- non-nullable column additions

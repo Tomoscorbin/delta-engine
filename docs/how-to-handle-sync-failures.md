@@ -29,11 +29,12 @@ for table_report in report:
     print(table_report.qualified_name, table_report.status)
 ```
 
-`table_report.status` is one of five `TableRunStatus` values:
+`table_report.status` is one of six `TableRunStatus` values:
 
 | Status               | Meaning                                                         |
 | -------------------- | --------------------------------------------------------------- |
 | `SUCCESS`            | Table synced without issues                                     |
+| `DEFERRED`           | Table does not exist and the declaration cannot create it — skipped with a warning, not a failure |
 | `READ_FAILED`        | Could not read current catalog state                            |
 | `PLANNING_FAILED`    | Plan was rejected before any SQL ran                            |
 | `FOREIGN_KEY_FAILED` | A foreign key could not be applied, or a dependency won't build |

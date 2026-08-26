@@ -2,7 +2,9 @@ import pytest
 
 from delta_engine.application.planning import (
     PlanningAccepted,
+    PlanningDeferred,
     PlanningRejected,
+    accepted_plan,
     plan_changes,
 )
 from delta_engine.domain.model import (
@@ -227,13 +229,33 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
     )
 
 
-def test_plan_changes_rejects_missing_table_when_table_existence_is_unmanaged():
+@pytest.mark.parametrize(
+    "scope",
+    [TableScope.TAGS, TableScope.ANNOTATIONS, TableScope.METADATA],
+)
+def test_plan_changes_defers_missing_table_when_table_existence_is_unmanaged(scope):
+    desired = _desired(scope=scope)
+
+    result = plan_changes(desired, None)
+
+    assert isinstance(result, PlanningDeferred)
+
+
+def test_a_deferred_outcome_retains_the_creation_diff_it_deferred():
     desired = _desired(scope=TableScope.ANNOTATIONS)
 
     result = plan_changes(desired, None)
 
-    assert isinstance(result, PlanningRejected)
-    assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
+    assert isinstance(result, PlanningDeferred)
+    assert result.diff == diff_table(desired, None)
+
+
+def test_a_deferred_outcome_narrows_to_no_accepted_plan():
+    desired = _desired(scope=TableScope.ANNOTATIONS)
+
+    result = plan_changes(desired, None)
+
+    assert accepted_plan(result) is None
 
 
 def test_plan_changes_keeps_rename_and_residual_drift_under_the_new_name():

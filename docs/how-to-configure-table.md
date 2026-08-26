@@ -368,11 +368,13 @@ events = DeltaTable(
 )
 ```
 
-The live table must already exist. If a non-tag aspect drifts from the
-declaration, validation fails before any tag SQL runs; update the declaration
-to match the live table or use the full scope. Properties are the exception:
-a restricted scope never compares them, so live table properties cannot fail
-the sync.
+A table that does not exist yet is deferred with a warning — the declaration
+cannot create it, so the sync reports it as `DEFERRED` (neither changed nor
+failed) and applies the tags once something else has created it. If a non-tag
+aspect drifts from the declaration, validation fails before any tag SQL runs;
+update the declaration to match the live table or use the full scope.
+Properties are the exception: a restricted scope never compares them, so live
+table properties cannot fail the sync.
 
 ### Manage comments and tags only
 

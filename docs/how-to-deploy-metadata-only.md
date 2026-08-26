@@ -60,11 +60,16 @@ metadata is applied.
   the live table (for example those written by a previous fully managed sync)
   are not drift.
 - **Cannot create** a missing table. If the table does not exist, the sync
-  fails at validation (`MissingTableUnmanaged`) — a metadata-only declaration
-  does not manage table existence, so it has no authority to create the table.
+  logs a warning and defers it — the table reports `DEFERRED`, neither changed
+  nor failed — because a metadata-only declaration has no authority to create
+  the table. The next sync after something else creates it applies the
+  declared metadata. Check the warning if you expected the table to exist: a
+  misspelled name defers instead of failing.
 
-Both failures are laws rather than rules, listed in
-[safe-change rules](reference-safe-change-rules.md).
+The drift failures are laws rather than rules, listed in
+[safe-change rules](reference-safe-change-rules.md). The missing-table case
+is not a failure at all: it is deferred at the planning boundary, before
+validation runs.
 
 ## Annotate a streaming table
 

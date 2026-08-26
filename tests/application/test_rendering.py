@@ -16,9 +16,14 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningAccepted, PlanningRejected
+from delta_engine.application.planning import (
+    PlanningAccepted,
+    PlanningDeferred,
+    PlanningRejected,
+)
 from delta_engine.application.ports import (
     ExecutionResult,
+    TableAbsent,
     TablePresent,
 )
 from delta_engine.application.relationships import TableResolution
@@ -672,6 +677,20 @@ def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failur
     )
 
 
+def _deferred_report(
+    name: str, *, blocked_failures: tuple[ForeignKeyFailure, ...] = ()
+) -> TableRun:
+    """Build the run of an absent table whose declaration cannot create it."""
+    qualified_name = QualifiedName("cat", "sch", name)
+    desired = DesiredTable(qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),))
+    return TableRun(
+        read=TableAbsent(),
+        planning=PlanningDeferred(diff=TableCreation(desired)),
+        resolution=TableResolution(desired, (), ()),
+        blocked_failures=blocked_failures,
+    )
+
+
 def _failed_execution(plan: ActionPlan, *, applied: int) -> ExecutionResult:
     statements = tuple(f"SQL {index}" for index in range(len(plan)))
     return ExecutionResult(
@@ -855,6 +874,33 @@ def test_grid_aligns_the_status_column_across_header_and_rows():
     assert failed_row.index("PLANNING_FAILED") == status_offset
 
 
+def test_grid_row_marks_a_deferred_table_as_absent():
+    # Given an absent table whose declaration cannot create it
+    data_row = render_grid((_deferred_report("orders"),)).splitlines()[1]
+
+    # Then the row states the deferral and plans no statements
+    assert "DEFERRED" in data_row
+    assert "table absent — skipped" in data_row
+    assert "—" in data_row
+
+
+def test_diff_block_says_a_deferred_table_is_absent():
+    block = render_diff_block(_deferred_report("orders"))
+
+    assert block == "cat.sch.orders\n  (table absent — skipped)"
+
+
+def test_diff_block_of_a_blocked_deferred_table_points_to_failures():
+    # Given a deferred table that is also blocked by a failed dependency
+    report = _deferred_report("orders", blocked_failures=(_blocked_failure("orders"),))
+
+    # When rendering its diff block
+    block = render_diff_block(report)
+
+    # Then the block points at the failures instead of claiming a clean skip
+    assert block == "cat.sch.orders\n  (no changes — see failures)"
+
+
 # ---------- run summary footer ----------
 
 
@@ -920,6 +966,43 @@ def test_real_run_footer_counts_each_catalog_change_outcome():
     assert footer == (
         "5 tables: 1 applied, 1 partially applied, 1 not applied, 1 unchanged, 1 not planned (3.0s)"
     )
+
+
+def test_planned_footer_counts_deferred_tables_only_when_present():
+    # Given a dry run over one changed, one unchanged, one deferred, and one failed table
+    changed = _grid_report(
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
+    )
+    unchanged = _grid_report("b")
+    deferred = _deferred_report("c")
+    failed = _grid_report("d", failures=(ValidationFailure(rule_name="R", message="m"),))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_runs=(changed, unchanged, deferred, failed),
+        dry_run=True,
+    )
+
+    # When rendering the footer
+    footer = run_summary_footer(sync)
+
+    # Then the deferred table appears between unchanged and failed
+    assert footer == "4 tables: 1 changed, 1 unchanged, 1 deferred, 1 failed (3.0s)"
+
+
+def test_real_run_footer_counts_deferred_tables():
+    # Given a real run over one unchanged and one deferred table
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_runs=(_grid_report("a"), _deferred_report("b")),
+    )
+
+    # When rendering the real-run footer
+    footer = run_summary_footer(sync)
+
+    # Then the deferred outcome is counted alongside the catalog outcomes
+    assert footer == "2 tables: 1 unchanged, 1 deferred (3.0s)"
 
 
 def test_a_single_table_run_uses_the_singular_noun():

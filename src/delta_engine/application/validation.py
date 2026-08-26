@@ -604,44 +604,6 @@ class UnmanagedAspectDrift:
                 )
 
 
-class MissingTableUnmanaged:
-    """
-    Fail creation of a table whose declaration does not manage table existence.
-
-    One of the ``ELIGIBILITY_CHECKS``, and the only one that judges the
-    ``TableCreation`` arm. It shares the naming shape of a rule (its ``name``
-    supplies the failure's ``rule_name``) but not the ``SafetyRule`` protocol —
-    a missing table has no changes to evaluate. Like every eligibility check it
-    runs unconditionally: ``rules=()`` must not enable metadata-only creates.
-    """
-
-    name: ClassVar[str] = "MissingTableUnmanaged"
-
-    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
-        """Flag a missing table that this declaration cannot create."""
-        match diff:
-            case TableDrift():
-                return ()
-
-            case TableCreation() as missing:
-                if missing.desired.scope.manages(TableAspect.TABLE_EXISTENCE):
-                    return ()
-                return (
-                    ValidationFailure(
-                        rule_name=self.name,
-                        message=(
-                            "Operation not allowed: the table does not exist and this"
-                            " definition does not manage table existence, so it cannot"
-                            " be created. Manage the table fully or create it out-of-band"
-                            " first."
-                        ),
-                    ),
-                )
-
-            case _ as unreachable:
-                assert_never(unreachable)
-
-
 class StreamingTableAnnotationsOnly:
     """
     Fail any declaration that manages more than annotations on a streaming table.
@@ -694,12 +656,10 @@ class StreamingTableAnnotationsOnly:
 
 # Position is report order, so a root defect leads what it causes: spelling
 # before the two it can co-fire with, then StreamingTableAnnotationsOnly before
-# UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
-# TableCreation, so it never co-fires.
+# UnmanagedAspectDrift.
 # TODO: fix order issue
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
-    MissingTableUnmanaged(),
     StreamingTableAnnotationsOnly(),
     UnmanagedAspectDrift(),
 )
@@ -726,9 +686,9 @@ def validate_diff(
     Evaluate a table diff and return its failures, empty when it is valid.
 
     Eligibility is settled before any safety rule. A column spelled differently
-    from the catalog, a drifted aspect the declaration does not manage, a
-    missing table it may not create, or a streaming table it claims more than
-    annotations on all fail here and short-circuit, so the safety rules never run on a
+    from the catalog, a drifted aspect the declaration does not manage, or a
+    streaming table it claims more than annotations on all fail here and
+    short-circuit, so the safety rules never run on a
     diff the engine has already rejected. This is what makes an unmanaged
     difference produce exactly the scope failure rather than also tripping rules
     for work the user never requested, and a misspelled column produce the
@@ -739,7 +699,9 @@ def validate_diff(
 
     Past that point every difference is in scope and spelled as the catalog
     spells it, so the safety rules judge the managed drift. A missing table
-    that is eligible is a fully-managed create and needs no safety judgement.
+    that reaches validation is a fully-managed create and needs no safety
+    judgement — the planning boundary defers a creation whose declaration does
+    not manage table existence before validation ever sees it.
     """
     ineligible = tuple(failure for check in ELIGIBILITY_CHECKS for failure in check.evaluate(diff))
 
