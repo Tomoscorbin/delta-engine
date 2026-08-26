@@ -1,3 +1,17 @@
+## v0.9.0 (2026-08-26)
+
+### Feat
+
+- generate a DeltaTable declaration from a live table (#362)
+- delegate constraint naming to Databricks (#350)
+- add Spark schema converter (#354)
+- add SyncReport rendering methods (#352)
+
+### Fix
+
+- resolve deep dependency graphs iteratively (#349)
+- prevent plans from accepting unresolvable drift (#347)
+
 ## v0.8.0 (2026-08-11)
 
 ### BREAKING CHANGE
