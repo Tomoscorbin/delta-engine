@@ -1,5 +1,6 @@
 """Behaviour of the executing ``delta-engine apply`` workflow."""
 
+from delta_engine.application.errors import ReadError
 from delta_engine.cli.app import app
 from tests.cli.conftest import NOT_NULL_DRIFT_ORDERS, ORDERS_ONLY, observed_orders
 
@@ -38,15 +39,36 @@ def test_changed_apply_exits_zero_and_prints_the_executed_sql(
 def test_execution_failure_prints_the_report_and_exits_one(
     runner, failing_engine, databricks_env, write_module
 ):
+    # Given a declared table whose statements fail at the warehouse
     module = write_module("apply_execution_failure", ORDERS_ONLY)
 
+    # When applying the declaration
     result = runner.invoke(app, ["apply", f"{module}:all_tables"])
 
+    # Then the report names the failed statement and the command exits one
     assert result.exit_code == 1
     assert "EXECUTION_FAILED" in result.stdout
     assert "PermissionDenied" in result.stdout
     assert "not applied" in result.stdout
+    assert "EXECUTED SQL" in result.stdout
     assert "SQL: -- dev.silver.orders: CreateTable" in result.stdout
+
+
+def test_read_failure_prints_the_report_and_exits_one(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declared table whose catalog state cannot be read
+    module = write_module("apply_read_failure", ORDERS_ONLY)
+    fake_engine.states["dev.silver.orders"] = ReadError("PermissionDenied", "cannot inspect table")
+
+    # When applying the declaration
+    result = runner.invoke(app, ["apply", f"{module}:all_tables"])
+
+    # Then the report shows the read failure, nothing executes, and the command exits one
+    assert result.exit_code == 1
+    assert "READ_FAILED" in result.stdout
+    assert "PermissionDenied" in result.stdout
+    assert "EXECUTED SQL" not in result.stdout
 
 
 def test_validation_failure_executes_nothing_and_exits_one(
