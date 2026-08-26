@@ -146,7 +146,7 @@ for the model, or jump to what you need:
 
 **Reference**
 
-- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the read-only plan and generate commands, connection contract, output, and exit codes
+- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the plan, apply, and generate commands, connection contract, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation

@@ -5,10 +5,12 @@ tags:
 
 # CLI reference
 
-The `delta-engine` command has two read-only workflows:
+The `delta-engine` command has three workflows — two read-only, one that
+writes:
 
 ```bash
 delta-engine plan myproject.tables:all_tables
+delta-engine apply myproject.tables:all_tables
 delta-engine generate dev.silver.orders > orders.py
 ```
 
@@ -16,7 +18,12 @@ delta-engine generate dev.silver.orders > orders.py
 target through a Databricks SQL warehouse, and runs
 `Engine.sync(..., dry_run=True)`. The engine invocation never executes planned
 DDL. Declaration modules are ordinary Python and remain responsible for their
-own import-time behaviour. Use the Python API when you intend to apply changes.
+own import-time behaviour.
+
+`apply` runs the same pipeline with `dry_run=False`: it re-reads live state,
+re-plans, and executes the compiled DDL. The same safety rules veto unsafe
+changes — there is no flag to force a rejected plan. Run it with an identity
+that holds the required schema-changing privileges.
 
 `generate` reads one live table and prints an importable declaration module —
 the adoption on-ramp for bringing an existing table under management without
@@ -93,6 +100,27 @@ not need to be installed first. Declaration imports execute arbitrary Python;
 run plans only for code you trust. A missing target module or attribute is a
 short configuration error. Exceptions raised by the selected module, including
 a missing dependency imported by that module, retain their original traceback.
+
+## delta-engine apply
+
+```text
+delta-engine apply MODULE:ATTRIBUTE
+```
+
+`apply` takes the same single declaration reference as `plan` and resolves its
+connection the same way. The run differs only after planning: compiled
+statements execute against the catalog in dependency order, each table
+independently, halting a table at its first failed statement while unrelated
+tables continue.
+
+Output matches `plan` with two differences: the report carries no dry-run
+banner and summarises real outcomes (`applied`, `partially applied`,
+`not applied`), and the SQL section is headed `EXECUTED SQL`. A table blocked
+by a failed dependency still shows its compiled SQL; the report explains why
+those statements did not run.
+
+Safety rules are enforced exactly as in `plan`: a rejected table reports
+`PLANNING_FAILED` and executes nothing. There is no force flag.
 
 ## Generating a declaration from a live table
 
@@ -187,16 +215,17 @@ a configuration error.
 
 ## Output
 
-Every completed plan writes these text sections to stdout in order:
+Every completed run writes these text sections to stdout in order:
 
 1. `TARGET`: normalized host, warehouse ID, and declaration reference
 2. `DIFF`: semantic changes for each table
 3. `SYNC REPORT`: statuses, failures, and summary
-4. `PLANNED SQL`: exact statements, when the plan compiled any
+4. `PLANNED SQL`: exact statements, when the plan compiled any (headed
+   `EXECUTED SQL` on an apply run)
 
-The sync report labels this boundary `PLAN — no planned SQL executed`. Catalog
-reads still occur and may start the warehouse; only the generated statements
-are guaranteed not to execute.
+On a dry run the sync report labels this boundary `PLAN — no planned SQL
+executed`. Catalog reads still occur and may start the warehouse; only the
+generated statements are guaranteed not to execute.
 
 Credentials are never intentionally rendered. Planned SQL is shown by default;
 there is no SQL display flag or JSON mode.
@@ -212,11 +241,11 @@ explains why those statements were not eligible to run.
 
 ## Exit codes
 
-| Code | Meaning                                                                      |
-| ---- | ---------------------------------------------------------------------------- |
-| 0    | The plan completed successfully, whether in sync or carrying pending changes |
-| 1    | Configuration, catalog read, planning, or generation failed                  |
-| 2    | Typer/Click rejected malformed command-line usage                            |
+| Code | Meaning                                                                                                          |
+| ---- | ---------------------------------------------------------------------------------------------------------------- |
+| 0    | The run completed with no failures: a plan in sync or carrying pending changes, or an apply that executed fully |
+| 1    | Configuration, catalog read, planning, execution, or generation failed                                           |
+| 2    | Typer/Click rejected malformed command-line usage                                                                |
 
 Unexpected declaration-code and engine defects propagate with tracebacks and
 exit non-zero. The connection is still closed; a cleanup failure is logged and

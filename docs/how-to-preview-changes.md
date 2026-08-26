@@ -91,3 +91,5 @@ natural deployment shape is: dry-run in CI to review the plan, then run the same
 `sync` call without `dry_run` to apply it. The real run re-reads and re-plans
 live state, so its actions can differ if drift appeared after the preview. It
 can also report execution failures that no dry run can discover.
+The CLI mirrors this shape: `delta-engine plan` in CI, then `delta-engine
+apply` with the same declaration reference from a write-capable job.

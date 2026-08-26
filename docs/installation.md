@@ -98,16 +98,17 @@ engine uses it for both catalog reads and DDL execution.
 
 ## Installing the CLI
 
-The `cli` extra adds the read-only `delta-engine plan` command on top of the
-SQL warehouse backend:
+The `cli` extra adds the `delta-engine` command — read-only `plan` and
+`generate`, plus the executing `apply` — on top of the SQL warehouse backend:
 
 ```bash
 pip install "delta-engine[cli]"
 ```
 
-The command builds a plan for one explicit declaration collection against the
+`plan` builds a plan for one explicit declaration collection against the
 live catalog, prints its semantic diff, report, and planned SQL, and never
-executes the planned SQL. The CLI extra contains only Typer, `databricks-sdk`, and
+executes the planned SQL; `apply` runs the same pipeline and executes it.
+The CLI extra contains only Typer, `databricks-sdk`, and
 `databricks-sql-connector`; the base package remains dependency-free.
 
 Configure `DATABRICKS_SQL_WAREHOUSE_ID`, then configure the Databricks SDK's
