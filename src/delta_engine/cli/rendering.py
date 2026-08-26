@@ -1,24 +1,24 @@
-"""CLI-private rendering for one complete schema plan."""
+"""CLI-private rendering for one complete sync run."""
 
 from delta_engine.application import SyncReport, render_diff, render_report
 from delta_engine.cli.connection import Target
 from delta_engine.cli.declarations import DeclarationRef
 
 
-def render_plan(
+def render_sync(
     target: Target,
     declaration: DeclarationRef,
     report: SyncReport,
 ) -> str:
-    """Render identity, semantic diff, report, and any planned SQL in order."""
+    """Render identity, semantic diff, report, and any compiled SQL in order."""
     sections = [
         _render_identity(target, declaration),
         render_diff(report),
         render_report(report),
     ]
-    planned_sql = _render_planned_sql(report)
-    if planned_sql:
-        sections.append(planned_sql)
+    sql = _render_sql(report)
+    if sql:
+        sections.append(sql)
     return "\n\n".join(sections)
 
 
@@ -34,13 +34,14 @@ def _render_identity(target: Target, declaration: DeclarationRef) -> str:
     )
 
 
-def _render_planned_sql(report: SyncReport) -> str:
-    """Render exact planned statements without exposing a library API."""
+def _render_sql(report: SyncReport) -> str:
+    """Render exact compiled statements under a heading that states their fate."""
     planned = report.planned_sql_statements
     if not planned:
         return ""
+    heading = "PLANNED SQL" if report.dry_run else "EXECUTED SQL"
     blocks = ["\n".join([f"-- {name}", *statements]) for name, statements in planned.items()]
-    return "\n\n".join([_heading("PLANNED SQL"), *blocks])
+    return "\n\n".join([_heading(heading), *blocks])
 
 
 def _heading(text: str) -> str:

@@ -139,8 +139,9 @@ compiled from the catalog snapshot read by this plan. A `PLANNING_FAILED`,
 in the report. A later write-capable sync re-reads and re-plans live state, so
 the preview is not a replay artifact and cannot predict execution failures.
 
-`delta-engine plan` always calls the engine with `dry_run=True`; there is no
-apply command or flag to turn the generated plan into a write. Declaration
-modules are ordinary Python, which is why the workflow uses trusted code and a
-read-only identity. Applying declarations remains a separate Python API
-workflow with its own explicit connection and permissions.
+`delta-engine plan` always calls the engine with `dry_run=True`; nothing in
+this workflow turns the generated plan into a write. Declaration modules are
+ordinary Python, which is why the workflow uses trusted code and a read-only
+identity. Applying declarations is a separate, deliberate step —
+`delta-engine apply` or the Python API — run with its own write-capable
+identity and permissions, never with the plan principal.

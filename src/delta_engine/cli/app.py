@@ -1,4 +1,4 @@
-"""The read-only ``delta-engine plan`` and ``delta-engine generate`` commands."""
+"""The ``delta-engine`` plan, apply, and generate commands."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
@@ -12,18 +12,18 @@ import typer
 import delta_engine
 from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.application import DuplicateTableDefinitionError, SyncReport
-from delta_engine.application.errors import ReadError
+from delta_engine.application.errors import ReadError, SyncFailedError
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.cli.connection import Target, open_connection
 from delta_engine.cli.declarations import DeclarationRef, load_declarations
 from delta_engine.cli.errors import ConfigError
-from delta_engine.cli.rendering import render_plan
+from delta_engine.cli.rendering import render_sync
 from delta_engine.databricks import build_reader, build_sql_engine
 from delta_engine.domain.model import QualifiedName
 
 app = typer.Typer(
     name="delta-engine",
-    help="Read-only schema plans for Delta Lake tables on Databricks.",
+    help="Declarative schema plans and applies for Delta Lake tables on Databricks.",
     no_args_is_help=True,
     add_completion=False,
     # Plain tracebacks keep local values out of CI logs.
@@ -51,8 +51,8 @@ TableNameArgument = Annotated[
 
 
 @dataclass(frozen=True, slots=True)
-class PlanView:
-    """The safe-to-render identity and report the plan command displays."""
+class SyncView:
+    """The safe-to-render identity and report a sync command displays."""
 
     target: Target
     declaration: DeclarationRef
@@ -81,19 +81,32 @@ def plan(declaration: DeclarationArgument) -> None:
     """Read the live catalog and print a plan; never execute planned DDL."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
-        result = _plan(reference)
-        typer.echo(render_plan(result.target, result.declaration, result.report))
+        result = _sync(reference, dry_run=True)
+        typer.echo(render_sync(result.target, result.declaration, result.report))
         raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
 
 
-def _plan(reference: DeclarationRef) -> PlanView:
-    """Load one collection, authenticate, and run one read-only engine sync."""
+@app.command()
+def apply(declaration: DeclarationArgument) -> None:
+    """Read the live catalog and execute the planned DDL; unsafe plans are rejected."""
+    with _anticipated_errors():
+        reference = DeclarationRef.parse(declaration)
+        result = _sync(reference, dry_run=False)
+        typer.echo(render_sync(result.target, result.declaration, result.report))
+        raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
+
+
+def _sync(reference: DeclarationRef, *, dry_run: bool) -> SyncView:
+    """Load one collection, authenticate, and run one engine sync."""
     with _engine_logging(), redirect_stdout(sys.stderr):
         tables = load_declarations(reference)
         with open_connection() as (target, connection):
             engine = build_sql_engine(connection)
-            report = engine.sync(*tables, dry_run=True)
-    return PlanView(target=target, declaration=reference, report=report)
+            try:
+                report = engine.sync(*tables, dry_run=dry_run)
+            except SyncFailedError as error:
+                report = error.report
+    return SyncView(target=target, declaration=reference, report=report)
 
 
 @app.command()

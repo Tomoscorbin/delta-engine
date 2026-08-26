@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from delta_engine.application.engine import Engine
-from delta_engine.application.errors import ReadError
+from delta_engine.application.errors import ExecutionError, ReadError
 from delta_engine.application.ports import (
     CatalogState,
     CompiledAction,
@@ -69,6 +69,13 @@ class FakeExecutor:
         pass
 
 
+class FailingExecutor(FakeExecutor):
+    """Executor whose every statement fails at the backend."""
+
+    def execute(self, statement: str) -> None:
+        raise ExecutionError("PermissionDenied", "cannot modify table")
+
+
 class _StubConnection:
     def close(self) -> None:
         pass
@@ -95,6 +102,16 @@ def fake_engine(monkeypatch):
     """Route the CLI's engine boundary to fakes; yield the reader to preload states."""
     reader = FakeReader()
     engine = Engine(reader=reader, executor=FakeExecutor())
+    monkeypatch.setattr(cli_app, "open_connection", _open_fake_connection)
+    monkeypatch.setattr(cli_app, "build_sql_engine", lambda connection: engine)
+    return reader
+
+
+@pytest.fixture
+def failing_engine(monkeypatch):
+    """Route the CLI's engine boundary to an engine whose executor always fails."""
+    reader = FakeReader()
+    engine = Engine(reader=reader, executor=FailingExecutor())
     monkeypatch.setattr(cli_app, "open_connection", _open_fake_connection)
     monkeypatch.setattr(cli_app, "build_sql_engine", lambda connection: engine)
     return reader
