@@ -1,4 +1,4 @@
-"""The read-only ``delta-engine plan`` command."""
+"""The read-only ``delta-engine plan`` and ``delta-engine generate`` commands."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
@@ -10,12 +10,16 @@ from typing import Annotated
 import typer
 
 import delta_engine
+from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.application import DuplicateTableDefinitionError, SyncReport
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.cli.connection import Target, open_connection
 from delta_engine.cli.declarations import DeclarationRef, load_declarations
 from delta_engine.cli.errors import ConfigError
 from delta_engine.cli.rendering import render_plan
-from delta_engine.databricks import build_sql_engine
+from delta_engine.databricks import build_reader, build_sql_engine
+from delta_engine.domain.model import QualifiedName
 
 app = typer.Typer(
     name="delta-engine",
@@ -34,6 +38,14 @@ DeclarationArgument = Annotated[
     typer.Argument(
         metavar="MODULE:ATTRIBUTE",
         help="One attribute containing a non-empty ordered sequence of DeltaTable declarations.",
+    ),
+]
+
+TableNameArgument = Annotated[
+    str,
+    typer.Argument(
+        metavar="CATALOG.SCHEMA.TABLE",
+        help="Fully qualified name of one live Unity Catalog table.",
     ),
 ]
 
@@ -84,6 +96,37 @@ def _plan(reference: DeclarationRef) -> PlanView:
     return PlanView(target=target, declaration=reference, report=report)
 
 
+@app.command()
+def generate(table_name: TableNameArgument) -> None:
+    """Read one live table and print an importable DeltaTable declaration."""
+    with _anticipated_errors():
+        qualified_name = _parse_table_name(table_name)
+        module = _generate(qualified_name)
+        for warning in module.warnings:
+            typer.echo(f"warning: {warning}", err=True)
+        typer.echo(module.source, nl=False)
+
+
+def _parse_table_name(text: str) -> QualifiedName:
+    """Parse one fully qualified table name into its domain form."""
+    try:
+        return QualifiedName.parse(text)
+    except ValueError as error:
+        raise ConfigError(str(error)) from None
+
+
+def _generate(qualified_name: QualifiedName) -> GeneratedModule:
+    """Read one table's live state and raise it into a declaration module."""
+    with _engine_logging(), redirect_stdout(sys.stderr):
+        with open_connection() as (_target, connection):
+            state = build_reader(connection).fetch_state(qualified_name)
+    match state:
+        case TablePresent(table=observed):
+            return generate_module(observed)
+        case TableAbsent():
+            raise ConfigError(f"table {qualified_name} does not exist")
+
+
 @contextmanager
 def _engine_logging() -> Iterator[None]:
     """Attach one invocation-scoped stderr handler to the package logger."""
@@ -108,6 +151,6 @@ def _anticipated_errors() -> Iterator[None]:
     """Render expected configuration failures; let code defects propagate."""
     try:
         yield
-    except (ConfigError, DuplicateTableDefinitionError) as error:
+    except (ConfigError, DuplicateTableDefinitionError, GenerationError, ReadError) as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=_EXIT_FAILURE) from None

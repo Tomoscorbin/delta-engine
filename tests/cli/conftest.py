@@ -74,6 +74,17 @@ class _StubConnection:
         pass
 
 
+@contextmanager
+def _open_fake_connection():
+    yield (
+        Target(
+            host="https://test.cloud.databricks.com",
+            warehouse_id="test-warehouse",
+        ),
+        _StubConnection(),
+    )
+
+
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
@@ -84,19 +95,17 @@ def fake_engine(monkeypatch):
     """Route the CLI's engine boundary to fakes; yield the reader to preload states."""
     reader = FakeReader()
     engine = Engine(reader=reader, executor=FakeExecutor())
-
-    @contextmanager
-    def fake_connection():
-        yield (
-            Target(
-                host="https://test.cloud.databricks.com",
-                warehouse_id="test-warehouse",
-            ),
-            _StubConnection(),
-        )
-
-    monkeypatch.setattr(cli_app, "open_connection", fake_connection)
+    monkeypatch.setattr(cli_app, "open_connection", _open_fake_connection)
     monkeypatch.setattr(cli_app, "build_sql_engine", lambda connection: engine)
+    return reader
+
+
+@pytest.fixture
+def fake_reader(monkeypatch):
+    """Route the CLI's reader boundary to a fake; yield it to preload states."""
+    reader = FakeReader()
+    monkeypatch.setattr(cli_app, "open_connection", _open_fake_connection)
+    monkeypatch.setattr(cli_app, "build_reader", lambda connection: reader)
     return reader
 
 

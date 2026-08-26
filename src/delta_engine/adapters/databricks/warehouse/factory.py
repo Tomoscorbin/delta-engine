@@ -13,6 +13,17 @@ if TYPE_CHECKING:
     from databricks.sql.client import Connection
 
 
+def build_reader(connection: Connection) -> WarehouseReader:
+    """
+    Create a catalog state reader for a Databricks SQL warehouse.
+
+    The caller opens and owns the connection, exactly as for
+    :func:`build_engine`. The reader is read-only: it can fetch one table's
+    observed state but executes no DDL.
+    """
+    return WarehouseReader(WarehouseSqlRunner(connection))
+
+
 def build_engine(connection: Connection) -> Engine:
     """
     Create an engine configured for a Databricks SQL warehouse.

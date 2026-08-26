@@ -112,6 +112,7 @@ def test_databricks_import_path_exposes_backend_entry_points():
 
     # Then it exposes exactly the supported backend entry points
     assert exports == {
+        "build_reader",
         "build_spark_engine",
         "build_sql_engine",
         "configure_logging",
@@ -156,6 +157,24 @@ def test_build_sql_engine_does_not_require_the_connector_or_pyspark():
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     # Then the whole warehouse backend imports and wires without either dependency
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_build_reader_does_not_require_the_connector_or_pyspark():
+    # Given an interpreter where neither pyspark nor databricks-sql can be imported
+    program = (
+        "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
+        "from delta_engine.databricks import build_reader\n"
+        "class DummyConnection: pass\n"
+        "build_reader(DummyConnection())\n"
+        "print('ok')\n"
+    )
+
+    # When building a catalog reader around a duck-typed connection
+    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
+
+    # Then the reader wires without either dependency
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
 

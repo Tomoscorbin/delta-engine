@@ -13,14 +13,20 @@ import logging
 from typing import TYPE_CHECKING, TextIO
 
 from delta_engine.application.engine import Engine
-from delta_engine.application.ports import DesiredTableSource
+from delta_engine.application.ports import CatalogStateReader, DesiredTableSource
 
 if TYPE_CHECKING:
     from databricks.sql.client import Connection
     from pyspark.sql import SparkSession
     from pyspark.sql.types import StructType
 
-__all__ = ["build_spark_engine", "build_sql_engine", "configure_logging", "to_spark_schema"]
+__all__ = [
+    "build_reader",
+    "build_spark_engine",
+    "build_sql_engine",
+    "configure_logging",
+    "to_spark_schema",
+]
 
 _SPARK_RUNTIME_HINT = (
     "delta-engine's Spark backend requires the PySpark supplied by a supported Databricks Runtime."
@@ -77,6 +83,19 @@ def build_sql_engine(connection: Connection) -> Engine:
     from delta_engine.adapters.databricks.warehouse.factory import build_engine as _build_engine
 
     return _build_engine(connection)
+
+
+def build_reader(connection: Connection) -> CatalogStateReader:
+    """
+    Create a read-only catalog state reader for a Databricks SQL warehouse.
+
+    The caller opens and owns the connection, exactly as for
+    ``build_sql_engine``. The reader fetches one table's observed state and
+    executes no DDL.
+    """
+    from delta_engine.adapters.databricks.warehouse.factory import build_reader as _build_reader
+
+    return _build_reader(connection)
 
 
 def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:
