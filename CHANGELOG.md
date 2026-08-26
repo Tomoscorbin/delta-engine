@@ -1,3 +1,10 @@
+## v0.10.0 (2026-08-26)
+
+### Feat
+
+- add delta-engine apply command (#364)
+- defer absent tables a narrow scope cannot create (#363)
+
 ## v0.9.0 (2026-08-26)
 
 ### Feat
