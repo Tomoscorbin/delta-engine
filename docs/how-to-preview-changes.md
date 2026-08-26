@@ -52,7 +52,7 @@ PLAN — no planned SQL executed
 TABLE                 STATUS   STATEMENTS  DETAIL
 dev.silver.customers  SUCCESS  1           2 columns
 
-1 table: 1 changed, 0 unchanged, 0 failed (0.0s)
+1 table: 1 changed, 0 unchanged, 0 deferred, 0 failed (0.0s)
 ```
 
 Elapsed time varies. `sync` returns the report object and neither renderer is

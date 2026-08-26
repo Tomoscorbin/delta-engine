@@ -904,7 +904,7 @@ def test_diff_block_of_a_blocked_deferred_table_points_to_failures():
 # ---------- run summary footer ----------
 
 
-def test_run_summary_footer_counts_changed_unchanged_and_failed():
+def test_run_summary_footer_counts_every_planned_outcome_even_at_zero():
     # Given a run over one changed, one unchanged, and one failed table
     changed = _grid_report(
         "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
@@ -922,7 +922,7 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
     footer = run_summary_footer(sync)
 
     # Then each table is classified by its outcome
-    assert footer == "3 tables: 1 changed, 1 unchanged, 1 failed (3.0s)"
+    assert footer == "3 tables: 1 changed, 1 unchanged, 0 deferred, 1 failed (3.0s)"
 
 
 def test_real_run_footer_counts_each_catalog_change_outcome():
@@ -968,7 +968,7 @@ def test_real_run_footer_counts_each_catalog_change_outcome():
     )
 
 
-def test_planned_footer_counts_deferred_tables_only_when_present():
+def test_planned_footer_places_deferred_between_unchanged_and_failed():
     # Given a dry run over one changed, one unchanged, one deferred, and one failed table
     changed = _grid_report(
         "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
@@ -1055,7 +1055,7 @@ def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     assert lines[0] == "SYNC REPORT"
     grid_header = next(line for line in lines if line.startswith("TABLE"))
     assert grid_header.split() == ["TABLE", "STATUS", "STATEMENTS", "DETAIL"]
-    assert rendered.endswith("2 tables: 1 changed, 0 unchanged, 1 failed (3.0s)")
+    assert rendered.endswith("2 tables: 1 changed, 0 unchanged, 0 deferred, 1 failed (3.0s)")
 
 
 def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():

@@ -252,7 +252,9 @@ class TableRun:
             raise ValueError("A successful planning outcome requires compilation")
         if self.compiled is not None and self.compiled.plan != plan:
             raise ValueError("Compiled plan must match the successful planning outcome")
-        if self.execution is not None and (read_failed or planning_failed or resolution_failed):
+        if self.execution is not None and plan is None:
+            raise ValueError("Execution requires a successful planning outcome")
+        if self.execution is not None and resolution_failed:
             raise ValueError("Execution cannot follow a failed earlier phase")
         if self.execution is not None and self.execution.compiled_plan != self.compiled:
             raise ValueError("Execution must refer to the reported compiled plan")
@@ -377,7 +379,7 @@ class TableRun:
 
 def _table_change_state(run: TableRun, *, dry_run: bool) -> TableChangeState:
     """Derive what happened to a table's intended catalog change."""
-    if isinstance(run.planning, PlanningDeferred) and not run.has_failures:
+    if run.status is TableRunStatus.DEFERRED:
         return TableChangeState.DEFERRED
     plan = run.plan
     if plan is None:
@@ -495,7 +497,7 @@ class SyncReport:
         for run in self.table_runs:
             if run.has_failures:
                 failed += 1
-            elif isinstance(run.planning, PlanningDeferred):
+            elif run.status is TableRunStatus.DEFERRED:
                 deferred += 1
             elif run.has_changes:
                 changed += 1

@@ -60,10 +60,11 @@ class PlanningDeferred:
 
     Not a failure: a declaration whose scope does not manage table existence
     reconciles a portion of a table that must already exist, so the table's
-    absence leaves it nothing to do — yet. The creation diff is retained so a
-    report can still show what was declared absent. No action plan exists for
-    this result variant; the sync converges vacuously and picks the table up
-    once something else has created it.
+    absence leaves it nothing to do — yet. The creation diff completes the
+    ``diff`` field every planning result carries, letting the report hold all
+    variants to the same invariants; nothing renders it. No action plan exists
+    for this result variant; the sync converges vacuously and picks the table
+    up once something else has created it.
     """
 
     diff: TableCreation

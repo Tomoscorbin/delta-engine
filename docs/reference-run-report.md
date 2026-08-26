@@ -87,7 +87,8 @@ The human-readable views use these states on real runs. `report.render_diff()`
 marks non-empty plans that were not applied or only partially applied, while
 the `report.render()` footer counts catalog outcomes. A compiled plan blocked
 before execution shows statement progress as `0/n`. Dry-run diff blocks and
-their changed/unchanged/failed footer keep describing planned work instead.
+their changed/unchanged/deferred/failed footer keep describing planned work
+instead.
 
 This Python-level derived view does not add fields to `SyncReport.to_dict()` or
 `TableRun.to_dict()`; the structured schema below remains version 2.

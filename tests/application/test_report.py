@@ -794,6 +794,22 @@ def test_a_deferred_run_rejects_compilation():
         )
 
 
+def test_a_deferred_run_rejects_execution():
+    # Given a deferred planning outcome, no plan was accepted to execute
+    desired = _a_desired_table("orders")
+    plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
+    compiled = build_compiled_plan(plan, ("SQL",))
+
+    # Then the run refuses an execution outcome
+    with pytest.raises(ValueError, match="Execution requires a successful planning outcome"):
+        TableRun(
+            resolution=TableResolution(desired=desired, dependencies=(), structural_failures=()),
+            read=TableAbsent(),
+            planning=PlanningDeferred(diff=TableCreation(desired)),
+            execution=ExecutionResult(compiled_plan=compiled, applied_count=1),
+        )
+
+
 def test_failures_dominate_deferral():
     # Given a deferred table whose declaration also failed resolution
     desired = _a_desired_table("orders")

@@ -22,8 +22,12 @@ from delta_engine.application.diff_entries import (
     plan_entries,
 )
 from delta_engine.application.failures import ReadFailure
-from delta_engine.application.planning import PlanningDeferred
-from delta_engine.application.report import SyncReport, TableChangeState, TableRun
+from delta_engine.application.report import (
+    SyncReport,
+    TableChangeState,
+    TableRun,
+    TableRunStatus,
+)
 from delta_engine.domain.plan import ActionPlan, TableDrift
 
 # Shown wherever a report has a readable state but no planned actions. One
@@ -98,7 +102,7 @@ def _render_diff_block(report: TableRun, *, change_state: TableChangeState | Non
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailure):
         return f"{header}\n  (could not read — no diff)"
-    if isinstance(report.planning, PlanningDeferred) and not report.has_failures:
+    if report.status is TableRunStatus.DEFERRED:
         return f"{header}\n  ({_TABLE_ABSENT})"
 
     plan = report.plan
@@ -136,7 +140,7 @@ def _grid_statements_cell(report: TableRun, change_state: TableChangeState | Non
     progress = report.statement_progress
     if progress is not None:
         return f"{progress.applied}/{progress.planned}"
-    if isinstance(report.planning, PlanningDeferred):
+    if report.status is TableRunStatus.DEFERRED:
         return "—"
     planned = len(report.compiled.statements) if report.compiled is not None else 0
     if report.has_failures:
@@ -160,7 +164,7 @@ def _grid_detail(report: TableRun) -> str:
         first = failures[0].headline()
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
-    if isinstance(report.planning, PlanningDeferred):
+    if report.status is TableRunStatus.DEFERRED:
         return _TABLE_ABSENT
     return _humanized_action_summary(report.plan)
 
@@ -218,11 +222,10 @@ def run_summary_footer(report: SyncReport) -> str:
 def _planned_summary(report: SyncReport) -> str:
     """Count changed, unchanged, deferred, and failed tables without claiming an outcome."""
     counts = report.counts
-    parts = [f"{counts.changed} changed", f"{counts.unchanged} unchanged"]
-    if counts.deferred:
-        parts.append(f"{counts.deferred} deferred")
-    parts.append(f"{counts.failed} failed")
-    return ", ".join(parts)
+    return (
+        f"{counts.changed} changed, {counts.unchanged} unchanged, "
+        f"{counts.deferred} deferred, {counts.failed} failed"
+    )
 
 
 def _real_run_summary(report: SyncReport) -> str:
