@@ -719,7 +719,11 @@ class DeltaTable:
                 ``"tags"``, and no wider scope: their definition — schema,
                 properties, and keys — belongs to the owning pipeline, so a
                 declaration managing more than comments and tags fails
-                validation. A restricted scope still declares the full table
+                validation. Under any scope narrower than ``"full"``, a table
+                that does not exist yet is deferred with a warning rather than
+                failed: the declaration cannot create it, so the sync reports
+                the table as deferred and applies the declared metadata once
+                something else has created it. A restricted scope still declares the full table
                 shape; aspects outside the scope are never changed, and drift
                 on them fails validation. A key the pipeline declared must
                 therefore be mirrored in ``primary_key`` — it is never

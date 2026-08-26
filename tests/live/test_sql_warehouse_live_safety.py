@@ -287,7 +287,7 @@ def test_restricted_scope_drift_is_rejected_without_catalog_change(live_connecti
 
 
 def test_restricted_scope_does_not_create_missing_table(live_connection, live_tables):
-    """A restricted-scope declaration refuses to create a missing table."""
+    """A restricted-scope declaration defers a missing table instead of creating it."""
     table_name = live_tables("missing_scope")
     declaration = DeltaTable(
         live_catalog(),
@@ -298,9 +298,11 @@ def test_restricted_scope_does_not_create_missing_table(live_connection, live_ta
         scope="tags",
     )
 
-    with pytest.raises(SyncFailedError):
-        build_sql_engine(live_connection).sync(declaration)
+    report = build_sql_engine(live_connection).sync(declaration)
 
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.DEFERRED
+    assert table_report.has_failures is False
     assert table_exists(live_connection, table_name) is False
 
 

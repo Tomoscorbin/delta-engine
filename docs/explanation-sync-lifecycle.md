@@ -26,7 +26,7 @@ lower → resolve → read → diff → plan → compile → execute → report
 | **Resolve** | Can each declared foreign key work, and which tables go first? | Tables ordered dependency-first, with structural FK verdicts and their dependency edges |
 | **Read**    | What does the table look like right now?     | Present (with its observed state), absent, or a read failure       |
 | **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — foreign-key existence included — or no drift |
-| **Plan**    | Is the complete diff accepted?               | A validated action plan, or named validation failures with no plan |
+| **Plan**    | Is the complete diff accepted?               | A validated action plan, named validation failures with no plan, or a deferral when the table is absent and the declaration cannot create it |
 | **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
 | **Execute** | Apply the compiled statements                | Attempted results — or nothing, for tables skipped as no-ops, blocked, or on a dry run |
 
@@ -47,9 +47,14 @@ The diff phase produces rich, backend-neutral actions directly — for example,
 `DropColumn` carries the complete observed column — but never judges whether
 executing one is a good idea. Ambiguous or unsupported states remain domain
 differences rather than being labelled as blockers; the application default
-policy decides to reject them. The planning boundary always validates that
-complete diff and returns either an accepted `ActionPlan` or failures; a
-rejected result has no plan. An accepted plan carries the qualified table
+policy decides to reject them. The planning boundary judges that complete
+diff and returns one of three results: an accepted `ActionPlan`, validation
+failures with no plan, or a deferral. A table that does not exist and whose
+declaration cannot create it (any
+[scope](explanation-safety-model.md#managed-aspects-what-a-declaration-is-responsible-for)
+narrower than `full`) is deferred before validation runs — the engine logs a
+warning and the table reports `DEFERRED`, neither changed nor failed, until
+something else creates it. An accepted plan carries the qualified table
 target and relation kind needed for compilation as well as its ordered actions.
 
 This separation is why rejections are precise: a failed sync names the exact

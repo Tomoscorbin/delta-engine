@@ -1,3 +1,5 @@
+import logging
+
 from hypothesis import given, strategies as st
 import pytest
 
@@ -1556,7 +1558,7 @@ def test_metadata_scoped_sync_applies_metadata_when_schema_matches():
     assert executor.executed_names == [fqn]
 
 
-def test_metadata_scoped_sync_fails_when_table_is_missing():
+def test_metadata_scoped_sync_defers_when_table_is_missing():
     # Given a metadata-only declaration for a missing table
     fqn = "cat.sch.orders"
     reader = _RecordingReader({fqn: TableAbsent()})
@@ -1564,15 +1566,60 @@ def test_metadata_scoped_sync_fails_when_table_is_missing():
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
-    with pytest.raises(SyncFailedError) as exc_info:
-        engine.sync(_metadata_scoped_spec(fqn))
+    report = engine.sync(_metadata_scoped_spec(fqn))
 
-    # Then validation fails and nothing executes
-    [table_report] = list(exc_info.value.report)
-    assert table_report.status is TableRunStatus.PLANNING_FAILED
+    # Then the run succeeds with the table deferred, and nothing executes
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.DEFERRED
+    assert table_report.has_failures is False
     assert table_report.execution is None
     assert executor.executed_names == []
-    assert any(failure.rule_name == "MissingTableUnmanaged" for failure in table_report.failures)
+
+
+def test_fk_dependent_of_a_deferred_table_proceeds_to_execution():
+    # Given a metadata-scoped declaration for missing table a, and b declaring an FK to a
+    catalog, schema, table_name = _split_fqn("cat.sch.a")
+    deferred_spec = DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("id", String(), nullable=False),),
+        primary_key=["id"],
+        scope="metadata",
+    )
+    reader = _RecordingReader(
+        {
+            "cat.sch.a": TableAbsent(),
+            "cat.sch.b": TableAbsent(),
+        }
+    )
+    executor = _RecordingExecutor([None])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    report = engine.sync(deferred_spec, _spec_with_fk("cat.sch.b", "cat.sch.a"))
+
+    # Then a is deferred and b is not blocked — it proceeds to execution
+    table_a = _assert_status(report, "cat.sch.a", TableRunStatus.DEFERRED)
+    table_b = _assert_status(report, "cat.sch.b", TableRunStatus.SUCCESS)
+    assert table_a.execution is None
+    assert table_b.blocked_failures == ()
+    assert executor.executed_names == ["cat.sch.b"]
+
+
+def test_metadata_scoped_sync_warns_when_table_is_missing(caplog):
+    # Given a metadata-only declaration for a missing table
+    fqn = "cat.sch.orders"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_table_errors=[]))
+
+    # When syncing
+    with caplog.at_level(logging.WARNING, logger="delta_engine.application.engine"):
+        engine.sync(_metadata_scoped_spec(fqn))
+
+    # Then the absence is warned about, naming the table
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert any(fqn in record.getMessage() for record in warnings)
 
 
 def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():

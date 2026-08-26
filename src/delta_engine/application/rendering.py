@@ -22,13 +22,22 @@ from delta_engine.application.diff_entries import (
     plan_entries,
 )
 from delta_engine.application.failures import ReadFailure
-from delta_engine.application.report import SyncReport, TableChangeState, TableRun
+from delta_engine.application.report import (
+    SyncReport,
+    TableChangeState,
+    TableRun,
+    TableRunStatus,
+)
 from delta_engine.domain.plan import ActionPlan, TableDrift
 
 # Shown wherever a report has a readable state but no planned actions. One
 # spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
 # a standalone line in the diff block.
 _NO_CHANGES: Final[str] = "no changes"
+
+# Shown for a deferred table — absent, and not this declaration's to create.
+# Same two presentations as _NO_CHANGES.
+_TABLE_ABSENT: Final[str] = "table absent — skipped"
 
 _DETAIL_MAX_CHARS: Final[int] = 60
 
@@ -39,6 +48,7 @@ _REAL_RUN_OUTCOME_ORDER: Final[tuple[TableChangeState, ...]] = (
     TableChangeState.PARTIALLY_APPLIED,
     TableChangeState.NOT_APPLIED,
     TableChangeState.UNCHANGED,
+    TableChangeState.DEFERRED,
     TableChangeState.NOT_PLANNED,
 )
 
@@ -92,6 +102,8 @@ def _render_diff_block(report: TableRun, *, change_state: TableChangeState | Non
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailure):
         return f"{header}\n  (could not read — no diff)"
+    if report.status is TableRunStatus.DEFERRED:
+        return f"{header}\n  ({_TABLE_ABSENT})"
 
     plan = report.plan
     if plan is None:
@@ -128,6 +140,8 @@ def _grid_statements_cell(report: TableRun, change_state: TableChangeState | Non
     progress = report.statement_progress
     if progress is not None:
         return f"{progress.applied}/{progress.planned}"
+    if report.status is TableRunStatus.DEFERRED:
+        return "—"
     planned = len(report.compiled.statements) if report.compiled is not None else 0
     if report.has_failures:
         return f"0/{planned}" if change_state is TableChangeState.NOT_APPLIED and planned else "—"
@@ -144,12 +158,14 @@ def _humanized_action_summary(plan: ActionPlan | None) -> str:
 
 
 def _grid_detail(report: TableRun) -> str:
-    """Return the DETAIL cell: first failure headline, or a per-category change count."""
+    """Return the DETAIL cell: first failure headline, the deferral, or change counts."""
     if report.has_failures:
         failures = report.failures
         first = failures[0].headline()
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
+    if report.status is TableRunStatus.DEFERRED:
+        return _TABLE_ABSENT
     return _humanized_action_summary(report.plan)
 
 
@@ -204,9 +220,12 @@ def run_summary_footer(report: SyncReport) -> str:
 
 
 def _planned_summary(report: SyncReport) -> str:
-    """Count changed, unchanged, and failed tables without claiming an outcome."""
+    """Count changed, unchanged, deferred, and failed tables without claiming an outcome."""
     counts = report.counts
-    return f"{counts.changed} changed, {counts.unchanged} unchanged, {counts.failed} failed"
+    return (
+        f"{counts.changed} changed, {counts.unchanged} unchanged, "
+        f"{counts.deferred} deferred, {counts.failed} failed"
+    )
 
 
 def _real_run_summary(report: SyncReport) -> str:

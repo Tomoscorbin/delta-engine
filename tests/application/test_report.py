@@ -13,7 +13,11 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningAccepted, PlanningRejected
+from delta_engine.application.planning import (
+    PlanningAccepted,
+    PlanningDeferred,
+    PlanningRejected,
+)
 from delta_engine.application.ports import (
     ExecutionResult,
     ReadResult,
@@ -22,6 +26,7 @@ from delta_engine.application.ports import (
 )
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
+    RunCounts,
     SyncReport,
     TableChangeState,
     TableRun,
@@ -366,7 +371,7 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(failed,))
 
     # Then it counts as failed, not changed: the change was planned, not applied
-    assert report.counts == (0, 0, 1)
+    assert report.counts == RunCounts(changed=0, unchanged=0, failed=1)
 
 
 def test_sync_report_reports_its_own_duration():
@@ -751,6 +756,109 @@ def test_change_state_is_unchanged_for_an_empty_plan_even_when_the_run_failed():
     # Then failure status and catalog change state remain independent
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert sync.table_change_states == (TableChangeState.UNCHANGED,)
+
+
+# ---------- deferred planning
+
+
+def _a_deferred_run(name: str = "orders") -> TableRun:
+    """Build the run of an absent table whose declaration cannot create it."""
+    desired = _a_desired_table(name)
+    return TableRun(
+        resolution=TableResolution(desired=desired, dependencies=(), structural_failures=()),
+        read=TableAbsent(),
+        planning=PlanningDeferred(diff=TableCreation(desired)),
+    )
+
+
+def test_a_deferred_table_reports_deferred_without_failures_or_changes():
+    run = _a_deferred_run()
+
+    assert run.status is TableRunStatus.DEFERRED
+    assert run.has_failures is False
+    assert run.has_changes is False
+
+
+def test_a_deferred_run_rejects_compilation():
+    # Given a deferred planning outcome, there is no accepted plan to compile
+    desired = _a_desired_table("orders")
+    stray_plan = ActionPlan(target=desired.qualified_name)
+
+    # Then the run refuses compiled statements
+    with pytest.raises(ValueError):
+        TableRun(
+            resolution=TableResolution(desired=desired, dependencies=(), structural_failures=()),
+            read=TableAbsent(),
+            planning=PlanningDeferred(diff=TableCreation(desired)),
+            compiled=build_compiled_plan(stray_plan, ()),
+        )
+
+
+def test_a_deferred_run_rejects_execution():
+    # Given a deferred planning outcome, no plan was accepted to execute
+    desired = _a_desired_table("orders")
+    plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
+    compiled = build_compiled_plan(plan, ("SQL",))
+
+    # Then the run refuses an execution outcome
+    with pytest.raises(ValueError, match="Execution requires a successful planning outcome"):
+        TableRun(
+            resolution=TableResolution(desired=desired, dependencies=(), structural_failures=()),
+            read=TableAbsent(),
+            planning=PlanningDeferred(diff=TableCreation(desired)),
+            execution=ExecutionResult(compiled_plan=compiled, applied_count=1),
+        )
+
+
+def test_failures_dominate_deferral():
+    # Given a deferred table whose declaration also failed resolution
+    desired = _a_desired_table("orders")
+    run = TableRun(
+        resolution=TableResolution(
+            desired=desired,
+            dependencies=(),
+            structural_failures=(
+                ForeignKeyFailure(
+                    table=desired.qualified_name,
+                    local_columns=("customer_id",),
+                    references=_name("customers"),
+                    reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+                ),
+            ),
+        ),
+        read=TableAbsent(),
+        planning=PlanningDeferred(diff=TableCreation(desired)),
+    )
+
+    # When deriving the run's outcomes
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(run,))
+
+    # Then the failure leads and the change state does not claim deferral
+    assert run.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert sync.table_change_states == (TableChangeState.NOT_PLANNED,)
+    assert sync.counts == RunCounts(changed=0, unchanged=0, failed=1, deferred=0)
+
+
+def test_change_state_is_deferred_for_an_absent_table_the_scope_cannot_create():
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(_a_deferred_run(),))
+
+    assert sync.table_change_states == (TableChangeState.DEFERRED,)
+
+
+def test_counts_place_a_deferred_table_in_its_own_bucket():
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(_a_deferred_run(),))
+
+    assert sync.counts == RunCounts(changed=0, unchanged=0, failed=0, deferred=1)
+    assert sync.counts.total == 1
+
+
+def test_a_deferred_table_to_dict_reports_deferred_status():
+    payload = _a_deferred_run().to_dict()
+
+    assert payload["status"] == "DEFERRED"
+    assert payload["has_changes"] is False
+    assert payload["has_failures"] is False
+    assert payload["changes"] == []
 
 
 def test_change_state_is_planned_for_a_dry_run_with_changes():

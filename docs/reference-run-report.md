@@ -41,6 +41,12 @@ The per-type failure fields (2026-08-05) were likewise added without a bump:
 every failure record still carries `phase`, `type`, and `message` with
 unchanged meaning, and the additional keys sit beside them.
 
+The `DEFERRED` status value (2026-08-26) was added without a bump: a table
+whose declaration cannot create it (any scope narrower than `full`) now
+reports `DEFERRED` instead of `PLANNING_FAILED` when the table does not
+exist. Every previously possible payload is unchanged; readers that switch on
+`status` see the new value only in runs that previously failed.
+
 ## Consistency
 
 `SyncReport` rejects combinations that a completed engine run cannot produce.
@@ -64,6 +70,7 @@ the run's `dry_run` mode, not on the table report alone.
 | Member              | Value               | Meaning                                                        |
 | ------------------- | ------------------- | -------------------------------------------------------------- |
 | `NOT_PLANNED`       | `not planned`       | Reading or planning failed before a plan was accepted          |
+| `DEFERRED`          | `deferred`          | The table does not exist and the declaration cannot create it — skipped with a warning until something else creates it |
 | `UNCHANGED`         | `unchanged`         | The accepted plan contained no catalog changes                 |
 | `PLANNED`           | `planned`           | A dry run compiled a non-empty plan without executing it       |
 | `NOT_APPLIED`       | `not applied`       | A real-run change was blocked, or its first statement failed   |
@@ -80,7 +87,8 @@ The human-readable views use these states on real runs. `report.render_diff()`
 marks non-empty plans that were not applied or only partially applied, while
 the `report.render()` footer counts catalog outcomes. A compiled plan blocked
 before execution shows statement progress as `0/n`. Dry-run diff blocks and
-their changed/unchanged/failed footer keep describing planned work instead.
+their changed/unchanged/deferred/failed footer keep describing planned work
+instead.
 
 This Python-level derived view does not add fields to `SyncReport.to_dict()` or
 `TableRun.to_dict()`; the structured schema below remains version 2.
@@ -106,7 +114,7 @@ Each entry in `tables`, and the whole of `TableRun.to_dict()`:
 | Field                    | Type             | Meaning                                                      |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |
 | `name`                   | `str`            | Dotted, unquoted qualified name, e.g. `cat.schema.orders`    |
-| `status`                 | `str`            | A `TableRunStatus` value (`SUCCESS`, `PLANNING_FAILED`, …)  |
+| `status`                 | `str`            | A `TableRunStatus` value (`SUCCESS`, `DEFERRED`, `PLANNING_FAILED`, …)  |
 | `has_changes`            | `bool`           | True if this table has a planned change                      |
 | `has_failures`           | `bool`           | True if this table failed a phase                            |
 | `changes`                | `list[dict]`     | Summaries of the planned changes, in plan order (see below)  |

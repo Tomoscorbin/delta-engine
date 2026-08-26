@@ -62,6 +62,7 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import (
     PlanningAccepted,
+    PlanningDeferred,
     PlanningRejected,
     plan_changes,
 )
@@ -227,6 +228,14 @@ class Engine:
         planning = plan_changes(resolution.desired, observed)
 
         match planning:
+            case PlanningDeferred():
+                logger.warning(
+                    "Table %s does not exist and this declaration (scope=%s) cannot"
+                    " create it; skipping until something else creates it",
+                    resolution.qualified_name,
+                    resolution.desired.scope.name.lower(),
+                )
+                return TableRun(resolution=resolution, read=read, planning=planning)
             case PlanningRejected():
                 logger.error("Planning failed for %s", resolution.qualified_name)
                 return TableRun(resolution=resolution, read=read, planning=planning)

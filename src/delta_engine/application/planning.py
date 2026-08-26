@@ -6,7 +6,7 @@ from typing import assert_never
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.collection_types import ListOrTuple
-from delta_engine.domain.model import DesiredTable, ObservedTable
+from delta_engine.domain.model import DesiredTable, ObservedTable, TableAspect
 from delta_engine.domain.plan import (
     ActionPlan,
     TableCreation,
@@ -53,7 +53,24 @@ class PlanningRejected:
         object.__setattr__(self, "failures", tuple(self.failures))
 
 
-type PlanningResult = PlanningAccepted | PlanningRejected
+@dataclass(frozen=True, slots=True)
+class PlanningDeferred:
+    """
+    The table does not exist and this declaration cannot create it.
+
+    Not a failure: a declaration whose scope does not manage table existence
+    reconciles a portion of a table that must already exist, so the table's
+    absence leaves it nothing to do — yet. The creation diff completes the
+    ``diff`` field every planning result carries, letting the report hold all
+    variants to the same invariants; nothing renders it. No action plan exists
+    for this result variant; the sync converges vacuously and picks the table
+    up once something else has created it.
+    """
+
+    diff: TableCreation
+
+
+type PlanningResult = PlanningAccepted | PlanningRejected | PlanningDeferred
 
 
 def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
@@ -68,7 +85,7 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
     match planning:
         case PlanningAccepted(plan=plan):
             return plan
-        case PlanningRejected() | None:
+        case PlanningRejected() | PlanningDeferred() | None:
             return None
         case _ as unreachable:
             assert_never(unreachable)
@@ -76,7 +93,7 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
 
 def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> PlanningResult:
     """
-    Plan the changes that reconcile ``observed`` with ``desired``; accept or reject.
+    Plan the changes that reconcile ``observed`` with ``desired``; accept, reject, or defer.
 
     The one boundary from state to executable plan. It diffs the declaration
     against the observed table — ``None`` means confirmed absence, so the diff
@@ -85,12 +102,22 @@ def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> Plann
     accepted result carries the validated :class:`ActionPlan`; a rejected
     result carries the validation failures and deliberately has no plan,
     making execution of unvalidated drift unrepresentable. This remains the
-    only boundary that constructs an ``ActionPlan``, and both outcomes retain
-    the diff they were planned from. The plan carries the relation kind its
+    only boundary that constructs an ``ActionPlan``, and every outcome retains
+    the diff it was planned from. The plan carries the relation kind its
     actions lower against: the observed kind for drift, and the default
     ordinary kind for a creation.
+
+    A proposed creation from a declaration whose scope does not manage table
+    existence is deferred before validation ever sees it: the declaration
+    cannot create the table, so a plan for the creation is unrepresentable
+    rather than validated away, and the table's absence is not its failure.
+    This is how a streaming table declared under ``"annotations"`` or
+    ``"tags"`` waits for its pipeline to create it.
     """
     diff = diff_table(desired, observed)
+    if isinstance(diff, TableCreation) and not desired.scope.manages(TableAspect.TABLE_EXISTENCE):
+        return PlanningDeferred(diff=diff)
+
     failures = validate_diff(diff)
     if failures:
         return PlanningRejected(diff=diff, failures=failures)

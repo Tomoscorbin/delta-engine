@@ -69,7 +69,7 @@ through a sync.
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `TableScope`       | The closed ownership policy carried by a desired table. It answers whether an aspect is managed and whether one scope fits within another.                  |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
-| `PlanningResult`   | The total planning outcome: either `PlanningAccepted(diff, plan)` or `PlanningRejected(diff, failures)`; both retain the diff they were planned from.        |
+| `PlanningResult`   | The total planning outcome: `PlanningAccepted(diff, plan)`, `PlanningRejected(diff, failures)`, or `PlanningDeferred(diff)` for an absent table the declaration cannot create; every variant retains the diff it was planned from. |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
 | `ExecutionResult` | The result of running a plan's compiled statements. It records how many statements applied and the first failed statement, if execution failed.                   |
@@ -296,7 +296,7 @@ sequenceDiagram
         Engine->>Planner: plan_changes(desired, observed_or_none)
         Planner->>Differ: diff_table(desired, observed_or_none)
         Differ-->>Planner: TableCreation / TableDrift
-        Planner-->>Engine: PlanningAccepted(diff, plan) / PlanningRejected(diff, failures)
+        Planner-->>Engine: PlanningAccepted(diff, plan) / PlanningRejected(diff, failures) / PlanningDeferred(diff)
         Engine->>Executor: compile(plan)
         Executor-->>Engine: SQL statements
         Engine->>Engine: freeze the TableRun
@@ -485,10 +485,15 @@ actions, and the application default rules decide to reject each one.
 
 Whether a difference is permitted is application policy. `plan_changes` diffs
 the declaration against the observed state itself, always runs the default
-policy, and returns either `PlanningAccepted(diff, plan)` or
-`PlanningRejected(diff, failures)`. Only the success arm has an `ActionPlan`,
+policy, and returns `PlanningAccepted(diff, plan)`,
+`PlanningRejected(diff, failures)`, or `PlanningDeferred(diff)`. Only the
+success arm has an `ActionPlan`,
 and both diff production and plan construction are private to that boundary,
-so callers cannot plan unvalidated drift at all. `validate_diff(..., rules=...)`
+so callers cannot plan unvalidated drift at all. A proposed creation from a
+declaration whose scope does not manage table existence is deferred before
+validation runs: the declaration cannot create the table, so a plan for the
+creation is unrepresentable rather than validated away, and the table's
+absence is not its failure. `validate_diff(..., rules=...)`
 remains the lower-level interface for testing alternative rule sets; it does
 not construct plans.
 
@@ -563,9 +568,10 @@ unresolvable difference types, which the current default policy rejects.
 
 `validate_diff` is where policy lives. `ELIGIBILITY_CHECKS` lists the laws that
 always run, and `DEFAULT_SAFETY_RULES` lists the configurable
-safety checks that run only after those pass. A missing table passes when
-the declaration manages table existence because creating it from the full
-declaration is safe. An eligible drift is evaluated by every default safety rule.
+safety checks that run only after those pass. A missing table passes because
+creating it from the full declaration is safe — a declaration that cannot
+create it is deferred at the planning boundary and never reaches validation.
+An eligible drift is evaluated by every default safety rule.
 The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
@@ -573,7 +579,10 @@ one place prevents this architecture overview from drifting when policy grows.
 The engine calls `plan_changes` once per table. A `PlanningRejected` leaves the run without a
 plan and records its validation failures; a `PlanningAccepted` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
-an empty plan with a real target and relation kind.
+an empty plan with a real target and relation kind. A `PlanningDeferred` —
+an absent table the declaration cannot create — leaves the run without a plan
+and without failures: the engine logs a warning, the table reports `DEFERRED`,
+and the run converges vacuously until something else creates the table.
 
 ## Deterministic action plans
 
@@ -662,7 +671,7 @@ the same run.
 
 Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableCreation` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableCreation` that reaches validation is always eligible: creating a table from its full declaration is safe, and what a declaration creates it spells freely — a creation the declaration cannot perform never arrives, because `plan_changes` defers it first. A `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected/deferred planning sum.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`

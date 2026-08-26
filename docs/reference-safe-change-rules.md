@@ -65,7 +65,7 @@ rather than validated. CHECK constraints and generated columns are also
 outside the model: change dependent expressions first, or Databricks rejects
 the rename at execution.
 
-Four further checks are laws rather than rules — they define what a declaration
+Three further checks are laws rather than rules — they define what a declaration
 is allowed to govern and how it must name the table's columns, and always run
 regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
 `application/validation.py`, evaluated before any safety rule:
@@ -74,8 +74,12 @@ regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
 | -------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `ColumnSpellingMustMatchCatalog` | A declared column (or `renamed_from` reference) spelled differently from the catalog — case must match exactly | Update the declaration to the catalog's exact spelling (`DESCRIBE TABLE` shows it)     |
 | `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync — the failure names each difference | Update the declaration to match the live table, or widen its scope to manage this aspect |
-| `MissingTableUnmanaged`          | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
 | `StreamingTableAnnotationsOnly`  | The observed table is a streaming table and the declaration manages more than comments and tags | Declare it with `scope="annotations"` or `scope="tags"`; the table's schema, properties, and keys belong to its owning pipeline |
+
+A missing table under a scope that does not manage table existence is not a
+validation failure: the sync logs a warning and defers the table (it reports
+`DEFERRED`, neither changed nor failed) until something else — typically the
+owning pipeline — creates it.
 
 `ColumnSpellingMustMatchCatalog` is judged at every scope, because a misspelled
 column reference is a defect in the declaration rather than drift in one of the
