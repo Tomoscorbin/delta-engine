@@ -91,6 +91,7 @@ def test_minimal_table_renders_an_importable_declaration_module() -> None:
         "    ],\n"
         ")\n"
     )
+    assert module.variable_name == "orders"
     assert module.warnings == ()
 
 
@@ -279,24 +280,20 @@ def test_a_not_null_struct_field_inside_an_array_fails_generation() -> None:
     assert "dev.sales.nested" in str(caught.value)
 
 
-def test_the_module_reports_the_variable_name_it_binds() -> None:
-    # Given
+@pytest.mark.parametrize(
+    ("table_name", "expected_variable"),
+    [
+        ("2024-orders", "_2024_orders"),
+        ("class", "class_"),
+    ],
+    ids=["leading digit and hyphen", "python keyword"],
+)
+def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable(
+    table_name: str, expected_variable: str
+) -> None:
+    # Given a table whose name is not a valid Python identifier
     observed = ObservedTable(
-        qualified_name=QualifiedName("dev", "sales", "orders"),
-        columns=(ObservedColumn("id", Long()),),
-    )
-
-    # When
-    module = generate_module(observed)
-
-    # Then the reported name retrieves the bound declaration without scanning
-    assert module.variable_name == "orders"
-
-
-def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable() -> None:
-    # Given a table name with a leading digit and a hyphen
-    observed = ObservedTable(
-        qualified_name=QualifiedName("dev", "sales", "2024-orders"),
+        qualified_name=QualifiedName("dev", "sales", table_name),
         columns=(ObservedColumn("id", Long()),),
     )
 
@@ -305,25 +302,9 @@ def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable() -
     declared = _import_declaration(module)
 
     # Then the module binds a valid identifier while declaring the real name
-    assert module.variable_name == "_2024_orders"
-    assert "_2024_orders = DeltaTable(" in module.source
-    assert declared.name == "2024-orders"
-
-
-def test_a_table_named_like_a_python_keyword_still_binds_a_variable() -> None:
-    # Given a table whose name is a Python keyword
-    observed = ObservedTable(
-        qualified_name=QualifiedName("dev", "sales", "class"),
-        columns=(ObservedColumn("id", Long()),),
-    )
-
-    # When
-    module = generate_module(observed)
-    declared = _import_declaration(module)
-
-    # Then
-    assert "class_ = DeltaTable(" in module.source
-    assert declared.name == "class"
+    assert module.variable_name == expected_variable
+    assert f"{expected_variable} = DeltaTable(" in module.source
+    assert declared.name == table_name
 
 
 def test_every_data_type_round_trips_through_generated_source() -> None:

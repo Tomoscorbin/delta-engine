@@ -69,10 +69,13 @@ def test_non_empty_ordered_sequence_loads_in_declared_order(write_module):
 
 
 def test_a_bare_delta_table_loads_as_a_one_table_collection(write_module):
+    # Given a module binding one DeltaTable to its own attribute
     module = write_module("decl_single", _TWO_TABLES)
 
+    # When loading that attribute directly
     tables = _load(f"{module}:orders")
 
+    # Then
     assert _dotted_names(tables) == ["dev.silver.orders"]
 
 
