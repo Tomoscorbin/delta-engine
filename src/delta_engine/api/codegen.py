@@ -44,9 +44,14 @@ class GenerationError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class GeneratedModule:
-    """Python source for one declaration module, with its generation warnings."""
+    """
+    Python source for one declaration module, with its generation warnings.
+
+    ``variable_name`` is the identifier the module binds its ``DeltaTable`` to.
+    """
 
     source: str
+    variable_name: str
     warnings: tuple[str, ...]
 
 
@@ -98,7 +103,7 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
         ) from error
 
     used_names: set[str] = {"Column", "DeltaTable"}
-    column_lines = [f"        {_render_column(column, used_names)}," for column in observed.columns]
+    column_lines = [f"        {_render_column(column, used_names)}," for column in columns]
 
     argument_lines = [
         f"    catalog={_string_literal(observed.qualified_name.catalog)},",
@@ -141,7 +146,11 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
             " properties, and keys belong to the owning pipeline",
             *warnings,
         )
-    return GeneratedModule(source="\n".join(lines) + "\n", warnings=warnings)
+    return GeneratedModule(
+        source="\n".join(lines) + "\n",
+        variable_name=variable,
+        warnings=warnings,
+    )
 
 
 def _foreign_key_warning(constraint: ObservedForeignKeyConstraint) -> str:
@@ -206,7 +215,7 @@ def _raise_column(observed: ObservedColumn) -> DesiredColumn:
     )
 
 
-def _render_column(column: ObservedColumn, used_names: set[str]) -> str:
+def _render_column(column: DesiredColumn, used_names: set[str]) -> str:
     """Render one column as ``Column(...)`` source, recording used names."""
     arguments = [
         _string_literal(str(column.name)),

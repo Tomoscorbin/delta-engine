@@ -10,7 +10,6 @@ from typing import Annotated
 import typer
 
 import delta_engine
-from delta_engine.adapters.databricks.warehouse.factory import build_reader
 from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.application import DuplicateTableDefinitionError, SyncReport
 from delta_engine.application.errors import ReadError
@@ -19,7 +18,7 @@ from delta_engine.cli.connection import Target, open_connection
 from delta_engine.cli.declarations import DeclarationRef, load_declarations
 from delta_engine.cli.errors import ConfigError
 from delta_engine.cli.rendering import render_plan
-from delta_engine.databricks import build_sql_engine
+from delta_engine.databricks import build_reader, build_sql_engine
 from delta_engine.domain.model import QualifiedName
 
 app = typer.Typer(

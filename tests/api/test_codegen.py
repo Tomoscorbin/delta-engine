@@ -2,7 +2,7 @@
 
 import pytest
 
-from delta_engine.api.codegen import GenerationError, generate_module
+from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.domain.model import (
     Array,
@@ -55,10 +55,11 @@ def _sample_data_types() -> tuple[DataType, ...]:
     )
 
 
-def _import_declaration(source: str) -> DeltaTable:
+def _import_declaration(module: GeneratedModule) -> DeltaTable:
     namespace: dict[str, object] = {}
-    exec(compile(source, "<generated>", "exec"), namespace)
-    (declared,) = (value for value in namespace.values() if isinstance(value, DeltaTable))
+    exec(compile(module.source, "<generated>", "exec"), namespace)
+    declared = namespace[module.variable_name]
+    assert isinstance(declared, DeltaTable)
     return declared
 
 
@@ -153,7 +154,7 @@ def test_declared_state_matches_observed_state_for_a_fully_specified_table() -> 
 
     # When
     module = generate_module(observed)
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
 
     # Then the declaration matches the observed table exactly
     diff = diff_table(declared.to_desired_table(), observed)
@@ -208,7 +209,7 @@ def test_foreign_keys_surface_as_warnings_and_commented_source() -> None:
     ) in module.source
 
     # Then planning the module as written drops exactly those keys
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
     diff = diff_table(declared.to_desired_table(), observed)
     assert diff.actions == (
         DropForeignKey(name="fk_orders_customer"),
@@ -239,7 +240,7 @@ def test_streaming_table_generates_an_annotations_scope_declaration() -> None:
     )
 
     # Then the declaration matches the observed table exactly
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
     diff = diff_table(declared.to_desired_table(), observed)
     assert diff.actions == ()
     assert diff.unresolvable == ()
@@ -278,6 +279,20 @@ def test_a_not_null_struct_field_inside_an_array_fails_generation() -> None:
     assert "dev.sales.nested" in str(caught.value)
 
 
+def test_the_module_reports_the_variable_name_it_binds() -> None:
+    # Given
+    observed = ObservedTable(
+        qualified_name=QualifiedName("dev", "sales", "orders"),
+        columns=(ObservedColumn("id", Long()),),
+    )
+
+    # When
+    module = generate_module(observed)
+
+    # Then the reported name retrieves the bound declaration without scanning
+    assert module.variable_name == "orders"
+
+
 def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable() -> None:
     # Given a table name with a leading digit and a hyphen
     observed = ObservedTable(
@@ -287,9 +302,10 @@ def test_a_table_name_that_is_not_a_python_identifier_still_binds_a_variable() -
 
     # When
     module = generate_module(observed)
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
 
     # Then the module binds a valid identifier while declaring the real name
+    assert module.variable_name == "_2024_orders"
     assert "_2024_orders = DeltaTable(" in module.source
     assert declared.name == "2024-orders"
 
@@ -303,7 +319,7 @@ def test_a_table_named_like_a_python_keyword_still_binds_a_variable() -> None:
 
     # When
     module = generate_module(observed)
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
 
     # Then
     assert "class_ = DeltaTable(" in module.source
@@ -324,7 +340,7 @@ def test_every_data_type_round_trips_through_generated_source() -> None:
 
     # When
     module = generate_module(observed)
-    declared = _import_declaration(module.source)
+    declared = _import_declaration(module)
 
     # Then the declaration matches the observed table exactly
     diff = diff_table(declared.to_desired_table(), observed)

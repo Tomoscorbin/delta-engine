@@ -1,9 +1,9 @@
 """Live round trip for declaration generation: create, generate, diff clean."""
 
-from delta_engine.adapters.databricks.warehouse.factory import build_reader
 from delta_engine.api.codegen import generate_module
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.application.ports import TablePresent
+from delta_engine.databricks import build_reader
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import diff_table
 from tests.live.sql_warehouse_live_helpers import (
@@ -41,7 +41,8 @@ def test_a_generated_declaration_matches_the_live_table_exactly(
 
     namespace: dict[str, object] = {}
     exec(compile(module.source, "<generated>", "exec"), namespace)
-    (declared,) = (value for value in namespace.values() if isinstance(value, DeltaTable))
+    declared = namespace[module.variable_name]
+    assert isinstance(declared, DeltaTable)
 
     # Then the declaration matches the live table exactly
     diff = diff_table(declared.to_desired_table(), state.table)
