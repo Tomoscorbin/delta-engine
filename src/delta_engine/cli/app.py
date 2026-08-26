@@ -12,7 +12,7 @@ import typer
 import delta_engine
 from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.application import DuplicateTableDefinitionError, SyncReport
-from delta_engine.application.errors import ReadError
+from delta_engine.application.errors import ReadError, SyncFailedError
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.cli.connection import Target, open_connection
 from delta_engine.cli.declarations import DeclarationRef, load_declarations
@@ -102,7 +102,10 @@ def _sync(reference: DeclarationRef, *, dry_run: bool) -> SyncView:
         tables = load_declarations(reference)
         with open_connection() as (target, connection):
             engine = build_sql_engine(connection)
-            report = engine.sync(*tables, dry_run=dry_run)
+            try:
+                report = engine.sync(*tables, dry_run=dry_run)
+            except SyncFailedError as error:
+                report = error.report
     return SyncView(target=target, declaration=reference, report=report)
 
 
