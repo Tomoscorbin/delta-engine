@@ -41,6 +41,7 @@ def main() -> None:
 
     help_result = _run("--help")
     assert "plan" in help_result.stdout
+    assert "apply" in help_result.stdout
 
     version_result = _run("--version")
     assert version("delta-engine") in version_result.stdout

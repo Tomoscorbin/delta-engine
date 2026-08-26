@@ -224,7 +224,6 @@ def test_unexpected_engine_error_propagates_after_connection_cleanup(
 @pytest.mark.parametrize(
     "arguments",
     [
-        ["apply", "some.module:tables"],
         ["plan", "some.module:tables", "other.module:tables"],
         ["plan", "some.module:tables", "--output", "json"],
         ["plan", "some.module:tables", "--show-sql"],
@@ -257,7 +256,7 @@ def test_help_and_version_keep_the_minimal_public_surface(runner):
     assert help_result.exit_code == 0
     assert "plan" in help_result.stdout
     assert "generate" in help_result.stdout
-    assert "apply" not in help_result.stdout
+    assert "apply" in help_result.stdout
     assert "completion" not in help_result.stdout
     assert version_result.exit_code == 0
     assert delta_engine.__version__ in version_result.stdout
