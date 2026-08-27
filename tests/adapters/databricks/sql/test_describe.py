@@ -170,6 +170,17 @@ def test_empty_table_comment_is_empty_string():
     assert _parse(json.dumps(doc)).comment == ""
 
 
+def test_mixed_case_column_name_is_preserved_verbatim():
+    # DESCRIBE echoes the creator's casing ('MyCol'); the reader carries that
+    # spelling through without lowercasing, so the observed column displays its
+    # exact casing while its identity stays case-insensitive.
+    description = _parse(
+        _doc(columns=[{"name": "MyCol", "type": {"name": "int"}, "nullable": True}])
+    )
+    assert str(description.columns[0].name) == "MyCol"
+    assert description.columns[0].name == "mycol"  # case-insensitive identity
+
+
 def test_lowercase_unicode_column_name_is_preserved_verbatim():
     # 'straße' is already lowercase; casefold would rewrite it to 'strasse',
     # a different identifier from the one the catalog stores
