@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, NamedTuple, final
+from typing import Final, NamedTuple
 
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
 from delta_engine.application.scopes import ScopeName, table_scope_for
@@ -655,7 +655,6 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     )
 
 
-@final
 class DeltaTable:
     """
     Defines a Delta table schema.
@@ -674,6 +673,9 @@ class DeltaTable:
     another cannot be edited in place and then synced. The state is validated
     exactly once, at construction, so a table that exists is a table whose
     declaration was accepted.
+
+    Copying is refused too: ``copy.copy`` and ``copy.deepcopy`` raise. Share
+    the single validated instance rather than copying it.
     """
 
     __slots__ = ("_desired_table", "_foreign_key_declarations")
@@ -764,7 +766,7 @@ class DeltaTable:
         object.__setattr__(self, "_desired_table", _lower_declaration(declaration))
         object.__setattr__(self, "_foreign_key_declarations", declaration.foreign_key_declarations)
 
-    def __setattr__(self, name: str, value: object) -> None:
+    def __setattr__(self, name: str, _value: object) -> None:
         raise AttributeError(
             f"{type(self).__name__} is immutable; cannot set {name!r}."
             " Build a new declaration instead of editing one in place."

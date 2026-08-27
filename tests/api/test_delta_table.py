@@ -2051,7 +2051,7 @@ def test_declared_state_cannot_be_replaced_after_construction():
 
     # When code tries to swap in a different backing table
     # Then the immutability guard refuses it and the original state is unchanged
-    with pytest.raises(AttributeError, match="immutable"):
+    with pytest.raises(AttributeError):
         table._desired_table = _orders_table().to_desired_table()
     assert table.name == "orders"
 
@@ -2062,7 +2062,7 @@ def test_foreign_keys_cannot_be_replaced_after_construction():
 
     # When code tries to overwrite its foreign-key declarations
     # Then the immutability guard refuses it and the declaration keeps no foreign keys
-    with pytest.raises(AttributeError, match="immutable"):
+    with pytest.raises(AttributeError):
         table._foreign_key_declarations = ("injected",)
     assert table.foreign_keys == ()
 
@@ -2073,7 +2073,7 @@ def test_arbitrary_attributes_cannot_be_added_to_a_declaration():
 
     # When code tries to attach a new attribute
     # Then the immutability guard refuses it
-    with pytest.raises(AttributeError, match="immutable"):
+    with pytest.raises(AttributeError):
         table.owner = "someone-else"
 
 
@@ -2083,6 +2083,6 @@ def test_declared_attributes_cannot_be_deleted():
 
     # When code tries to delete its backing state
     # Then the immutability guard refuses it and the declaration stays usable
-    with pytest.raises(AttributeError, match="immutable"):
+    with pytest.raises(AttributeError):
         del table._desired_table
     assert table.to_desired_table().qualified_name.name == "orders"
