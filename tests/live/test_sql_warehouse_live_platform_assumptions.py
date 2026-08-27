@@ -255,9 +255,11 @@ def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection
 def test_platform_preserves_column_display_case(live_connection, live_tables):
     """Databricks preserves the declared casing of column names."""
     # Column case is display metadata: references resolve case-insensitively,
-    # but DESCRIBE echoes the creator's casing back. This is what makes the
-    # reader's lowercasing of observed column names real normalization work
-    # rather than a no-op, and why engine-created columns display lowercase.
+    # but DESCRIBE echoes the creator's casing back. The reader carries that
+    # spelling through verbatim as a case-insensitive Identifier (it does not
+    # lowercase), so an engine-created column displays in its declared casing;
+    # the Identifier's case-insensitive identity is what lets the diff treat
+    # case-variant spellings as the same column.
     table_name = live_tables("column_case")
     execute_sql(
         live_connection,
