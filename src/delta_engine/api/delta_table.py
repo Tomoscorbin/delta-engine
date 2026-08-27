@@ -666,7 +666,22 @@ class DeltaTable:
     when ``delta.columnMapping.mode`` is ``name``. Declare it in ``properties``
     on any table whose columns may be dropped; a sync that drops a column
     without it fails at validation with a message naming the property.
+
+    A declaration is immutable once constructed: attribute assignment and
+    deletion are refused, and there are no fields to reassign. This matters
+    when declarations are shared — a package of tables one team imports from
+    another cannot be edited in place and then synced. The state is validated
+    exactly once, at construction, so a table that exists is a table whose
+    declaration was accepted.
+
+    Copying is refused too: ``copy.copy`` and ``copy.deepcopy`` raise. Share
+    the single validated instance rather than copying it.
     """
+
+    __slots__ = ("_desired_table", "_foreign_key_declarations")
+
+    _desired_table: DesiredTable
+    _foreign_key_declarations: tuple[ForeignKey, ...]
 
     def __init__(
         self,
@@ -748,8 +763,17 @@ class DeltaTable:
             scope=scope,
         )
         _validate_declaration(declaration)
-        self._desired_table = _lower_declaration(declaration)
-        self._foreign_key_declarations = declaration.foreign_key_declarations
+        object.__setattr__(self, "_desired_table", _lower_declaration(declaration))
+        object.__setattr__(self, "_foreign_key_declarations", declaration.foreign_key_declarations)
+
+    def __setattr__(self, name: str, _value: object) -> None:
+        raise AttributeError(
+            f"{type(self).__name__} is immutable; cannot set {name!r}."
+            " Build a new declaration instead of editing one in place."
+        )
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"{type(self).__name__} is immutable; cannot delete {name!r}.")
 
     @property
     def catalog(self) -> str:
