@@ -3,6 +3,8 @@
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
+from enum import StrEnum
+import json
 import logging
 import sys
 from typing import Annotated
@@ -50,6 +52,27 @@ TableNameArgument = Annotated[
 ]
 
 
+class OutputFormat(StrEnum):
+    """Report formats the CLI can print on stdout."""
+
+    TEXT = "text"
+    JSON = "json"
+
+
+OutputOption = Annotated[
+    OutputFormat,
+    typer.Option("--output", help="Report format on stdout."),
+]
+
+FailOnChangesOption = Annotated[
+    bool,
+    typer.Option(
+        "--fail-on-changes",
+        help="Exit 1 when a valid plan contains pending changes.",
+    ),
+]
+
+
 @dataclass(frozen=True, slots=True)
 class SyncView:
     """The safe-to-render identity and report a sync command displays."""
@@ -77,22 +100,31 @@ def _main(
 
 
 @app.command()
-def plan(declaration: DeclarationArgument) -> None:
+def plan(
+    declaration: DeclarationArgument,
+    output: OutputOption = OutputFormat.TEXT,
+    fail_on_changes: FailOnChangesOption = False,
+) -> None:
     """Read the live catalog and print a plan; never execute planned DDL."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
         result = _sync(reference, dry_run=True)
-        typer.echo(render_sync(result.target, result.declaration, result.report))
-        raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
+        typer.echo(_render_sync_view(result, output))
+        raise typer.Exit(
+            code=_resolve_plan_exit_code(result.report, fail_on_changes=fail_on_changes)
+        )
 
 
 @app.command()
-def apply(declaration: DeclarationArgument) -> None:
+def apply(
+    declaration: DeclarationArgument,
+    output: OutputOption = OutputFormat.TEXT,
+) -> None:
     """Read the live catalog and execute the planned DDL; unsafe plans are rejected."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
         result = _sync(reference, dry_run=False)
-        typer.echo(render_sync(result.target, result.declaration, result.report))
+        typer.echo(_render_sync_view(result, output))
         raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
 
 
@@ -107,6 +139,22 @@ def _sync(reference: DeclarationRef, *, dry_run: bool) -> SyncView:
             except SyncFailedError as error:
                 report = error.report
     return SyncView(target=target, declaration=reference, report=report)
+
+
+def _render_sync_view(view: SyncView, output: OutputFormat) -> str:
+    """Render one sync view as the selected stdout report format."""
+    if output is OutputFormat.JSON:
+        return json.dumps(view.report.to_dict(), indent=2)
+    return render_sync(view.target, view.declaration, view.report)
+
+
+def _resolve_plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int:
+    """Map one dry-run report to the plan command's exit code."""
+    if report.has_failures:
+        return _EXIT_FAILURE
+    if fail_on_changes and report.has_changes:
+        return _EXIT_FAILURE
+    return _EXIT_SUCCESS
 
 
 @app.command()

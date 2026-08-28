@@ -45,9 +45,17 @@ the Databricks SDK, or the SQL connector.
 delta-engine plan MODULE:ATTRIBUTE
 ```
 
-Routine use has no options. The root command retains `--help` and `--version`,
-and `plan --help` describes its one argument. Shell-completion installation
-options are disabled.
+The root command retains `--help` and `--version`, and `plan --help`
+describes its argument and options. Shell-completion installation options
+are disabled.
+
+`plan` takes two options; neither changes what the command reads, and
+nothing it plans is ever executed:
+
+| Option                  | Effect                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `--output [text\|json]` | Report format on stdout; `json` emits the [run report](reference-run-report.md)     |
+| `--fail-on-changes`     | Exit 1 when a valid plan contains pending changes, so CI can gate on catalog drift |
 
 The command performs these operations in order:
 
@@ -112,6 +120,9 @@ connection the same way. The run differs only after planning: compiled
 statements execute against the catalog in dependency order, each table
 independently, halting a table at its first failed statement while unrelated
 tables continue.
+
+`apply` accepts the same `--output` option as `plan`. There is no
+`--fail-on-changes`: executing pending changes is the command's purpose.
 
 Output matches `plan` with two differences: the report carries no dry-run
 banner and summarises real outcomes (`applied`, `partially applied`,
@@ -227,8 +238,14 @@ On a dry run the sync report labels this boundary `PLAN — no planned SQL
 executed`. Catalog reads still occur and may start the warehouse; only the
 generated statements are guaranteed not to execute.
 
-Credentials are never intentionally rendered. Planned SQL is shown by default;
-there is no SQL display flag or JSON mode.
+Credentials are never intentionally rendered. Planned SQL is always shown;
+there is no SQL display flag.
+
+With `--output json` the text sections are replaced by one JSON document:
+the versioned run report that `SyncReport.to_dict()` emits (see
+[the run report schema](reference-run-report.md)). The target identity is
+not part of the document. Diagnostics still go to stderr, so a completed
+run's stdout parses directly with `json.loads`.
 
 Imported-code output, SDK or connector output, engine logs, configuration
 errors, and tracebacks go to stderr. This keeps the complete human-readable
@@ -241,11 +258,11 @@ explains why those statements were not eligible to run.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                          |
-| ---- | ---------------------------------------------------------------------------------------------------------------- |
-| 0    | The run completed with no failures: a plan in sync or carrying pending changes, or an apply that executed fully |
-| 1    | Configuration, catalog read, planning, execution, or generation failed                                           |
-| 2    | Typer/Click rejected malformed command-line usage                                                                |
+| Code | Meaning                                                                                                                                  |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | The run completed with no failures: a plan in sync or carrying pending changes (without `--fail-on-changes`), or an apply that executed fully |
+| 1    | Configuration, catalog read, planning, execution, or generation failed — or `--fail-on-changes` found pending changes                       |
+| 2    | Typer/Click rejected malformed command-line usage                                                                                           |
 
 Unexpected declaration-code and engine defects propagate with tracebacks and
 exit non-zero. The connection is still closed; a cleanup failure is logged and

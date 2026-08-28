@@ -130,8 +130,16 @@ to the log. The original exit status is preserved after the summary is written.
 | Exit code | Result                                                                       |
 | --------- | ---------------------------------------------------------------------------- |
 | 0         | The live plan completed, with or without pending changes                     |
+| 1 (with `--fail-on-changes`) | A valid plan found pending changes                        |
 | 1         | Configuration, authentication, reading, planning, or FK resolution failed    |
 | 2         | The command line was malformed, such as a missing argument or removed option |
+
+By default an intentional schema change never fails the check. To gate on
+catalog drift instead — for example on a schedule against the default
+branch — add `--fail-on-changes`, and a valid plan with pending changes
+exits 1. For machine-readable gating or PR annotations, add `--output json`
+and parse the versioned run report
+([reference](reference-run-report.md)) instead of the text sections.
 
 Review the `DIFF` section for semantic intent and `PLANNED SQL` for the DDL
 compiled from the catalog snapshot read by this plan. A `PLANNING_FAILED`,
