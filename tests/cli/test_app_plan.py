@@ -1,6 +1,7 @@
 """Behaviour of the single read-only ``delta-engine plan`` workflow."""
 
 from contextlib import contextmanager
+import json
 import logging
 
 import pytest
@@ -54,6 +55,52 @@ def test_changed_plan_exits_zero_and_prints_diff_report_and_sql_in_order(
     assert result.stdout.index("TARGET") < result.stdout.index("DIFF")
     assert result.stdout.index("DIFF") < result.stdout.index("SYNC REPORT")
     assert result.stdout.index("SYNC REPORT") < result.stdout.index("PLANNED SQL")
+
+
+def test_json_output_prints_the_versioned_run_report_alone(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declaration that drifts from the live catalog
+    module = write_module("plan_json_drift", ORDERS_ONLY)
+
+    # When planning with JSON output
+    result = runner.invoke(app, ["plan", f"{module}:all_tables", "--output", "json"])
+
+    # Then stdout is exactly one machine-readable run report
+    assert result.exit_code == 0
+    report = json.loads(result.stdout)
+    assert report["schema_version"] == 2
+    assert report["dry_run"] is True
+    assert report["has_changes"] is True
+    assert report["has_failures"] is False
+    assert [table["name"] for table in report["tables"]] == ["dev.silver.orders"]
+    assert "TARGET" not in result.stdout
+
+
+def test_json_output_with_failures_is_parseable_and_exits_one(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declaration whose diff fails validation
+    module = write_module("plan_json_invalid", NOT_NULL_DRIFT_ORDERS)
+    fake_engine.states["dev.silver.orders"] = observed_orders()
+
+    # When planning with JSON output
+    result = runner.invoke(app, ["plan", f"{module}:all_tables", "--output", "json"])
+
+    # Then the report is still valid JSON and the exit code still signals failure
+    assert result.exit_code == 1
+    report = json.loads(result.stdout)
+    assert report["has_failures"] is True
+    assert report["tables"][0]["status"] == "PLANNING_FAILED"
+
+
+def test_unknown_output_format_is_a_usage_error(runner):
+    # Given an output format the CLI does not offer
+    # When invoking plan with it
+    result = runner.invoke(app, ["plan", "some.module:tables", "--output", "yaml"])
+
+    # Then the framework rejects the usage before any work starts
+    assert result.exit_code == 2
 
 
 def test_validation_failure_prints_the_plan_report_and_exits_one(
@@ -225,7 +272,6 @@ def test_unexpected_engine_error_propagates_after_connection_cleanup(
     "arguments",
     [
         ["plan", "some.module:tables", "other.module:tables"],
-        ["plan", "some.module:tables", "--output", "json"],
         ["plan", "some.module:tables", "--show-sql"],
         ["plan", "some.module:tables", "--host", "example"],
         ["plan", "some.module:tables", "--http-path", "/sql/x"],
