@@ -1745,10 +1745,9 @@ def test_name_reference_lowers_to_the_named_table():
     assert foreign_key.referenced_columns == ("id",)
 
 
-def test_name_reference_rejects_a_two_part_name():
-    # Given a reference missing its catalog part
-    reference = "sch.customers"
-
+@pytest.mark.parametrize("reference", ["customers", "sch.customers", "cat.sch.customers.extra"])
+def test_name_reference_rejects_anything_but_a_three_part_name(reference: str):
+    # Given a reference that is not exactly catalog.schema.table
     # When it is used in a foreign key
     # Then construction fails, naming the accepted form
     with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
@@ -1782,39 +1781,19 @@ def test_name_reference_requires_an_explicit_column_mapping(
         ForeignKey(columns=columns, references="cat.sch.customers")
 
 
-def test_name_reference_rejects_a_bare_table_name():
-    # Given a reference naming only a table
-    reference = "customers"
-
-    # When it is used in a foreign key
-    # Then construction fails, naming the accepted form
-    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
-        ForeignKey(columns={"customer_id": "id"}, references=reference)
-
-
-def test_name_reference_rejects_too_many_parts():
-    # Given a reference with more than three dotted parts
-    reference = "cat.sch.customers.extra"
-
-    # When it is used in a foreign key
-    # Then construction fails, naming the accepted form
-    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
-        ForeignKey(columns={"customer_id": "id"}, references=reference)
-
-
 @pytest.mark.parametrize(
-    ("reference", "blank_part"),
+    ("reference", "expected_error"),
     [
-        (".silver.events", "blank catalog part"),
-        ("cat..events", "blank schema part"),
-        ("cat.silver.", "blank table part"),
+        (".silver.events", "catalog must not be blank"),
+        ("cat..events", "schema must not be blank"),
+        ("cat.silver.", "name must not be blank"),
     ],
 )
-def test_name_reference_names_the_blank_part_it_rejects(reference: str, blank_part: str):
+def test_name_reference_names_the_blank_part_it_rejects(reference: str, expected_error: str):
     # Given a dotted name with one blank part
     # When it is used in a foreign key
     # Then construction fails, naming that part
-    with pytest.raises(ValueError, match=blank_part):
+    with pytest.raises(ValueError, match=expected_error):
         ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 

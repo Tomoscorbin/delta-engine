@@ -103,41 +103,26 @@ def _parse_name_reference(raw: str) -> QualifiedName:
 
     Every part must be a name Unity Catalog can store.
     """
-    parts = raw.split(".")
-    if len(parts) != 3:
-        raise ValueError(
-            f"foreign key reference {raw!r} must be 'catalog.schema.table';"
-            f" got {len(parts)} dot-separated part(s)"
-        )
-    subject = f"foreign key reference {raw!r}"
-    for label, part in zip(("catalog", "schema", "table"), parts, strict=True):
-        if not part.strip():
-            raise ValueError(f"{subject} has a blank {label} part")
-        _validate_object_name_part(subject, label, part)
-    catalog, schema, table = parts
-    return QualifiedName(catalog, schema, table)
+    name = QualifiedName.parse(raw)
+    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
+    return name
 
 
-def _validate_object_name_part(subject: str, label: str, part: str) -> None:
-    """Reject one catalog, schema, or table name part Unity Catalog cannot store."""
-    if len(part) > _OBJECT_NAME_MAX_LENGTH:
-        raise ValueError(
-            f"{subject} {label} is {len(part)} characters long; Unity Catalog"
-            f" limits object names to {_OBJECT_NAME_MAX_LENGTH} characters"
-        )
-    forbidden = sorted(set(part) & _OBJECT_NAME_FORBIDDEN_CHARACTERS)
-    if forbidden:
-        raise ValueError(
-            f"{subject} {label} {part!r} contains characters Unity Catalog"
-            f" forbids in object names: {forbidden}. Periods, spaces,"
-            " forward slashes, control characters, and DEL are not allowed."
-        )
-
-
-def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
+def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "Table") -> None:
     """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
     for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
-        _validate_object_name_part("Table", label, part)
+        if len(part) > _OBJECT_NAME_MAX_LENGTH:
+            raise ValueError(
+                f"{subject} {label} is {len(part)} characters long; Unity Catalog"
+                f" limits object names to {_OBJECT_NAME_MAX_LENGTH} characters"
+            )
+        forbidden = sorted(set(part) & _OBJECT_NAME_FORBIDDEN_CHARACTERS)
+        if forbidden:
+            raise ValueError(
+                f"{subject} {label} {part!r} contains characters Unity Catalog"
+                f" forbids in object names: {forbidden}. Periods, spaces,"
+                " forward slashes, control characters, and DEL are not allowed."
+            )
 
 
 def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
@@ -494,14 +479,12 @@ class ForeignKey:
             # Re-asserts the construction invariant; also narrows columns for typing.
             if not isinstance(self.columns, Mapping):
                 raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-            pairs = tuple(
-                (Identifier(local), Identifier(referenced))
-                for local, referenced in self.columns.items()
-            )
             return ForeignKeyConstraint(
-                local_columns=tuple(local_names.get(local, local) for local, _ in pairs),
+                local_columns=tuple(
+                    local_names.get(Identifier(local), local) for local in self.columns
+                ),
                 referenced_table=referenced_table,
-                referenced_columns=tuple(referenced for _, referenced in pairs),
+                referenced_columns=tuple(self.columns.values()),
                 name=self.name,
             )
 
