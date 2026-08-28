@@ -117,7 +117,7 @@ def _entry_records(entries: Iterable[DiffEntry]) -> list[dict[str, str]]:
             "kind": entry.category.name.lower(),
             "operation": entry.operation.value,
             "subject": entry.subject,
-            "detail": " ".join(entry.detail),
+            "detail": " ".join(phrase for phrase in entry.detail if phrase),
         }
         for entry in entries
     ]
