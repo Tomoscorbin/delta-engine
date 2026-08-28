@@ -85,6 +85,25 @@ def test_fail_on_changes_exits_zero_when_in_sync(
     assert result.exit_code == 0
 
 
+def test_fail_on_changes_with_json_output_still_prints_the_report(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declaration that drifts from the live catalog
+    module = write_module("plan_gate_json_drift", ORDERS_ONLY)
+
+    # When planning with the drift gate and JSON output together
+    result = runner.invoke(
+        app,
+        ["plan", f"{module}:all_tables", "--output", "json", "--fail-on-changes"],
+    )
+
+    # Then the machine-readable report still reaches stdout before the drift exit
+    assert result.exit_code == 1
+    report = json.loads(result.stdout)
+    assert report["has_changes"] is True
+    assert report["has_failures"] is False
+
+
 def test_json_output_prints_the_versioned_run_report_alone(
     runner, fake_engine, databricks_env, write_module
 ):

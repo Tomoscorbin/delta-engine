@@ -58,6 +58,22 @@ def test_json_output_reports_the_executed_run(
     assert report["tables"][0]["execution"] == {"applied": 1, "total": 1}
 
 
+def test_json_output_with_execution_failures_is_parseable_and_exits_one(
+    runner, failing_engine, databricks_env, write_module
+):
+    # Given a declared table whose statements fail at the warehouse
+    module = write_module("apply_json_execution_failure", ORDERS_ONLY)
+
+    # When applying with JSON output
+    result = runner.invoke(app, ["apply", f"{module}:all_tables", "--output", "json"])
+
+    # Then the report is still valid JSON and records the failure
+    assert result.exit_code == 1
+    report = json.loads(result.stdout)
+    assert report["has_failures"] is True
+    assert report["tables"][0]["status"] == "EXECUTION_FAILED"
+
+
 def test_execution_failure_prints_the_report_and_exits_one(
     runner, failing_engine, databricks_env, write_module
 ):
