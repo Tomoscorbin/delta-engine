@@ -64,6 +64,14 @@ OutputOption = Annotated[
     typer.Option("--output", help="Report format on stdout."),
 ]
 
+FailOnChangesOption = Annotated[
+    bool,
+    typer.Option(
+        "--fail-on-changes",
+        help="Exit 1 when a valid plan contains pending changes.",
+    ),
+]
+
 
 @dataclass(frozen=True, slots=True)
 class SyncView:
@@ -95,13 +103,14 @@ def _main(
 def plan(
     declaration: DeclarationArgument,
     output: OutputOption = OutputFormat.TEXT,
+    fail_on_changes: FailOnChangesOption = False,
 ) -> None:
     """Read the live catalog and print a plan; never execute planned DDL."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
         result = _sync(reference, dry_run=True)
         typer.echo(_render_sync_view(result, output))
-        raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
+        raise typer.Exit(code=_plan_exit_code(result.report, fail_on_changes=fail_on_changes))
 
 
 @app.command()
@@ -135,6 +144,15 @@ def _render_sync_view(view: SyncView, output: OutputFormat) -> str:
     if output is OutputFormat.JSON:
         return json.dumps(view.report.to_dict(), indent=2)
     return render_sync(view.target, view.declaration, view.report)
+
+
+def _plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int:
+    """Map one dry-run report to the plan command's exit code."""
+    if report.has_failures:
+        return _EXIT_FAILURE
+    if fail_on_changes and report.has_changes:
+        return _EXIT_FAILURE
+    return _EXIT_SUCCESS
 
 
 @app.command()

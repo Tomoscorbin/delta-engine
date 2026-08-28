@@ -57,6 +57,34 @@ def test_changed_plan_exits_zero_and_prints_diff_report_and_sql_in_order(
     assert result.stdout.index("SYNC REPORT") < result.stdout.index("PLANNED SQL")
 
 
+def test_fail_on_changes_exits_one_when_changes_are_pending(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declaration that drifts from the live catalog
+    module = write_module("plan_gate_drift", ORDERS_ONLY)
+
+    # When planning with the drift gate enabled
+    result = runner.invoke(app, ["plan", f"{module}:all_tables", "--fail-on-changes"])
+
+    # Then the full report still prints and the exit code signals drift
+    assert result.exit_code == 1
+    assert "PLANNED SQL" in result.stdout
+
+
+def test_fail_on_changes_exits_zero_when_in_sync(
+    runner, fake_engine, databricks_env, write_module
+):
+    # Given a declaration matching the live catalog
+    module = write_module("plan_gate_in_sync", ORDERS_ONLY)
+    fake_engine.states["dev.silver.orders"] = observed_orders()
+
+    # When planning with the drift gate enabled
+    result = runner.invoke(app, ["plan", f"{module}:all_tables", "--fail-on-changes"])
+
+    # Then the plan succeeds
+    assert result.exit_code == 0
+
+
 def test_json_output_prints_the_versioned_run_report_alone(
     runner, fake_engine, databricks_env, write_module
 ):
@@ -277,7 +305,6 @@ def test_unexpected_engine_error_propagates_after_connection_cleanup(
         ["plan", "some.module:tables", "--http-path", "/sql/x"],
         ["plan", "some.module:tables", "--profile", "default"],
         ["plan", "some.module:tables", "--verbose"],
-        ["plan", "some.module:tables", "--fail-on-changes"],
     ],
 )
 def test_removed_commands_arguments_and_options_are_usage_errors(runner, arguments):
