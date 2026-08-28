@@ -1,3 +1,12 @@
+## v0.11.0 (2026-08-28)
+
+### Feat
+
+- accept dotted table names as foreign key references (#368)
+- tighten the diff display (#369)
+- add JSON output and a drift gate to the CLI (#367)
+- make DeltaTable declarations immutable after construction (#365)
+
 ## v0.10.0 (2026-08-26)
 
 ### Feat
