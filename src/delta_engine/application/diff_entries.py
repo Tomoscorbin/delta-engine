@@ -140,6 +140,9 @@ class DiffEntry:
     ``detail`` element is one phrase describing the change; they are separate
     elements rather than one string so a text renderer can align them into
     columns down a group, as with the ``(was '...')`` clause of a value change.
+    An empty phrase is a position holder: it keeps the phrases after it in
+    their columns (a nullable column's comment still aligns with a NOT NULL
+    sibling's) — text rendering pads it, the machine projection skips it.
     """
 
     category: DiffCategory
@@ -162,20 +165,38 @@ class DiffEntry:
 
 
 def _column_add_entry(column: DesiredColumn) -> DiffEntry:
-    """Build a '+' columns entry for a created column: its type, then NOT NULL if declared."""
-    detail = [str(column.data_type)]
-    if not column.nullable:
-        detail.append("NOT NULL")
+    """
+    Build a '+' columns entry: type, NOT NULL if declared, then the comment.
+
+    The comment rides the line that introduces the column; the comments group
+    is reserved for comment-only changes. Absent middle phrases stay as empty
+    position holders (trailing ones dropped), so comments align down a group
+    of mixed nullable and NOT NULL columns.
+    """
+    detail = [
+        str(column.data_type),
+        "" if column.nullable else "NOT NULL",
+        f"'{column.comment}'" if column.comment else "",
+    ]
+    while detail and not detail[-1]:
+        detail.pop()
     return DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, subject=column.name, detail=detail)
 
 
-def _column_comment_entry(column: DesiredColumn) -> DiffEntry:
-    """Build a '+' comments entry for a created column."""
+def _comment_set_entry(subject: str, desired_comment: str, observed_comment: str) -> DiffEntry:
+    """
+    Build the comments entry for setting a comment on a column or the table.
+
+    An absent observed comment means the subject gains one, so the line adds
+    it; an absent desired comment removes it; otherwise it changes to the new
+    text. Unlike a property change, the old text never trails the line —
+    comments are prose, and repeating a paragraph of it would drown the diff.
+    """
+    if not desired_comment:
+        return DiffEntry(DiffCategory.COMMENTS, DiffOperation.REMOVE, subject=subject)
+    operation = DiffOperation.CHANGE if observed_comment else DiffOperation.ADD
     return DiffEntry(
-        DiffCategory.COMMENTS,
-        DiffOperation.ADD,
-        subject=f"column {column.name}",
-        detail=(f"'{column.comment}'",),
+        DiffCategory.COMMENTS, operation, subject=subject, detail=(f"'{desired_comment}'",)
     )
 
 
@@ -205,10 +226,18 @@ def _columns_detail(columns: Sequence[str]) -> tuple[str, ...]:
     return (f"({', '.join(columns)})",)
 
 
-def _key_subject(kind: str, name: str | None, columns: Sequence[str]) -> str:
-    """Identify a key by its requested name, or by columns when Databricks names it."""
-    identity = name if name is not None else f"({', '.join(columns)})"
-    return f"{kind} {identity}"
+def _key_cells(kind: str, name: str | None, columns: Sequence[str]) -> tuple[str, tuple[str, ...]]:
+    """
+    Split a key into its subject and leading detail phrases.
+
+    A named key reads name-first with its column list as detail; a key without
+    a requested name (Databricks names it) is identified by its column list,
+    which then never repeats as detail.
+    """
+    column_list = f"({', '.join(columns)})"
+    if name is None:
+        return f"{kind} {column_list}", ()
+    return f"{kind} {name}", (column_list,)
 
 
 @functools.singledispatch
@@ -247,13 +276,9 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
 
     primary_key = action.table.primary_key
     if primary_key is not None:
+        subject, detail = _key_cells("primary key", primary_key.name, primary_key.columns)
         entries.append(
-            DiffEntry(
-                DiffCategory.KEYS,
-                DiffOperation.ADD,
-                subject=_key_subject("primary key", primary_key.name, primary_key.columns),
-                detail=_columns_detail(primary_key.columns),
-            )
+            DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, subject=subject, detail=detail)
         )
 
     if action.table.clustered_by:
@@ -287,9 +312,6 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
         if value is not None
     )
 
-    entries.extend(
-        _column_comment_entry(column) for column in action.table.columns if column.comment
-    )
     if action.table.comment:
         entries.append(
             DiffEntry(
@@ -305,10 +327,7 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: AddColumn) -> tuple[DiffEntry, ...]:
-    entries = [_column_add_entry(action.column)]
-    if action.column.comment:
-        entries.append(_column_comment_entry(action.column))
-    return tuple(entries)
+    return (_column_add_entry(action.column),)
 
 
 @action_entries.register
@@ -358,28 +377,16 @@ def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
-    comment = action.desired_comment
     return (
-        DiffEntry(
-            DiffCategory.COMMENTS,
-            DiffOperation.CHANGE,
-            subject=f"column {action.column_name}",
-            detail=(f"'{comment}'",) if comment else ("(unset)",),
+        _comment_set_entry(
+            f"column {action.column_name}", action.desired_comment, action.observed_comment
         ),
     )
 
 
 @action_entries.register
 def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
-    comment = action.desired_comment
-    return (
-        DiffEntry(
-            DiffCategory.COMMENTS,
-            DiffOperation.CHANGE,
-            subject="table",
-            detail=(f"'{comment}'",) if comment else ("(unset)",),
-        ),
-    )
+    return (_comment_set_entry("table", action.desired_comment, action.observed_comment),)
 
 
 @action_entries.register
@@ -447,18 +454,8 @@ def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
-    return (
-        DiffEntry(
-            DiffCategory.KEYS,
-            DiffOperation.ADD,
-            subject=_key_subject(
-                "primary key",
-                action.primary_key.name,
-                action.primary_key.columns,
-            ),
-            detail=_columns_detail(action.primary_key.columns),
-        ),
-    )
+    subject, detail = _key_cells("primary key", action.primary_key.name, action.primary_key.columns)
+    return (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, subject=subject, detail=detail),)
 
 
 @action_entries.register
@@ -474,19 +471,11 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
-    local_columns = ", ".join(action.constraint.local_columns)
-    return (
-        DiffEntry(
-            DiffCategory.KEYS,
-            DiffOperation.ADD,
-            subject=_key_subject(
-                "foreign key",
-                action.constraint.name,
-                action.constraint.local_columns,
-            ),
-            detail=(f"({local_columns}) → {action.constraint.referenced_table}",),
-        ),
+    subject, leading = _key_cells(
+        "foreign key", action.constraint.name, action.constraint.local_columns
     )
+    detail = (*leading, f"→ {action.constraint.referenced_table}")
+    return (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, subject=subject, detail=detail),)
 
 
 @action_entries.register
@@ -509,7 +498,14 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     # columns (DELTA_OPTIMIZE_FULL_NOT_SUPPORTED); existing files simply keep
     # their old layout after CLUSTER BY NONE.
     if not action.desired_clustering:
-        return (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.REMOVE, subject="clustering"),)
+        return (
+            DiffEntry(
+                DiffCategory.CLUSTERING,
+                DiffOperation.REMOVE,
+                subject="clustering",
+                detail=_columns_detail(action.observed_clustering),
+            ),
+        )
     return (
         DiffEntry(
             DiffCategory.CLUSTERING,

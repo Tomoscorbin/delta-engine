@@ -58,16 +58,33 @@ def _aligned_rows(rows: Sequence[Sequence[str]]) -> list[str]:
     Pad ragged rows into columns, each row joined and right-stripped.
 
     Rows need not be the same length: a column is as wide as the widest cell
-    any row puts there, and rows that stop short simply end early.
+    any row puts there, and rows that stop short simply end early. A cell may
+    be empty to hold a column position for later cells; a column empty in
+    every row collapses rather than leaving doubled separators.
     """
     widths: dict[int, int] = {}
     for row in rows:
         for index, cell in enumerate(row):
             widths[index] = max(widths.get(index, 0), len(cell))
     return [
-        "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)).rstrip()
+        "  ".join(
+            cell.ljust(widths[index]) for index, cell in enumerate(row) if widths[index]
+        ).rstrip()
         for row in rows
     ]
+
+
+def _headed_cells(entry: DiffEntry) -> tuple[str, ...]:
+    """
+    Return an entry's cells for a line that sits under its group heading.
+
+    A subject that only restates the heading (clustering, partitioning) is
+    dropped, provided detail remains to carry the line. Contexts without a
+    heading — a validation failure naming drift — use ``entry.cells`` intact.
+    """
+    if entry.subject == entry.category.plural and entry.detail:
+        return tuple(entry.detail)
+    return entry.cells
 
 
 def _render_entry_groups(entries: Sequence[DiffEntry]) -> list[str]:
@@ -78,7 +95,7 @@ def _render_entry_groups(entries: Sequence[DiffEntry]) -> list[str]:
         if not group:
             continue
         lines.append(f"  {category.plural}")
-        bodies = _aligned_rows([entry.cells for entry in group])
+        bodies = _aligned_rows([_headed_cells(entry) for entry in group])
         lines.extend(
             f"    {entry.symbol} {body}".rstrip() for entry, body in zip(group, bodies, strict=True)
         )

@@ -542,7 +542,9 @@ def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
         if isinstance(difference, Action)
         else unresolvable_entries(difference)
     )
-    return tuple(f"{entry.symbol} {' '.join(entry.cells)}" for entry in entries)
+    return tuple(
+        f"{entry.symbol} {' '.join(cell for cell in entry.cells if cell)}" for entry in entries
+    )
 
 
 class UnmanagedAspectDrift:

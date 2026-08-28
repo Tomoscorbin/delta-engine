@@ -124,15 +124,27 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             AddColumn(DesiredColumn("age", Integer(), nullable=False)),
             (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer", "NOT NULL")),),
         ),
+        # The comment rides the column line; the empty middle phrase holds the
+        # NOT NULL position so comments align down a mixed group.
         (
             AddColumn(DesiredColumn("age", Integer(), comment="Age in years")),
             (
-                DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer",)),
                 DiffEntry(
-                    DiffCategory.COMMENTS,
+                    DiffCategory.COLUMNS,
                     DiffOperation.ADD,
-                    "column age",
-                    ("'Age in years'",),
+                    "age",
+                    ("Integer", "", "'Age in years'"),
+                ),
+            ),
+        ),
+        (
+            AddColumn(DesiredColumn("age", Integer(), nullable=False, comment="Age in years")),
+            (
+                DiffEntry(
+                    DiffCategory.COLUMNS,
+                    DiffOperation.ADD,
+                    "age",
+                    ("Integer", "NOT NULL", "'Age in years'"),
                 ),
             ),
         ),
@@ -229,7 +241,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                     DiffCategory.KEYS,
                     DiffOperation.ADD,
                     "foreign key orders_customer_id_fk",
-                    ("(customer_id) → cat.sch.customers",),
+                    ("(customer_id)", "→ cat.sch.customers"),
                 ),
             ),
         ),
@@ -321,22 +333,32 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, "column email.pii"),),
         ),
         # The subject names what carries the comment; alignment separates it
-        # from the text, so no colon is needed.
+        # from the text, so no colon is needed. A comment set where none
+        # existed adds; replacing one changes; clearing one removes —
+        # mirroring properties and tags.
         (
             SetColumnComment(column_name="id", desired_comment="the key", observed_comment=""),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column id", ("'the key'",)),),
+        ),
+        (
+            SetColumnComment(column_name="id", desired_comment="the key", observed_comment="old"),
             (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "column id", ("'the key'",)),),
         ),
         (
             SetColumnComment(column_name="id", desired_comment="", observed_comment="old"),
-            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "column id", ("(unset)",)),),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.REMOVE, "column id"),),
         ),
         (
             SetTableComment(desired_comment="core table", observed_comment=""),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "table", ("'core table'",)),),
+        ),
+        (
+            SetTableComment(desired_comment="core table", observed_comment="old"),
             (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "table", ("'core table'",)),),
         ),
         (
             SetTableComment(desired_comment="", observed_comment="old"),
-            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "table", ("(unset)",)),),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.REMOVE, "table"),),
         ),
         (
             AlterClustering(desired_clustering=("region", "day"), observed_clustering=()),
@@ -350,10 +372,15 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         # Removal carries no OPTIMIZE hint: OPTIMIZE FULL errors on a table
-        # without clustering columns.
+        # without clustering columns. It names the keys being removed — the
+        # subject alone restates the heading and would render an empty line.
         (
             AlterClustering(desired_clustering=(), observed_clustering=("region",)),
-            (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.REMOVE, "clustering"),),
+            (
+                DiffEntry(
+                    DiffCategory.CLUSTERING, DiffOperation.REMOVE, "clustering", ("(region)",)
+                ),
+            ),
         ),
         (
             RenameColumn(old_name="customer_nm", new_name="customer_name"),
@@ -382,7 +409,6 @@ def test_action_entries_render_expected(action, expected):
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
                 "primary key (id, tenant_id)",
-                ("(id, tenant_id)",),
             ),
             id="primary-key",
         ),
@@ -392,13 +418,14 @@ def test_action_entries_render_expected(action, expected):
                 DiffCategory.KEYS,
                 DiffOperation.ADD,
                 "foreign key (customer_id)",
-                ("(customer_id) → cat.sch.customers",),
+                ("→ cat.sch.customers",),
             ),
             id="foreign-key",
         ),
     ],
 )
 def test_unnamed_key_entries_identify_constraints_by_columns(action, expected):
+    # Then the column list identifies the key and never repeats as detail
     assert action_entries(action) == (expected,)
 
 
@@ -439,16 +466,20 @@ def test_create_table_entries_include_all_state_embedded_in_create():
         )
     )
 
-    # Then reporting states every fact that CREATE TABLE establishes. A None
-    # property asserts absence and is therefore not a creation change.
+    # Then reporting states every fact that CREATE TABLE establishes, with
+    # each column's comment on its own line rather than exiled to the
+    # comments group. A None property asserts absence and is therefore not a
+    # creation change.
     assert action_entries(action) == (
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "day", ("String",)),
+        DiffEntry(
+            DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL", "'identifier'")
+        ),
+        DiffEntry(
+            DiffCategory.COLUMNS, DiffOperation.ADD, "day", ("String", "", "'partition date'")
+        ),
         DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key tbl_pk", ("(id)",)),
         DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, "partitioning", ("(day)",)),
         DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, "delta.appendOnly", ("= 'true'",)),
-        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column id", ("'identifier'",)),
-        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column day", ("'partition date'",)),
         DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "table", ("'daily orders'",)),
     )
 
@@ -464,9 +495,7 @@ def test_create_table_entry_identifies_unnamed_primary_key_by_columns():
 
     key_entries = [entry for entry in action_entries(action) if entry.category is DiffCategory.KEYS]
 
-    assert key_entries == [
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key (id)", ("(id)",))
-    ]
+    assert key_entries == [DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key (id)")]
 
 
 def test_every_category_names_itself_in_singular_and_plural():
@@ -600,8 +629,59 @@ def test_diff_block_groups_lines_under_category_headings_in_plan_order():
     assert "  columns" in lines
     assert "    + age  Integer" in lines
     assert "  comments" in lines
-    assert "    ~ table  'c'" in lines
+    assert "    + table  'c'" in lines
     assert lines.index("  columns") < lines.index("  comments")
+
+
+def test_added_column_comments_align_across_mixed_nullability():
+    # Given a plan adding a NOT NULL column and a nullable column, both commented
+    report = _grid_report(
+        "orders",
+        plan=_plan(
+            "orders",
+            AddColumn(DesiredColumn("id", Long(), nullable=False, comment="key")),
+            AddColumn(DesiredColumn("note", String(), comment="free text")),
+        ),
+    )
+
+    # When rendering the diff block
+    lines = render_diff_block(report).splitlines()
+
+    # Then each comment rides its own column's line, in one aligned column
+    assert "    + id    Long    NOT NULL  'key'" in lines
+    assert "    + note  String            'free text'" in lines
+
+
+def test_added_column_comment_sits_beside_the_type_when_nothing_is_not_null():
+    # Given a plan adding only nullable commented columns
+    report = _grid_report(
+        "orders",
+        plan=_plan("orders", AddColumn(DesiredColumn("note", String(), comment="free text"))),
+    )
+
+    # When rendering the diff block
+    lines = render_diff_block(report).splitlines()
+
+    # Then the unused NOT NULL column collapses instead of gapping the line
+    assert "    + note  String  'free text'" in lines
+
+
+def test_clustering_lines_drop_the_subject_that_restates_the_heading():
+    # Given a plan removing the table's clustering keys
+    report = _grid_report(
+        "orders",
+        plan=_plan(
+            "orders",
+            AlterClustering(desired_clustering=(), observed_clustering=("region",)),
+        ),
+    )
+
+    # When rendering the diff block
+    lines = render_diff_block(report).splitlines()
+
+    # Then the line under the heading names the removed keys, not "clustering" again
+    assert "  clustering" in lines
+    assert "    - (region)" in lines
 
 
 def test_diff_block_marks_a_create_in_the_header():
@@ -1236,7 +1316,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
     assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
     assert "cat.sch.a" in rendered.splitlines()
     assert "cat.sch.b" in rendered.splitlines()
-    assert "~ table  'c'" in rendered
+    assert "+ table  'c'" in rendered
     assert "+ age  Integer" in rendered
 
 
@@ -1420,8 +1500,9 @@ def test_a_rejected_table_shows_the_differences_no_action_could_close():
     # When the block is rendered
     block = render_diff_block(report)
 
-    # Then the unresolvable difference is shown alongside any refused actions
-    assert "~ partitioning  (country) → (region)" in block
+    # Then the unresolvable difference is shown alongside any refused actions,
+    # under its heading with no repeated subject
+    assert "  partitioning\n    ~ (country) → (region)" in block
 
 
 def test_a_table_with_no_diff_at_all_still_points_at_its_failures():

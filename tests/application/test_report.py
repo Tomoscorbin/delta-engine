@@ -46,6 +46,7 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan import TableCreation, TableDiff, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
+    AddColumn,
     CreateTable,
     EnableTableFeature,
     SetTableComment,
@@ -1018,13 +1019,30 @@ def test_table_to_dict_states_the_planned_change():
     assert payload["has_changes"] is True
     assert payload["has_failures"] is False
     assert payload["changes"] == [
-        {"kind": "comments", "operation": "change", "subject": "table", "detail": "'hello'"}
+        {"kind": "comments", "operation": "add", "subject": "table", "detail": "'hello'"}
     ]
     assert payload["planned_sql_statements"] == [
         "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
     ]
     assert payload["failures"] == []
     assert payload["execution"] is None
+
+
+def test_table_to_dict_detail_reads_as_prose_without_alignment_placeholders():
+    # Given a plan adding a nullable commented column, whose entry holds an
+    # empty alignment phrase between the type and the comment
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan("orders", AddColumn(DesiredColumn("note", String(), comment="free text"))),
+        statements=("SQL 0",),
+    )
+
+    # When serializing the public report
+    (change,) = report.to_dict()["changes"]
+
+    # Then the detail joins with single spaces, skipping the placeholder
+    assert change["detail"] == "String 'free text'"
 
 
 def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
@@ -1062,7 +1080,7 @@ def test_table_to_dict_spells_every_operation_as_one_of_three_plain_words():
             "orders",
             SetTableTag(name="env", desired_value="prod", observed_value=None),
             UnsetTableTag(name="legacy"),
-            SetTableComment(desired_comment="hello", observed_comment=""),
+            SetTableComment(desired_comment="hello", observed_comment="old"),
         ),
         statements=("SQL 0", "SQL 1", "ALTER TABLE ... SET TAGS (...)"),
     )
