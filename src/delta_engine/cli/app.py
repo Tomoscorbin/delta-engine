@@ -110,7 +110,9 @@ def plan(
         reference = DeclarationRef.parse(declaration)
         result = _sync(reference, dry_run=True)
         typer.echo(_render_sync_view(result, output))
-        raise typer.Exit(code=_plan_exit_code(result.report, fail_on_changes=fail_on_changes))
+        raise typer.Exit(
+            code=_resolve_plan_exit_code(result.report, fail_on_changes=fail_on_changes)
+        )
 
 
 @app.command()
@@ -146,7 +148,7 @@ def _render_sync_view(view: SyncView, output: OutputFormat) -> str:
     return render_sync(view.target, view.declaration, view.report)
 
 
-def _plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int:
+def _resolve_plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int:
     """Map one dry-run report to the plan command's exit code."""
     if report.has_failures:
         return _EXIT_FAILURE
