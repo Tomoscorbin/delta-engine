@@ -627,6 +627,42 @@ table with `REFERENCED_COLUMN_TYPE_MISMATCH`, blocking its dependents.
 Register the same parent object used by the foreign-key declaration so the
 mismatch surfaces at construction rather than at resolution.
 
+### Referencing a table by name
+
+`references` also accepts a dotted name string, for when the parent's
+`DeltaTable` object is not importable — another team owns it, or importing it
+would create a circular import:
+
+```python
+orders = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="orders",
+    columns=[
+        Column("order_id", Long(), nullable=False),
+        Column("customer_id", Long(), nullable=False),
+    ],
+    primary_key=["order_id"],
+    foreign_keys=[
+        ForeignKey(columns={"customer_id": "id"}, references="silver.customers"),
+    ],
+)
+```
+
+Two forms are accepted. `"schema.table"` is completed with the owning table's
+catalog, so it can never be cross-catalog and never hardcodes an
+environment-specific catalog name — prefer it. `"catalog.schema.table"` works
+too and must name the owner's catalog. A bare table name is rejected.
+
+A name carries no primary key to resolve column shorthands against, so a name
+reference requires the explicit `{local: referenced}` mapping form. The
+primary-key and column-type checks an object reference runs at construction
+happen at sync time instead, when the resolver judges the registered parent —
+the referenced table must be registered in the same sync either way. The
+mapping's referenced column spelling must match the parent's declared spelling
+exactly; a case difference is reported at sync as
+`REFERENCED_COLUMN_CASE_MISMATCH`.
+
 ### Self-referential foreign keys
 
 Use the `Self` sentinel when a table references itself:
