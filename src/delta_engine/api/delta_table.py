@@ -92,11 +92,10 @@ Self: Final = _SelfReference()
 @dataclass(frozen=True, slots=True)
 class _NameReference:
     """
-    A foreign key target named by a dotted string, normalized at construction.
+    A foreign key target parsed from a dotted name string.
 
-    ``catalog`` is ``None`` for the two-part ``schema.table`` form; the owning
-    table's catalog completes it at lowering time, which is what makes the
-    two-part form immune to the cross-catalog rule by construction.
+    ``catalog`` is ``None`` for the two-part ``schema.table`` form, meaning
+    the owning table's catalog.
     """
 
     schema: str
@@ -105,8 +104,8 @@ class _NameReference:
 
 
 _NAME_REFERENCE_LABELS: Final[dict[int, tuple[str, ...]]] = {
-    2: ("schema", "name"),
-    3: ("catalog", "schema", "name"),
+    2: ("schema", "table"),
+    3: ("catalog", "schema", "table"),
 }
 
 _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
@@ -370,13 +369,11 @@ def _validate_column_names(
 
 class _ParentDeclaration(NamedTuple):
     """
-    What a referenced table's declaration supplies at lowering time.
+    A referenced table's declared primary key and column types.
 
     Present only when the parent's declaration is in scope (a ``DeltaTable``
-    reference or ``Self``); a name reference supplies no declaration, so the
-    checks that need one wait for the sync to judge the registered parent.
-    ``primary_key`` is ``None`` when the declared parent has no primary key —
-    a distinct, always-invalid state.
+    reference or ``Self``); a name reference supplies no declaration.
+    ``primary_key`` is ``None`` when the declared parent has no primary key.
     """
 
     primary_key: PrimaryKeyConstraint | None
@@ -502,17 +499,15 @@ class ForeignKey:
         """
         Resolve ``references`` into the constraint's table and column pairs.
 
-        Runs every lowering rule whose inputs exist at lowering time.
-        The reference form decides what is available: a ``DeltaTable`` or
-        :data:`Self` supplies the parent's declaration (for ``Self`` the
-        enclosing table supplies it, because the owner's ``DesiredTable``
-        does not exist yet while its foreign keys are being lowered), so the
-        resolved parent columns must equal its primary key exactly and each
-        local column's data type must match its referenced column's. A name
-        reference supplies no declaration, so those checks wait for the sync
-        to judge the registered parent. Every form's referenced table must
-        live in the owner's catalog, and local column existence is never
-        checked here — the ``DesiredTable`` built right after enforces it.
+        Runs every lowering rule whose inputs exist at lowering time. The
+        reference form decides what is available: a ``DeltaTable`` or
+        :data:`Self` supplies the parent's declaration (``Self`` reads it
+        from the owner), so the resolved parent columns must equal its
+        primary key exactly and each local column's data type must match its
+        referenced column's. A name reference supplies no declaration, so
+        those checks are the sync's. Every form's referenced table must live
+        in the owner's catalog. Local column existence is never checked here
+        — the ``DesiredTable`` built right after enforces it.
         """
         declared: _ParentDeclaration | None
         match self.references:
@@ -550,6 +545,7 @@ class ForeignKey:
         local_names = {column.name: column.name for column in owner_columns}
 
         if declared is None:
+            # Re-asserts the construction invariant; also narrows columns for typing.
             if not isinstance(self.columns, Mapping):
                 raise TypeError(_NAME_REFERENCE_NEEDS_MAPPING)
             pairs = tuple(

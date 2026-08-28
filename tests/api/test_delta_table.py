@@ -1791,29 +1791,45 @@ def test_name_reference_requires_an_explicit_column_mapping(
 
 
 def test_name_reference_rejects_a_bare_table_name():
-    # When the reference is a single-part name, then ForeignKey rejects it,
-    # naming the accepted forms
+    # Given a reference naming only a table
+    reference = "customers"
+
+    # When it is used in a foreign key
+    # Then construction fails, naming the accepted forms
     with pytest.raises(ValueError, match=r"schema\.table"):
-        ForeignKey(columns={"customer_id": "id"}, references="customers")
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
 def test_name_reference_rejects_too_many_parts():
-    # When the reference has more than three parts, then ForeignKey rejects it
+    # Given a reference with more than three dotted parts
+    reference = "cat.sch.customers.extra"
+
+    # When it is used in a foreign key
+    # Then construction fails, naming the accepted forms
     with pytest.raises(ValueError, match=r"schema\.table"):
-        ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers.extra")
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
-def test_name_reference_names_the_blank_part_it_rejects():
-    # When a part of the dotted name is blank, then the error names that part
-    with pytest.raises(ValueError, match="blank schema part"):
-        ForeignKey(columns={"customer_id": "id"}, references="silver..events")
+@pytest.mark.parametrize(
+    ("reference", "blank_part"),
+    [("silver..events", "blank schema part"), ("silver.", "blank table part")],
+)
+def test_name_reference_names_the_blank_part_it_rejects(reference: str, blank_part: str):
+    # Given a dotted name with one blank part
+    # When it is used in a foreign key
+    # Then construction fails, naming that part
+    with pytest.raises(ValueError, match=blank_part):
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
 def test_name_reference_rejects_forbidden_characters():
-    # When a part contains characters Unity Catalog forbids in object names,
-    # then ForeignKey rejects it at construction rather than at DDL time
+    # Given a table name with a character Unity Catalog forbids in object names
+    reference = "sch.my table"
+
+    # When it is used in a foreign key
+    # Then construction fails, rather than waiting for DDL to be rejected
     with pytest.raises(ValueError, match="forbids"):
-        ForeignKey(columns={"customer_id": "id"}, references="sch.my table")
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
 def test_name_reference_rejects_an_over_long_part():
