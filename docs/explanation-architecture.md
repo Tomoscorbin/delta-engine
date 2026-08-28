@@ -699,7 +699,7 @@ executing.
   primary-key columns
 
 A `ForeignKey` declares its target by passing the referenced `DeltaTable` object
-directly, or the `Self` sentinel for a self-reference:
+directly, the `Self` sentinel for a self-reference, or a dotted table name:
 
 ```python
 customers = DeltaTable(
@@ -731,11 +731,18 @@ This source-code order does not determine execution order. The engine sorts
 lowered desired tables by qualified name for deterministic setup, then the
 resolver topologically orders them by FK dependency before execution.
 
-References by dotted name are intentionally not supported in this iteration. If
-that becomes necessary, the API can be widened to accept a `QualifiedName` as an
-additional branch. That would be backward-compatible: the referenced columns are
-already explicit in the `columns` mapping, so a bare name would only lose the
-primary-key object the engine validates the mapping against.
+References by dotted name cover the cases an object reference cannot express
+without coupling: a parent owned by another package, or one whose import would
+be circular. `references="catalog.schema.table"` is the only accepted form,
+and the catalog must be the owner's — a cross-catalog name is rejected at
+lowering exactly as a cross-catalog object reference is. A name carries no primary-key
+object to resolve the `columns` shorthands against, so a name reference
+requires the explicit `{local: referenced}` mapping, and the primary-key and
+type checks an object reference runs at lowering wait for the resolver's
+sync-time judgment of the registered parent instead. Nothing else changes: the
+name lowers to the same qualified name an object reference would, and a name
+not registered in the sync fails as `UNRESOLVABLE_REFERENCE` exactly as an
+unregistered object does.
 
 Partitioning is shaped by a related decision. `primary_key` and
 `partitioned_by` are both table-level lists of column names, but "order"

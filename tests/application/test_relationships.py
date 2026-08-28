@@ -332,6 +332,58 @@ def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
     assert not _failed_resolutions(result)
 
 
+def test_resolve_orders_a_name_referenced_parent_before_its_dependent():
+    # Given orders declares its dependency on customers by name, not by object
+    customers = DeltaTable(
+        "cat",
+        "sch",
+        "customers",
+        columns=(Column("id", String(), nullable=False),),
+        primary_key=["id"],
+    )
+    orders = DeltaTable(
+        "cat",
+        "sch",
+        "orders",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("customer_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")],
+    )
+    tables = (orders.to_desired_table(), customers.to_desired_table())
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then customers is ordered before orders with no structural failures
+    _assert_before(result, "cat.sch.customers", "cat.sch.orders")
+    assert not _failed_resolutions(result)
+
+
+def test_resolve_fails_a_name_reference_to_an_unregistered_table():
+    # Given orders names a parent that is not part of the sync
+    orders = DeltaTable(
+        "cat",
+        "sch",
+        "orders",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("customer_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")],
+    )
+
+    # When resolving dependencies
+    [resolution] = resolve((orders.to_desired_table(),))
+
+    # Then the foreign key fails as an unresolvable reference
+    [failure] = resolution.structural_failures
+    assert failure.reason is ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+
+
 def test_resolve_handles_chain_of_dependencies():
     # Given c -> b -> a
     tables = (

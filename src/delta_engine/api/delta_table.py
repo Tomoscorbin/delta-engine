@@ -89,18 +89,37 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
-def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
+_NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
+    "foreign key with a name reference requires an explicit"
+    " {local: referenced} column mapping; the string and sequence"
+    " shorthand forms resolve against the referenced table's primary key,"
+    " which a name does not carry"
+)
+
+
+def _parse_name_reference(raw: str) -> QualifiedName:
+    """
+    Parse a ``catalog.schema.table`` string into the referenced table's name.
+
+    Every part must be a name Unity Catalog can store.
+    """
+    name = QualifiedName.parse(raw)
+    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
+    return name
+
+
+def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "Table") -> None:
     """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
     for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
         if len(part) > _OBJECT_NAME_MAX_LENGTH:
             raise ValueError(
-                f"Table {label} is {len(part)} characters long; Unity Catalog"
+                f"{subject} {label} is {len(part)} characters long; Unity Catalog"
                 f" limits object names to {_OBJECT_NAME_MAX_LENGTH} characters"
             )
         forbidden = sorted(set(part) & _OBJECT_NAME_FORBIDDEN_CHARACTERS)
         if forbidden:
             raise ValueError(
-                f"Table {label} {part!r} contains characters Unity Catalog"
+                f"{subject} {label} {part!r} contains characters Unity Catalog"
                 f" forbids in object names: {forbidden}. Periods, spaces,"
                 " forward slashes, control characters, and DEL are not allowed."
             )
@@ -309,10 +328,15 @@ def _validate_column_names(
             )
 
 
-class _ReferencedSide(NamedTuple):
-    """The referenced side of a foreign key, resolved at lowering time."""
+class _ParentDeclaration(NamedTuple):
+    """
+    A referenced table's declared primary key and column types.
 
-    table: QualifiedName
+    Present only when the parent's declaration is in scope (a ``DeltaTable``
+    reference or ``Self``); a name reference supplies no declaration.
+    ``primary_key`` is ``None`` when the declared parent has no primary key.
+    """
+
     primary_key: PrimaryKeyConstraint | None
     column_types: dict[str, DataType]
 
@@ -332,16 +356,20 @@ class ForeignKey:
     created. When omitted, Databricks chooses the name. Existing constraints
     match by definition regardless of their physical name.
 
-    ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
-    for a self-referential key. See the architecture explanation doc for why
-    the reference is an object rather than a name. The referenced table must
-    live in the same catalog as the declaring table — information_schema is
-    per-catalog, so a cross-catalog constraint could be created but never
-    observed afterwards.
+    ``references`` is another :class:`DeltaTable`, the :data:`Self` sentinel
+    for a self-referential key, or the referenced table's full
+    ``"catalog.schema.table"`` name. The referenced table must live in the
+    same catalog as the declaring table — information_schema is per-catalog,
+    so a cross-catalog constraint could be created but never observed
+    afterwards. A name reference carries no primary key to resolve shorthands
+    against, so it requires the explicit ``{local: referenced}`` mapping, and
+    its primary-key and column-type checks happen when the sync judges the
+    registered parent instead of at declaration time. Either way the
+    referenced table must be part of the same sync.
     """
 
     columns: str | ListOrTuple[str] | Mapping[str, str]
-    references: DeltaTable | _SelfReference
+    references: DeltaTable | _SelfReference | str
     name: str | None = None
 
     def __post_init__(self) -> None:
@@ -383,10 +411,18 @@ class ForeignKey:
         if self.name is not None:
             Identifier(self.name)
 
-        if not isinstance(self.references, (DeltaTable, _SelfReference)):
-            raise TypeError(
-                f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
-            )
+        match self.references:
+            case str() as raw:
+                if not isinstance(frozen, Mapping):
+                    raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
+                _parse_name_reference(raw)
+            case DeltaTable() | _SelfReference():
+                pass
+            case _:
+                raise TypeError(
+                    "foreign key references must be a DeltaTable, Self, or a"
+                    f" 'catalog.schema.table' name; got {self.references!r}"
+                )
 
         object.__setattr__(self, "columns", frozen)
 
@@ -399,50 +435,85 @@ class ForeignKey:
         """
         Lower this declaration into a domain constraint.
 
-        Applies the lowering rules in order: the referenced table must live in
-        the owner's catalog, must declare a primary key, the resolved parent
-        columns must equal that key exactly, and each local column's data type must
-        match its referenced column's. Local column existence is not checked
-        here — the ``DesiredTable`` built right after enforces it.
+        Runs every lowering rule whose inputs exist at lowering time. The
+        reference form decides what is available: a ``DeltaTable`` or
+        :data:`Self` supplies the parent's declaration (``Self`` reads it
+        from the owner), so the resolved parent columns must equal its
+        primary key exactly and each local column's data type must match its
+        referenced column's. A name reference supplies no declaration, so
+        those checks are the sync's. Every form's referenced table must live
+        in the owner's catalog. Local column existence is never checked here
+        — the ``DesiredTable`` built right after enforces it.
         """
-        referenced = self._resolve_reference(owner_name, owner_columns, owner_primary_key)
+        declared: _ParentDeclaration | None
+        match self.references:
+            case str() as raw:
+                referenced_table = _parse_name_reference(raw)
+                declared = None
+            case _SelfReference():
+                referenced_table = owner_name
+                declared = _ParentDeclaration(
+                    owner_primary_key,
+                    {column.name: column.data_type for column in owner_columns},
+                )
+            case DeltaTable() as parent:
+                desired = parent.to_desired_table()
+                referenced_table = desired.qualified_name
+                declared = _ParentDeclaration(
+                    desired.primary_key,
+                    {column.name: column.data_type for column in desired.columns},
+                )
 
-        if referenced.table.catalog != owner_name.catalog:
+        if referenced_table.catalog != owner_name.catalog:
             raise ValueError(
                 f"cross-catalog foreign key not supported: {owner_name} cannot"
-                f" reference {referenced.table}. information_schema is"
+                f" reference {referenced_table}. information_schema is"
                 " per-catalog, so the engine could create the constraint but"
                 " never observe it afterwards; declare both tables in the same"
                 " catalog."
             )
 
-        primary_key = referenced.primary_key
+        local_names = {column.name: column.name for column in owner_columns}
+
+        if declared is None:
+            # Re-asserts the construction invariant; also narrows columns for typing.
+            if not isinstance(self.columns, Mapping):
+                raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
+            return ForeignKeyConstraint(
+                local_columns=tuple(
+                    local_names.get(Identifier(local), local) for local in self.columns
+                ),
+                referenced_table=referenced_table,
+                referenced_columns=tuple(self.columns.values()),
+                name=self.name,
+            )
+
+        primary_key = declared.primary_key
         if primary_key is None:
             raise ValueError(
-                f"foreign key references {referenced.table}, which declares no primary key"
+                f"foreign key references {referenced_table}, which declares no primary key"
             )
 
         pairs = tuple(
             (Identifier(local), Identifier(parent))
-            for local, parent in self._resolve_column_pairs(referenced.table, primary_key)
+            for local, parent in self._resolve_column_pairs(referenced_table, primary_key)
         )
-        local_names = {column.name: column.name for column in owner_columns}
-        referenced_names = {name: name for name in referenced.column_types}
+        referenced_names = {name: name for name in declared.column_types}
         local_columns = tuple(local_names.get(local, local) for local, _ in pairs)
         referenced_columns = tuple(referenced_names.get(parent, parent) for _, parent in pairs)
 
         if not primary_key.matches_columns(referenced_columns):
-            declared = set(referenced_columns)
+            mapped = set(referenced_columns)
             key = set(primary_key.columns)
-            missing = sorted(key - declared)
-            extra = sorted(declared - key)
+            missing = sorted(key - mapped)
+            extra = sorted(mapped - key)
             details = []
             if missing:
                 details.append(f"missing from the mapping: {', '.join(missing)}")
             if extra:
                 details.append(f"not in the key: {', '.join(extra)}")
             raise ValueError(
-                f"foreign key columns must reference {referenced.table}'s"
+                f"foreign key columns must reference {referenced_table}'s"
                 f" primary key ({', '.join(primary_key.columns)}) exactly;"
                 f" {'; '.join(details)}"
             )
@@ -452,44 +523,20 @@ class ForeignKey:
             local_type = local_types.get(local_name)
             if local_type is None:
                 continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = referenced.column_types[referenced_name]
+            referenced_type = declared.column_types[referenced_name]
             if local_type != referenced_type:
                 raise ValueError(
                     f"foreign key column type mismatch: {owner_name}.{local_name}"
-                    f" is {local_type} but {referenced.table}.{referenced_name}"
+                    f" is {local_type} but {referenced_table}.{referenced_name}"
                     f" is {referenced_type}"
                 )
 
         return ForeignKeyConstraint(
             local_columns=local_columns,
-            referenced_table=referenced.table,
+            referenced_table=referenced_table,
             referenced_columns=referenced_columns,
             name=self.name,
         )
-
-    def _resolve_reference(
-        self,
-        owner_name: QualifiedName,
-        owner_columns: tuple[Column, ...],
-        owner_primary_key: PrimaryKeyConstraint | None,
-    ) -> _ReferencedSide:
-        """
-        Resolve ``references`` to the referenced side of the constraint.
-
-        For :data:`Self` the enclosing table supplies every field — its own
-        name, ``owner_primary_key``, and ``owner_columns`` — because the
-        owner's ``DesiredTable`` does not exist yet while its foreign keys
-        are being lowered. ``column_types`` always covers every referenced
-        column: primary-key columns are validated to exist on whichever
-        table declares them.
-        """
-        if isinstance(self.references, _SelfReference):
-            types = {column.name: column.data_type for column in owner_columns}
-            return _ReferencedSide(owner_name, owner_primary_key, types)
-
-        desired = self.references.to_desired_table()
-        types = {column.name: column.data_type for column in desired.columns}
-        return _ReferencedSide(desired.qualified_name, desired.primary_key, types)
 
     def _resolve_column_pairs(
         self,

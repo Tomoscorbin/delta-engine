@@ -1712,12 +1712,101 @@ def test_explicit_foreign_key_name_is_independent_of_unnamed_foreign_keys():
 
 
 def test_foreign_key_rejects_non_table_reference_during_its_construction():
-    # When the reference is neither a DeltaTable nor Self, then ForeignKey rejects it
+    # When the reference is neither a DeltaTable, Self, nor a name string,
+    # then ForeignKey rejects it
     with pytest.raises(TypeError):
         ForeignKey(
             columns={"customer_id": "id"},
-            references="cat.sch.customers",  # type: ignore[arg-type]
+            references=123,  # type: ignore[arg-type]
         )
+
+
+# ---------- name references ----------
+
+
+def test_name_reference_lowers_to_the_named_table():
+    # Given a foreign key referencing its parent by full name, with no
+    # parent object anywhere in scope
+    declaration = ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")
+
+    # When the owning table is constructed in that same catalog
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("customer_id", Integer())],
+        foreign_keys=[declaration],
+    )
+
+    # Then the reference lowers to the named table with the mapped columns
+    [foreign_key] = orders.to_desired_table().foreign_keys
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.local_columns == ("customer_id",)
+    assert foreign_key.referenced_columns == ("id",)
+
+
+@pytest.mark.parametrize("reference", ["customers", "sch.customers", "cat.sch.customers.extra"])
+def test_name_reference_rejects_anything_but_a_three_part_name(reference: str):
+    # Given a reference that is not exactly catalog.schema.table
+    # When it is used in a foreign key
+    # Then construction fails
+    with pytest.raises(ValueError):
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
+
+
+def test_name_reference_rejects_a_foreign_catalog():
+    # Given a foreign key naming a table in another catalog
+    declaration = ForeignKey(columns={"customer_id": "id"}, references="other.sch.customers")
+
+    # When the owning table is constructed, then the cross-catalog
+    # relationship is rejected exactly as it is for object references
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("customer_id", Integer())],
+            foreign_keys=[declaration],
+        )
+
+
+@pytest.mark.parametrize("columns", ["customer_id", ["customer_id"], ("customer_id",)])
+def test_name_reference_requires_an_explicit_column_mapping(
+    columns: str | list[str] | tuple[str, ...],
+):
+    # When a name reference is combined with a shorthand column form, then
+    # ForeignKey rejects it: shorthands resolve against the parent's primary
+    # key, which a name does not carry
+    with pytest.raises(ValueError):
+        ForeignKey(columns=columns, references="cat.sch.customers")
+
+
+@pytest.mark.parametrize("reference", [".silver.events", "cat..events", "cat.silver."])
+def test_name_reference_rejects_a_blank_part(reference: str):
+    # Given a dotted name with one blank part
+    # When it is used in a foreign key
+    # Then construction fails
+    with pytest.raises(ValueError):
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
+
+
+def test_name_reference_rejects_forbidden_characters():
+    # Given a table name with a character Unity Catalog forbids in object names
+    reference = "cat.sch.my table"
+
+    # When it is used in a foreign key
+    # Then construction fails, rather than waiting for DDL to be rejected
+    with pytest.raises(ValueError):
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
+
+
+def test_name_reference_rejects_an_over_long_part():
+    # Given a table name one character over Unity Catalog's object-name limit
+    over_long = "t" * 256
+
+    # When it is used in a name reference, then ForeignKey rejects it
+    with pytest.raises(ValueError):
+        ForeignKey(columns={"customer_id": "id"}, references=f"cat.sch.{over_long}")
 
 
 def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key():
