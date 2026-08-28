@@ -350,7 +350,7 @@ def test_resolve_orders_a_name_referenced_parent_before_its_dependent():
             Column("customer_id", String()),
         ),
         primary_key=["id"],
-        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="sch.customers")],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")],
     )
     tables = (orders.to_desired_table(), customers.to_desired_table())
 
@@ -373,7 +373,7 @@ def test_resolve_fails_a_name_reference_to_an_unregistered_table():
             Column("customer_id", String()),
         ),
         primary_key=["id"],
-        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="sch.customers")],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")],
     )
 
     # When resolving dependencies

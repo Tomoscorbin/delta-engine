@@ -733,10 +733,9 @@ resolver topologically orders them by FK dependency before execution.
 
 References by dotted name cover the cases an object reference cannot express
 without coupling: a parent owned by another package, or one whose import would
-be circular. `references="schema.table"` is completed with the owner's catalog
-at lowering, so it can never be cross-catalog and never pins an
-environment-specific catalog name; `references="catalog.schema.table"` is also
-accepted and must name the owner's catalog. A name carries no primary-key
+be circular. `references="catalog.schema.table"` is the only accepted form,
+and the catalog must be the owner's — a cross-catalog name is rejected at
+lowering exactly as a cross-catalog object reference is. A name carries no primary-key
 object to resolve the `columns` shorthands against, so a name reference
 requires the explicit `{local: referenced}` mapping, and the primary-key and
 type checks an object reference runs at lowering wait for the resolver's

@@ -1724,29 +1724,9 @@ def test_foreign_key_rejects_non_table_reference_during_its_construction():
 # ---------- name references ----------
 
 
-def test_two_part_name_reference_completes_with_the_owners_catalog():
-    # Given a foreign key referencing its parent by "schema.table", with no
+def test_name_reference_lowers_to_the_named_table():
+    # Given a foreign key referencing its parent by full name, with no
     # parent object anywhere in scope
-    declaration = ForeignKey(columns={"customer_id": "id"}, references="sch.customers")
-
-    # When the owning table is constructed
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("customer_id", Integer())],
-        foreign_keys=[declaration],
-    )
-
-    # Then the reference is completed with the owner's catalog
-    [foreign_key] = orders.to_desired_table().foreign_keys
-    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_columns == ("id",)
-
-
-def test_three_part_name_reference_in_the_owners_catalog_is_accepted():
-    # Given a foreign key naming its parent's catalog explicitly
     declaration = ForeignKey(columns={"customer_id": "id"}, references="cat.sch.customers")
 
     # When the owning table is constructed in that same catalog
@@ -1758,12 +1738,24 @@ def test_three_part_name_reference_in_the_owners_catalog_is_accepted():
         foreign_keys=[declaration],
     )
 
-    # Then the reference lowers to the named table
+    # Then the reference lowers to the named table with the mapped columns
     [foreign_key] = orders.to_desired_table().foreign_keys
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.local_columns == ("customer_id",)
+    assert foreign_key.referenced_columns == ("id",)
 
 
-def test_three_part_name_reference_rejects_a_foreign_catalog():
+def test_name_reference_rejects_a_two_part_name():
+    # Given a reference missing its catalog part
+    reference = "sch.customers"
+
+    # When it is used in a foreign key
+    # Then construction fails, naming the accepted form
+    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
+        ForeignKey(columns={"customer_id": "id"}, references=reference)
+
+
+def test_name_reference_rejects_a_foreign_catalog():
     # Given a foreign key naming a table in another catalog
     declaration = ForeignKey(columns={"customer_id": "id"}, references="other.sch.customers")
 
@@ -1786,8 +1778,8 @@ def test_name_reference_requires_an_explicit_column_mapping(
     # When a name reference is combined with a shorthand column form, then
     # ForeignKey rejects it: shorthands resolve against the parent's primary
     # key, which a name does not carry
-    with pytest.raises(TypeError, match="column mapping"):
-        ForeignKey(columns=columns, references="sch.customers")
+    with pytest.raises(ValueError, match="column mapping"):
+        ForeignKey(columns=columns, references="cat.sch.customers")
 
 
 def test_name_reference_rejects_a_bare_table_name():
@@ -1795,8 +1787,8 @@ def test_name_reference_rejects_a_bare_table_name():
     reference = "customers"
 
     # When it is used in a foreign key
-    # Then construction fails, naming the accepted forms
-    with pytest.raises(ValueError, match=r"schema\.table"):
+    # Then construction fails, naming the accepted form
+    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
         ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
@@ -1805,14 +1797,18 @@ def test_name_reference_rejects_too_many_parts():
     reference = "cat.sch.customers.extra"
 
     # When it is used in a foreign key
-    # Then construction fails, naming the accepted forms
-    with pytest.raises(ValueError, match=r"schema\.table"):
+    # Then construction fails, naming the accepted form
+    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
         ForeignKey(columns={"customer_id": "id"}, references=reference)
 
 
 @pytest.mark.parametrize(
     ("reference", "blank_part"),
-    [("silver..events", "blank schema part"), ("silver.", "blank table part")],
+    [
+        (".silver.events", "blank catalog part"),
+        ("cat..events", "blank schema part"),
+        ("cat.silver.", "blank table part"),
+    ],
 )
 def test_name_reference_names_the_blank_part_it_rejects(reference: str, blank_part: str):
     # Given a dotted name with one blank part
@@ -1824,7 +1820,7 @@ def test_name_reference_names_the_blank_part_it_rejects(reference: str, blank_pa
 
 def test_name_reference_rejects_forbidden_characters():
     # Given a table name with a character Unity Catalog forbids in object names
-    reference = "sch.my table"
+    reference = "cat.sch.my table"
 
     # When it is used in a foreign key
     # Then construction fails, rather than waiting for DDL to be rejected
@@ -1838,7 +1834,7 @@ def test_name_reference_rejects_an_over_long_part():
 
     # When it is used in a name reference, then ForeignKey rejects it
     with pytest.raises(ValueError, match="255"):
-        ForeignKey(columns={"customer_id": "id"}, references=f"sch.{over_long}")
+        ForeignKey(columns={"customer_id": "id"}, references=f"cat.sch.{over_long}")
 
 
 def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key():

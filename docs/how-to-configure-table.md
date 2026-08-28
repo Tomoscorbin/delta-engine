@@ -644,15 +644,16 @@ orders = DeltaTable(
     ],
     primary_key=["order_id"],
     foreign_keys=[
-        ForeignKey(columns={"customer_id": "id"}, references="silver.customers"),
+        ForeignKey(columns={"customer_id": "id"}, references="dev.silver.customers"),
     ],
 )
 ```
 
-Two forms are accepted. `"schema.table"` is completed with the owning table's
-catalog, so it can never be cross-catalog and never hardcodes an
-environment-specific catalog name — prefer it. `"catalog.schema.table"` works
-too and must name the owner's catalog. A bare table name is rejected.
+The full `"catalog.schema.table"` name is required; fewer parts are rejected.
+The catalog must be the owning table's catalog — a cross-catalog name fails
+construction exactly as a cross-catalog object reference does. When the
+catalog varies by environment, build the reference from the same value the
+table uses: `references=f"{catalog}.silver.customers"`.
 
 A name carries no primary key to resolve column shorthands against, so a name
 reference requires the explicit `{local: referenced}` mapping form. The
