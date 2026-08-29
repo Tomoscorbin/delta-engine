@@ -153,23 +153,19 @@ A table name that is not a valid Python identifier is sanitised for the
 variable binding (`2024-orders` becomes `_2024_orders`); the declared table
 name is always the real one.
 
-A correctly generated module plans no changes against its source table, with
-one exception: foreign keys, which plan as drops until wired up by hand (see
-below). Warnings go to stderr, so redirecting stdout to a file never captures
-them.
+A correctly generated module plans no changes against its source table.
+Warnings go to stderr, so redirecting stdout to a file never captures them.
 
 Connection configuration is identical to `plan`: `DATABRICKS_SQL_WAREHOUSE_ID`
 plus Databricks unified authentication.
 
-### Foreign keys are not rendered
+### Foreign keys
 
-A `ForeignKey` declaration references another `DeltaTable` object, which a
-single-table module cannot construct. Each observed foreign key is instead
-emitted as a commented hint inside the constructor call and as a stderr
-warning. **Planning the module as written drops those constraints** — the
-engine owns the full key set, so an undeclared key reads as removal. Wire the
-referenced tables (or `Self` for a self-referencing key) into `foreign_keys`
-before applying anything.
+Each observed foreign key is declared in `foreign_keys`: a key to another
+table references it by its full `"catalog.schema.table"` name, and a
+self-referencing key uses `Self`. The module never constructs the referenced
+`DeltaTable`, so it stays self-contained, and planning it as written keeps
+every constraint.
 
 ### Streaming tables
 
