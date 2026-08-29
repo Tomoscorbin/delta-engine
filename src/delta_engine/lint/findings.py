@@ -27,13 +27,19 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class LintReport:
-    """Aggregate outcome of one lint run across all tables."""
+    """
+    Aggregate outcome of one lint run across all tables.
+
+    Findings are held in qualified-table-name order, each table's in the order
+    given, so every rendering groups cleanly per table.
+    """
 
     findings: ListOrTuple[Finding]
     tables_checked: int
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "findings", tuple(self.findings))
+        ordered = sorted(self.findings, key=lambda finding: str(finding.table))
+        object.__setattr__(self, "findings", tuple(ordered))
 
     @property
     def error_count(self) -> int:

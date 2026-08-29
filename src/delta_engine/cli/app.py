@@ -197,18 +197,19 @@ def lint(
 
 def _load_lint_section(path: Path | None) -> Mapping[str, object]:
     """Read ``[tool.delta-engine.lint]``; a missing default file means an empty section."""
-    if path is None and not _DEFAULT_CONFIG_PATH.exists():
-        return {}
-    selected = path if path is not None else _DEFAULT_CONFIG_PATH
+    if path is None:
+        if not _DEFAULT_CONFIG_PATH.exists():
+            return {}
+        path = _DEFAULT_CONFIG_PATH
     try:
-        content = selected.read_text()
+        content = path.read_text()
     except OSError as error:
-        raise ConfigError(f"cannot read config file {selected}: {error}") from None
+        raise ConfigError(f"cannot read config file {path}: {error}") from None
     try:
         data = tomllib.loads(content)
     except tomllib.TOMLDecodeError as error:
-        raise ConfigError(f"invalid TOML in {selected}: {error}") from None
-    return _lint_section(data, selected)
+        raise ConfigError(f"invalid TOML in {path}: {error}") from None
+    return _lint_section(data, path)
 
 
 def _lint_section(data: Mapping[str, object], path: Path) -> Mapping[str, object]:

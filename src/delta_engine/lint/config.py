@@ -9,7 +9,6 @@ from delta_engine.lint.findings import Severity
 from delta_engine.lint.rules import ALL_RULES, LintRule
 
 _OFF: Final = "off"
-_SEVERITIES: Final[Mapping[str, Severity]] = {severity.value: severity for severity in Severity}
 _SEVERITY_SETTING: Final = "severity"
 _DECLARATIONS: Final = "declarations"
 _KNOWN_SETTINGS: Final = (
@@ -65,24 +64,23 @@ def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
     rules: list[ConfiguredRule] = []
     for rule_type in ALL_RULES:
         value = section.get(rule_type.name, _default_setting_for(rule_type))
-        if isinstance(value, Mapping):
-            severity_value: object = value.get(_SEVERITY_SETTING, Severity.ERROR.value)
-            parameters: dict[str, Any] = {
-                key: item for key, item in value.items() if key != _SEVERITY_SETTING
-            }
-        else:
-            severity_value = value
-            parameters = {}
-        severity = _parse_rule_severity(rule_type.name, severity_value)
+        # A bare severity string is sugar for the inline-table form.
+        settings = value if isinstance(value, Mapping) else {_SEVERITY_SETTING: value}
+        severity = _parse_rule_severity(
+            rule_type.name, settings.get(_SEVERITY_SETTING, Severity.ERROR.value)
+        )
         if severity is None:
             continue
+        parameters: dict[str, Any] = {
+            key: item for key, item in settings.items() if key != _SEVERITY_SETTING
+        }
         try:
             rule = rule_type(**parameters)
         except (TypeError, ValueError) as error:
             raise LintConfigError(f"{rule_type.name}: {error}") from None
         rules.append(ConfiguredRule(rule, severity))
 
-    return LintPolicy(tuple(rules))
+    return LintPolicy(rules)
 
 
 def _default_setting_for(rule_type: type[Any]) -> str:
@@ -101,9 +99,9 @@ def _parse_rule_severity(name: str, value: object) -> Severity | None:
         )
     if value == _OFF:
         return None
-    severity = _SEVERITIES.get(value)
-    if severity is None:
+    try:
+        return Severity(value)
+    except ValueError:
         raise LintConfigError(
             f"{name}: invalid severity {value!r}; expected 'error', 'warning', or 'off'"
-        )
-    return severity
+        ) from None
