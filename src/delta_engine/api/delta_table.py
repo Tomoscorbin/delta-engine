@@ -339,14 +339,15 @@ def _declared_spelling(columns_by_name: Mapping[str, Column], name: str) -> Iden
 
 class _ParentDeclaration(NamedTuple):
     """
-    A referenced table's declared primary key and columns.
+    A referenced table's declaration, resolved to what judgment needs.
 
     Present only when the parent's declaration is in scope (a ``DeltaTable``
-    reference or ``Self``); a name reference supplies no declaration.
-    ``primary_key`` is ``None`` when the declared parent has no primary key.
+    reference or ``Self``); a name reference supplies no declaration. One is
+    only constructed once the parent is known to declare a primary key, so
+    holding one means there is a key to judge against.
     """
 
-    primary_key: PrimaryKeyConstraint | None
+    primary_key: PrimaryKeyConstraint
     columns_by_name: Mapping[str, Column]
 
 
@@ -362,6 +363,52 @@ class _NameReference(NamedTuple):
 
     table: QualifiedName
     columns: Mapping[Identifier, Identifier]
+
+
+def _validate_reference_coherence(
+    owner: _NormalizedDeclaration,
+    referenced_table: QualifiedName,
+    declared: _ParentDeclaration,
+    pairs: tuple[tuple[str, str], ...],
+) -> None:
+    """
+    Judge resolved column pairs against the parent's declaration.
+
+    The referenced columns must be exactly the parent's primary key, and
+    each local column's data type must equal its referenced column's. Local
+    columns that resolve to no owner column are the domain's to reject (see
+    ``_NormalizedDeclaration``).
+    """
+    referenced_columns = tuple(
+        _declared_spelling(declared.columns_by_name, referenced) for _, referenced in pairs
+    )
+    if not declared.primary_key.matches_columns(referenced_columns):
+        mapped = set(referenced_columns)
+        key = set(declared.primary_key.columns)
+        missing = sorted(key - mapped)
+        extra = sorted(mapped - key)
+        details = []
+        if missing:
+            details.append(f"missing from the mapping: {', '.join(missing)}")
+        if extra:
+            details.append(f"not in the key: {', '.join(extra)}")
+        raise ValueError(
+            f"foreign key columns must reference {referenced_table}'s"
+            f" primary key ({', '.join(declared.primary_key.columns)}) exactly;"
+            f" {'; '.join(details)}"
+        )
+
+    for local_name, referenced_name in pairs:
+        local_column = owner.columns_by_name.get(local_name)
+        if local_column is None:
+            continue  # local column existence is enforced when the DesiredTable is built
+        referenced_type = declared.columns_by_name[referenced_name].data_type
+        if local_column.data_type != referenced_type:
+            raise ValueError(
+                f"foreign key column type mismatch: {owner.qualified_name}.{local_name}"
+                f" is {local_column.data_type} but {referenced_table}.{referenced_name}"
+                f" is {referenced_type}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,19 +516,18 @@ class ForeignKey:
         """
         Lower this declaration into a domain constraint.
 
-        Runs every lowering rule whose inputs exist at lowering time. The
-        reference form decides what is available: a ``DeltaTable`` or
-        :data:`Self` supplies the parent's declaration (``Self`` reads it
-        from the owner), so the resolved parent columns must equal its
-        primary key exactly and each local column's data type must match its
-        referenced column's. A name reference supplies no declaration, so
-        those checks are the sync's. Every form's referenced table must live
-        in the owner's catalog. Local column existence is never checked here
-        — the ``DesiredTable`` built right after enforces it.
+        The match arms resolve the reference into the parent to judge
+        against; the judgment itself is :func:`_validate_reference_coherence`.
+        A name reference supplies no declaration to judge, so its checks are
+        the sync's when the registered parent is read. Every form's
+        referenced table must live in the owner's catalog. Local column
+        existence is never checked here — the ``DesiredTable`` built right
+        after enforces it.
         """
         owner_name = owner.qualified_name
 
-        declared: _ParentDeclaration
+        declared_primary_key: PrimaryKeyConstraint | None
+        parent_columns: Mapping[str, Column]
         match self._reference:
             case _NameReference(referenced_table, mapping):
                 _validate_same_catalog(owner_name, referenced_table)
@@ -495,63 +541,32 @@ class ForeignKey:
                 )
             case _SelfReference():
                 referenced_table = owner_name
-                declared = _ParentDeclaration(owner_primary_key, owner.columns_by_name)
+                declared_primary_key = owner_primary_key
+                parent_columns = owner.columns_by_name
             case DeltaTable() as parent:
                 desired = parent.to_desired_table()
                 referenced_table = desired.qualified_name
-                declared = _ParentDeclaration(
-                    desired.primary_key,
-                    {column.name: column for column in desired.columns},
-                )
+                declared_primary_key = desired.primary_key
+                parent_columns = {column.name: column for column in desired.columns}
 
         _validate_same_catalog(owner_name, referenced_table)
-
-        primary_key = declared.primary_key
-        if primary_key is None:
+        if declared_primary_key is None:
             raise ValueError(
                 f"foreign key references {referenced_table}, which declares no primary key"
             )
+        declared = _ParentDeclaration(declared_primary_key, parent_columns)
 
-        pairs = self._resolve_column_pairs(referenced_table, primary_key)
-        local_columns = tuple(
-            _declared_spelling(owner.columns_by_name, local) for local, _ in pairs
-        )
-        referenced_columns = tuple(
-            _declared_spelling(declared.columns_by_name, referenced) for _, referenced in pairs
-        )
-
-        if not primary_key.matches_columns(referenced_columns):
-            mapped = set(referenced_columns)
-            key = set(primary_key.columns)
-            missing = sorted(key - mapped)
-            extra = sorted(mapped - key)
-            details = []
-            if missing:
-                details.append(f"missing from the mapping: {', '.join(missing)}")
-            if extra:
-                details.append(f"not in the key: {', '.join(extra)}")
-            raise ValueError(
-                f"foreign key columns must reference {referenced_table}'s"
-                f" primary key ({', '.join(primary_key.columns)}) exactly;"
-                f" {'; '.join(details)}"
-            )
-
-        for local_name, referenced_name in pairs:
-            local_column = owner.columns_by_name.get(local_name)
-            if local_column is None:
-                continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = declared.columns_by_name[referenced_name].data_type
-            if local_column.data_type != referenced_type:
-                raise ValueError(
-                    f"foreign key column type mismatch: {owner_name}.{local_name}"
-                    f" is {local_column.data_type} but {referenced_table}.{referenced_name}"
-                    f" is {referenced_type}"
-                )
+        pairs = self._resolve_column_pairs(referenced_table, declared.primary_key)
+        _validate_reference_coherence(owner, referenced_table, declared, pairs)
 
         return ForeignKeyConstraint(
-            local_columns=local_columns,
+            local_columns=tuple(
+                _declared_spelling(owner.columns_by_name, local) for local, _ in pairs
+            ),
             referenced_table=referenced_table,
-            referenced_columns=referenced_columns,
+            referenced_columns=tuple(
+                _declared_spelling(declared.columns_by_name, referenced) for _, referenced in pairs
+            ),
             name=self.name,
         )
 
