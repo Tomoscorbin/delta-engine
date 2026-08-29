@@ -1,12 +1,14 @@
-"""The ``delta-engine`` plan, apply, and generate commands."""
+"""The ``delta-engine`` plan, apply, generate, and lint commands."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from enum import StrEnum
 import json
 import logging
+from pathlib import Path
 import sys
+import tomllib
 from typing import Annotated
 
 import typer
@@ -19,9 +21,16 @@ from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.cli.connection import Target, open_connection
 from delta_engine.cli.declarations import DeclarationRef, load_declarations
 from delta_engine.cli.errors import ConfigError
-from delta_engine.cli.rendering import render_sync
+from delta_engine.cli.rendering import render_lint, render_sync
 from delta_engine.databricks import build_reader, build_sql_engine
 from delta_engine.domain.model import QualifiedName
+from delta_engine.lint import (
+    LintConfig,
+    LintConfigError,
+    LintReport,
+    lint_tables,
+    parse_lint_config,
+)
 
 app = typer.Typer(
     name="delta-engine",
@@ -69,6 +78,22 @@ FailOnChangesOption = Annotated[
     typer.Option(
         "--fail-on-changes",
         help="Exit 1 when a valid plan contains pending changes.",
+    ),
+]
+
+LintDeclarationArgument = Annotated[
+    str | None,
+    typer.Argument(
+        metavar="MODULE:ATTRIBUTE",
+        help="Declarations to lint; defaults to 'declarations' in [tool.delta-engine.lint].",
+    ),
+]
+
+LintConfigOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--config",
+        help="TOML file carrying [tool.delta-engine.lint]; defaults to ./pyproject.toml.",
     ),
 ]
 
@@ -158,6 +183,72 @@ def _resolve_plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int
 
 
 @app.command()
+def lint(
+    declaration: LintDeclarationArgument = None,
+    output: OutputOption = OutputFormat.TEXT,
+    config: LintConfigOption = None,
+) -> None:
+    """Check declarations against the configured lint rules; never opens a connection."""
+    with _anticipated_errors():
+        lint_config = _load_lint_config(config)
+        reference = _resolve_lint_target(declaration, lint_config)
+        with _engine_logging(), redirect_stdout(sys.stderr):
+            tables = load_declarations(reference)
+        report = lint_tables(*tables, policy=lint_config.policy)
+        typer.echo(_render_lint_report(report, output))
+        raise typer.Exit(code=_EXIT_FAILURE if report.has_errors else _EXIT_SUCCESS)
+
+
+_DEFAULT_CONFIG_PATH = Path("pyproject.toml")
+
+
+def _load_lint_config(path: Path | None) -> LintConfig:
+    """Read the lint settings; a missing default file simply means the defaults."""
+    if path is None and not _DEFAULT_CONFIG_PATH.exists():
+        return parse_lint_config({})
+    selected = path if path is not None else _DEFAULT_CONFIG_PATH
+    try:
+        content = selected.read_text()
+    except OSError as error:
+        raise ConfigError(f"cannot read config file {selected}: {error}") from None
+    try:
+        data = tomllib.loads(content)
+    except tomllib.TOMLDecodeError as error:
+        raise ConfigError(f"invalid TOML in {selected}: {error}") from None
+    return parse_lint_config(_lint_section(data, selected))
+
+
+def _lint_section(data: Mapping[str, object], path: Path) -> Mapping[str, object]:
+    """Select ``[tool.delta-engine.lint]``; absent tables mean an empty section."""
+    section: object = data
+    for key in ("tool", "delta-engine", "lint"):
+        if not isinstance(section, Mapping):
+            return {}
+        section = section.get(key, {})
+    if not isinstance(section, Mapping):
+        raise ConfigError(f"[tool.delta-engine.lint] in {path} must be a TOML table")
+    return section
+
+
+def _resolve_lint_target(argument: str | None, config: LintConfig) -> DeclarationRef:
+    """Pick the declarations to lint: the argument, else the configured target."""
+    target = argument if argument is not None else config.declarations
+    if target is None:
+        raise ConfigError(
+            "no declarations given; pass MODULE:ATTRIBUTE or set"
+            " 'declarations' in [tool.delta-engine.lint]"
+        )
+    return DeclarationRef.parse(target)
+
+
+def _render_lint_report(report: LintReport, output: OutputFormat) -> str:
+    """Render one lint report as the selected stdout report format."""
+    if output is OutputFormat.JSON:
+        return json.dumps(report.to_dict(), indent=2)
+    return render_lint(report)
+
+
+@app.command()
 def generate(table_name: TableNameArgument) -> None:
     """Read one live table and print an importable DeltaTable declaration."""
     with _anticipated_errors():
@@ -212,6 +303,12 @@ def _anticipated_errors() -> Iterator[None]:
     """Render expected configuration failures; let code defects propagate."""
     try:
         yield
-    except (ConfigError, DuplicateTableDefinitionError, GenerationError, ReadError) as error:
+    except (
+        ConfigError,
+        DuplicateTableDefinitionError,
+        GenerationError,
+        LintConfigError,
+        ReadError,
+    ) as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=_EXIT_FAILURE) from None

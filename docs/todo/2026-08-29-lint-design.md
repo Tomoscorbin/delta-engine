@@ -1,8 +1,8 @@
 # Declaration linting: `delta-engine lint`
 
-Status: **approved design, ready for implementation planning**
+Status: **implemented**
 Date: 2026-08-29
-Branch: `claude/lint-command-design`
+Branch: `claude/lint-command`
 
 ## Goal
 

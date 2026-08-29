@@ -5,13 +5,14 @@ tags:
 
 # CLI reference
 
-The `delta-engine` command has three workflows — two read-only, one that
+The `delta-engine` command has four workflows — three read-only, one that
 writes:
 
 ```bash
 delta-engine plan myproject.tables:all_tables
 delta-engine apply myproject.tables:all_tables
 delta-engine generate dev.silver.orders > orders.py
+delta-engine lint myproject.tables:all_tables
 ```
 
 `plan` loads one explicit declaration collection, reads one live Unity Catalog
@@ -28,6 +29,10 @@ that holds the required schema-changing privileges.
 `generate` reads one live table and prints an importable declaration module —
 the adoption on-ramp for bringing an existing table under management without
 hand-transcribing its schema.
+
+`lint` checks the declarations themselves against governance rules — comments,
+primary keys, required tags. It never opens a connection, so it needs no
+credentials and can run first in CI.
 
 Install the optional CLI dependencies first:
 
@@ -197,6 +202,57 @@ maps.
 - Only engine-managed property keys appear; other properties a table carries
   are not engine state.
 
+## Linting declarations
+
+```text
+delta-engine lint [MODULE:ATTRIBUTE]
+```
+
+`lint` loads the same declaration collection as `plan` and checks each table
+against the enabled rules. Nothing is read from the catalog and no connection
+is opened, so the command works without any Databricks configuration.
+
+| Rule id          | Checks                                                              | Default |
+| ---------------- | ------------------------------------------------------------------- | ------- |
+| `table-comment`  | The table has a comment                                             | error   |
+| `column-comment` | Every column has a comment (one finding per column)                 | error   |
+| `primary-key`    | The table declares a primary key                                    | error   |
+| `required-tag`   | The table carries each configured tag key (values are not checked) | off     |
+
+Configure severities in `pyproject.toml`; each rule takes `"error"`,
+`"warning"`, or `"off"`:
+
+```toml
+[tool.delta-engine.lint]
+declarations = "myproject.tables:all_tables"
+column-comment = "warning"
+required-tag = { keys = ["owner"] }
+```
+
+`required-tag` is off until its keys are listed; `severity` inside its inline
+table is optional and defaults to `"error"`. An unknown rule name or an
+invalid severity is a configuration error, so a typo cannot silently disable
+a rule.
+
+The argument is optional when the config declares a `declarations` target; an
+explicit argument wins. The config is read from `./pyproject.toml` in the
+working directory, or from the file named with `--config`.
+
+`lint` accepts the same `--output` option as `plan`. Text output groups
+findings per table and ends with a summary line. `--output json` emits one
+document carrying `tables_checked`, `error_count`, `warning_count`, and a
+`findings` list; each finding carries `rule`, `severity`, `table`, and
+`message`.
+
+Warnings never change the exit code: exit 0 means no error-severity findings,
+exit 1 means at least one error finding or a configuration error. To gate CI
+on a rule, leave it at `error`; to adopt gradually, downgrade it to
+`warning`.
+
+Programmatic use needs no CLI: `delta_engine.lint.lint_tables(*all_tables)`
+returns the same report, so a declarations repository can assert
+`not report.has_errors` in its own tests.
+
 ## Databricks connection
 
 Every invocation requires one CLI-specific target setting:
@@ -260,8 +316,8 @@ explains why those statements were not eligible to run.
 
 | Code | Meaning                                                                                                                                  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | The run completed with no failures: a plan in sync or carrying pending changes (without `--fail-on-changes`), or an apply that executed fully |
-| 1    | Configuration, catalog read, planning, execution, or generation failed — or `--fail-on-changes` found pending changes                       |
+| 0    | The run completed with no failures: a plan in sync or carrying pending changes (without `--fail-on-changes`), an apply that executed fully, or a lint with no error-severity findings |
+| 1    | Configuration, catalog read, planning, execution, or generation failed — `--fail-on-changes` found pending changes, or lint found error-severity findings |
 | 2    | Typer/Click rejected malformed command-line usage                                                                                           |
 
 Unexpected declaration-code and engine defects propagate with tracebacks and
