@@ -146,4 +146,5 @@ autoapi/delta_engine/index
 explanation-architecture
 how-to-implement-adapter
 how-to-add-action-type
+how-to-add-lint-rule
 ```

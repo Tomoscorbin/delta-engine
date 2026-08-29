@@ -253,6 +253,9 @@ Programmatic use needs no CLI: `delta_engine.lint.lint_tables(*all_tables)`
 returns the same report, so a declarations repository can assert
 `not report.has_errors` in its own tests.
 
+The rule set is built in. Adding a rule is one class in `lint/rules.py` —
+see [how to add a lint rule](how-to-add-lint-rule.md).
+
 ## Databricks connection
 
 Every invocation requires one CLI-specific target setting:

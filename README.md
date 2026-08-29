@@ -28,23 +28,27 @@ Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing 
 
    Run a complete dry run against live Unity Catalog state as part of a pull request or deployment pipeline. Delta Engine performs the same reading, semantic diffing, safety validation, dependency resolution, and SQL compilation as a real sync, but executes no DDL. Reviewers can see both what would change and the exact SQL produced for the current live state, while unreadable or unsafe plans can be rejected by CI before deployment.
 
-5. **Manage only the parts of a table you own**
+5. **Lint declarations against governance policy**
+
+   Check every declaration against governance rules — required table and column comments, primary keys, and tag keys — before anything is deployed. `delta-engine lint` is fully offline: it imports the declarations exactly like `plan` does but never opens a connection, so it can run first in CI before any credentials exist. Each rule's severity (`error`, `warning`, or `off`) is configured per repository in `pyproject.toml`, so a team can adopt a rule as a warning and promote it to blocking once the estate complies. The same check runs programmatically, letting a declarations repository enforce its policy in plain pytest.
+
+6. **Manage only the parts of a table you own**
 
    A declaration does not have to take responsibility for the entire table. Delta Engine’s `full`, `metadata`, `annotations`, and `tags` scopes let a team manage everything from the complete table definition down to tags alone, while enforcing that boundary during reconciliation. This allows one team or tool to manage comments, tags, or constraints around a table whose schema and data lifecycle are owned elsewhere, without risking changes outside its responsibility.
 
-6. **Built for Delta and Unity Catalog**
+7. **Built for Delta and Unity Catalog**
 
    Delta Engine models Databricks table-management concepts directly rather than treating changes as arbitrary SQL strings. Column mapping, explicit renames, safe type widening, Delta table-feature requirements, partitioning, liquid clustering, properties, comments, tags, and key constraints all participate in the same diff, validation, planning, and reporting model. These features are planned and validated together as part of the table’s desired state rather than being managed as unrelated pieces of DDL.
 
-7. **Reconcile related tables together**
+8. **Reconcile related tables together**
 
    Delta Engine can synchronise a set of related tables in the same run rather than treating each one in isolation. Primary- and foreign-key relationships are validated before execution, parent tables are ordered before their dependants, and downstream tables are blocked when a dependency cannot reach its desired state. The engine can therefore reason about whether a related set of table definitions can converge together, not merely whether each table contains individually valid DDL.
 
-8. **Run through Spark or a SQL warehouse**
+9. **Run through Spark or a SQL warehouse**
 
    Reconcile tables through the Spark session already available on Databricks compute, or through a Databricks SQL warehouse from a conventional Python environment. The same declarations and reconciliation model can be used inside a data pipeline, a deployment job, or a lightweight CI workflow without installing PySpark or starting a Spark cluster.
 
-9. **Structured results for automation**
+10. **Structured results for automation**
 
    Every sync returns a structured `SyncReport` describing each table’s semantic changes, rejected changes, planned SQL, failures, and execution progress. The report has a stable, versioned, JSON-serialisable representation, so the same information can drive CI gates, structured logging, audit history, dashboards, and other automation rather than existing only as console output.
 
@@ -76,7 +80,8 @@ Install `delta-engine[cli]` to run
 unified-auth configuration. The CLI always shows the semantic diff, report,
 and planned SQL and never applies the generated plan. To bring an existing
 table under management, `delta-engine generate CATALOG.SCHEMA.TABLE` prints a
-ready-to-plan declaration module for it. See the
+ready-to-plan declaration module for it, and `delta-engine lint` checks
+declarations against governance rules with no connection at all. See the
 [CLI reference](https://tomoscorbin.github.io/delta-engine/reference-cli.html).
 
 ## Quickstart
@@ -146,7 +151,7 @@ for the model, or jump to what you need:
 
 **Reference**
 
-- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the plan, apply, and generate commands, connection contract, output, and exit codes
+- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the plan, apply, lint, and generate commands, connection contract, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation
@@ -158,3 +163,4 @@ for the model, or jump to what you need:
 - [Architecture](https://tomoscorbin.github.io/delta-engine/explanation-architecture.html) — layers, ports and adapters, design decisions
 - [Implement a custom adapter](https://tomoscorbin.github.io/delta-engine/how-to-implement-adapter.html) — the `CatalogStateReader` and `PlanExecutor` ports
 - [Add a new action type](https://tomoscorbin.github.io/delta-engine/how-to-add-action-type.html) — extend `Action`, `ActionPhase`, and the compiler
+- [Add a lint rule](https://tomoscorbin.github.io/delta-engine/how-to-add-lint-rule.html) — one class in `lint/rules.py`; config and defaults derive from the registry
