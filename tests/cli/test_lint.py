@@ -28,6 +28,14 @@ UNGOVERNED_TABLES = """
     all_tables = [orders]
 """
 
+TWO_UNGOVERNED_TABLES = """
+    from delta_engine.schema import Column, DeltaTable, String
+
+    zeta = DeltaTable("dev", "silver", "zeta", columns=(Column("id", String()),))
+    alpha = DeltaTable("dev", "silver", "alpha", columns=(Column("id", String()),))
+    all_tables = [zeta, alpha]
+"""
+
 ALL_WARNINGS_CONFIG = """
     [tool.delta-engine.lint]
     table-comment = "warning"
@@ -75,6 +83,24 @@ def test_violations_exit_one_and_name_rule_table_and_message(
     assert "1 table checked: 3 errors" in result.stdout
 
 
+def test_findings_are_grouped_under_one_heading_per_table(
+    runner, write_module, tmp_path, monkeypatch
+):
+    # Given two ungoverned tables
+    monkeypatch.chdir(tmp_path)
+    module = write_module("lint_two_tables", TWO_UNGOVERNED_TABLES)
+
+    # When
+    result = runner.invoke(app, ["lint", f"{module}:all_tables"])
+
+    # Then each table appears once as a heading, in name order, and both are tallied
+    assert result.exit_code == 1
+    assert result.stdout.count("dev.silver.alpha") == 1
+    assert result.stdout.count("dev.silver.zeta") == 1
+    assert result.stdout.index("dev.silver.alpha") < result.stdout.index("dev.silver.zeta")
+    assert "2 tables checked: 6 errors" in result.stdout
+
+
 def test_warnings_alone_exit_zero(runner, write_module, tmp_path, monkeypatch):
     # Given every broken rule downgraded to a warning
     monkeypatch.chdir(tmp_path)
@@ -90,7 +116,7 @@ def test_warnings_alone_exit_zero(runner, write_module, tmp_path, monkeypatch):
 
 
 def test_json_output_is_machine_readable(runner, write_module, tmp_path, monkeypatch):
-    # Given
+    # Given a declaration breaking the default rules
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_json", UNGOVERNED_TABLES)
 
@@ -220,9 +246,16 @@ def test_missing_target_everywhere_is_a_config_error(runner, tmp_path, monkeypat
 def test_explicit_config_path_is_read_instead_of_the_working_directory(
     runner, write_module, tmp_path, monkeypatch
 ):
-    # Given a config outside the working directory
+    # Given competing configs: errors in the working directory, downgrades elsewhere
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_explicit_config", UNGOVERNED_TABLES)
+    write_pyproject(
+        tmp_path,
+        """
+        [tool.delta-engine.lint]
+        table-comment = "error"
+        """,
+    )
     elsewhere = tmp_path / "configs"
     elsewhere.mkdir()
     write_pyproject(elsewhere, ALL_WARNINGS_CONFIG)
@@ -239,7 +272,7 @@ def test_explicit_config_path_is_read_instead_of_the_working_directory(
 
 
 def test_missing_explicit_config_path_is_an_error(runner, write_module, tmp_path, monkeypatch):
-    # Given
+    # Given no file at the explicit --config path
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_missing_config", COMPLIANT_TABLES)
 

@@ -65,7 +65,7 @@ class TestSeverityAttachment:
 
 
 class TestOrdering:
-    def test_findings_are_ordered_by_qualified_table_name(self) -> None:
+    def test_every_table_is_checked_regardless_of_input_order(self) -> None:
         # Given tables passed out of name order
         zeta = build_declared_table("zeta", comment="")
         alpha = build_declared_table("alpha", comment="")
@@ -73,7 +73,8 @@ class TestOrdering:
         # When
         report = lint_tables(zeta, alpha)
 
-        # Then
+        # Then both are checked and their findings arrive in name order
+        assert report.tables_checked == 2
         assert [str(finding.table) for finding in report.findings] == [
             "dev.silver.alpha",
             "dev.silver.zeta",

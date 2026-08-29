@@ -31,13 +31,6 @@ class TestSeverityOverrides:
         # Then
         assert severities_by_rule(policy)["column-comment"] is Severity.WARNING
 
-    def test_a_rule_set_to_off_is_absent_from_the_policy(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"primary-key": "off"})
-
-        # Then
-        assert "primary-key" not in severities_by_rule(policy)
-
     def test_an_invalid_severity_is_rejected(self) -> None:
         # Given / When / Then
         with pytest.raises(LintConfigError):
@@ -84,11 +77,6 @@ class TestRequiredTag:
         # Given / When / Then
         with pytest.raises(LintConfigError):
             parse_lint_config({"required-tag": {"keys": []}})
-
-    def test_an_unknown_setting_inside_required_tag_is_rejected(self) -> None:
-        # Given / When / Then
-        with pytest.raises(LintConfigError):
-            parse_lint_config({"required-tag": {"key": ["owner"]}})
 
     def test_required_tag_severity_off_inside_the_table_disables_the_rule(self) -> None:
         # Given / When

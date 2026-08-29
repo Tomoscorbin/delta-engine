@@ -52,25 +52,13 @@ class TestTableCommentRule:
         # Then
         assert messages == ()
 
-    def test_table_without_comment_is_reported(self) -> None:
-        # Given
-        table = build_table(comment="")
+    def test_blank_table_comment_is_reported(self) -> None:
+        # Given tables whose comments are empty or whitespace-only
+        tables = (build_table(comment=""), build_table(comment="   "))
 
-        # When
-        messages = TableCommentRule().evaluate(table)
-
-        # Then
-        assert messages == ("table has no comment",)
-
-    def test_whitespace_only_table_comment_is_reported(self) -> None:
-        # Given
-        table = build_table(comment="   ")
-
-        # When
-        messages = TableCommentRule().evaluate(table)
-
-        # Then
-        assert messages == ("table has no comment",)
+        # When / Then each counts as missing
+        for table in tables:
+            assert TableCommentRule().evaluate(table) == ("table has no comment",)
 
 
 class TestColumnCommentRule:
