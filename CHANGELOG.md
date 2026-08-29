@@ -1,3 +1,20 @@
+## v0.12.0 (2026-08-29)
+
+### Feat
+
+- add a lint command for declaration governance (#371)
+- declare observed foreign keys in generated modules (#370)
+
+### Fix
+
+- **ci**: grant id-token to the release workflow's live call (#378)
+
+### Refactor
+
+- lower ForeignKey input once, at construction (#373)
+- move declaration generation out of api into its own package (#374)
+- move module constants to the top of their files (#372)
+
 ## v0.11.0 (2026-08-28)
 
 ### Feat
