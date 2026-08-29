@@ -1,9 +1,13 @@
 """Run a lint policy over table declarations and assemble the report."""
 
+from typing import Final
+
 from delta_engine.application.engine import lower_desired_tables
 from delta_engine.application.ports import DesiredTableSource
-from delta_engine.lint.config import DEFAULT_POLICY, LintPolicy
+from delta_engine.lint.config import LintPolicy, parse_lint_config
 from delta_engine.lint.findings import Finding, LintReport
+
+DEFAULT_POLICY: Final[LintPolicy] = parse_lint_config({}).policy
 
 
 def lint_tables(

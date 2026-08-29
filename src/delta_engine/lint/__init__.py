@@ -1,7 +1,6 @@
 """Governance linting for table declarations: rules, policy, and the runner."""
 
 from delta_engine.lint.config import (
-    DEFAULT_POLICY,
     ConfiguredRule,
     LintConfig,
     LintConfigError,
@@ -16,7 +15,7 @@ from delta_engine.lint.rules import (
     RequiredTagRule,
     TableCommentRule,
 )
-from delta_engine.lint.run import lint_tables
+from delta_engine.lint.run import DEFAULT_POLICY, lint_tables
 
 __all__ = [
     "DEFAULT_POLICY",

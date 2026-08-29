@@ -43,6 +43,7 @@ app = typer.Typer(
 
 _EXIT_SUCCESS = 0
 _EXIT_FAILURE = 1
+_DEFAULT_CONFIG_PATH = Path("pyproject.toml")
 
 DeclarationArgument = Annotated[
     str,
@@ -197,9 +198,6 @@ def lint(
         report = lint_tables(*tables, policy=lint_config.policy)
         typer.echo(_render_lint_report(report, output))
         raise typer.Exit(code=_EXIT_FAILURE if report.has_errors else _EXIT_SUCCESS)
-
-
-_DEFAULT_CONFIG_PATH = Path("pyproject.toml")
 
 
 def _load_lint_config(path: Path | None) -> LintConfig:

@@ -14,6 +14,20 @@ from delta_engine.lint.rules import (
     TableCommentRule,
 )
 
+_OFF: Final = "off"
+_SEVERITIES: Final[Mapping[str, Severity]] = {severity.value: severity for severity in Severity}
+_PARAMETER_FREE_RULES: Final[Mapping[str, type[LintRule]]] = {
+    TableCommentRule.name: TableCommentRule,
+    ColumnCommentRule.name: ColumnCommentRule,
+    PrimaryKeyRule.name: PrimaryKeyRule,
+}
+_DECLARATIONS: Final = "declarations"
+_KNOWN_SETTINGS: Final = (
+    _DECLARATIONS,
+    *_PARAMETER_FREE_RULES,
+    RequiredTagRule.name,
+)
+
 
 class LintConfigError(Exception):
     """An invalid lint configuration: unknown setting, bad severity, bad shape."""
@@ -43,21 +57,6 @@ class LintConfig:
 
     policy: LintPolicy
     declarations: str | None = None
-
-
-_OFF: Final = "off"
-_SEVERITIES: Final[Mapping[str, Severity]] = {severity.value: severity for severity in Severity}
-_PARAMETER_FREE_RULES: Final[Mapping[str, type[LintRule]]] = {
-    TableCommentRule.name: TableCommentRule,
-    ColumnCommentRule.name: ColumnCommentRule,
-    PrimaryKeyRule.name: PrimaryKeyRule,
-}
-_DECLARATIONS: Final = "declarations"
-_KNOWN_SETTINGS: Final = (
-    _DECLARATIONS,
-    *_PARAMETER_FREE_RULES,
-    RequiredTagRule.name,
-)
 
 
 def parse_lint_config(section: Mapping[str, object]) -> LintConfig:
@@ -147,6 +146,3 @@ def _parse_declarations_target(value: object) -> str | None:
     if not isinstance(value, str):
         raise LintConfigError(f"declarations: expected a 'module:attribute' string, got {value!r}")
     return value
-
-
-DEFAULT_POLICY: Final[LintPolicy] = parse_lint_config({}).policy
