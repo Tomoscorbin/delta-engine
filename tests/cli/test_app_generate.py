@@ -1,6 +1,5 @@
 """Behavioural tests for the ``delta-engine generate`` command."""
 
-from delta_engine.api.codegen import generate_module
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import TablePresent
 from delta_engine.cli.app import app
@@ -13,6 +12,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     TableKind,
 )
+from delta_engine.generate import generate_module
 from tests.cli.conftest import observed_orders
 
 

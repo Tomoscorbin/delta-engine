@@ -14,7 +14,6 @@ from typing import Annotated
 import typer
 
 import delta_engine
-from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.application import DuplicateTableDefinitionError, SyncReport
 from delta_engine.application.errors import ReadError, SyncFailedError
 from delta_engine.application.ports import TableAbsent, TablePresent
@@ -24,6 +23,7 @@ from delta_engine.cli.errors import ConfigError
 from delta_engine.cli.rendering import render_lint, render_sync
 from delta_engine.databricks import build_reader, build_sql_engine
 from delta_engine.domain.model import QualifiedName
+from delta_engine.generate import GeneratedModule, GenerationError, generate_module
 from delta_engine.lint import LintConfigError, LintReport, lint_tables, parse_lint_config
 
 app = typer.Typer(
