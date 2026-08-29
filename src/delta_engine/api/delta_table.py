@@ -478,8 +478,14 @@ class ForeignKey:
                     raise ValueError("foreign key columns must not be empty")
                 if not all(isinstance(column, str) for column in sequence):
                     raise TypeError("foreign key columns must be strings")
+                lowered_sequence = tuple(Identifier(column) for column in sequence)
+                seen: set[Identifier] = set()
+                for column in lowered_sequence:
+                    if column in seen:
+                        raise ValueError(f"Duplicate foreign key local column: {column}")
+                    seen.add(column)
                 frozen = sequence
-                lowered = tuple(Identifier(column) for column in sequence)
+                lowered = lowered_sequence
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
