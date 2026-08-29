@@ -5,7 +5,6 @@ from typing import ClassVar, Protocol
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable
-from delta_engine.lint.findings import Violation
 
 
 class LintRule(Protocol):
@@ -16,8 +15,8 @@ class LintRule(Protocol):
         """The rule id used in config keys and finding output."""
         ...
 
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]:
-        """Return one violation per way ``table`` breaks this rule."""
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
+        """Return one message per way ``table`` breaks this rule."""
         ...
 
 
@@ -27,11 +26,11 @@ class TableCommentRule:
 
     name: ClassVar[str] = "table-comment"
 
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]:
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when its comment is blank."""
         if table.comment.strip():
             return ()
-        return (Violation(self.name, table.qualified_name, "table has no comment"),)
+        return ("table has no comment",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,14 +39,10 @@ class ColumnCommentRule:
 
     name: ClassVar[str] = "column-comment"
 
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]:
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each column whose comment is blank, by name."""
         return tuple(
-            Violation(
-                self.name,
-                table.qualified_name,
-                f"column '{column.name}' has no comment",
-            )
+            f"column '{column.name}' has no comment"
             for column in table.columns
             if not column.comment.strip()
         )
@@ -59,11 +54,11 @@ class PrimaryKeyRule:
 
     name: ClassVar[str] = "primary-key"
 
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]:
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when it has no primary key."""
         if table.primary_key is not None:
             return ()
-        return (Violation(self.name, table.qualified_name, "table has no primary key"),)
+        return ("table has no primary key",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,14 +71,6 @@ class RequiredTagRule:
     def __post_init__(self) -> None:
         object.__setattr__(self, "keys", tuple(self.keys))
 
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]:
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each required tag key missing from the table's tags."""
-        return tuple(
-            Violation(
-                self.name,
-                table.qualified_name,
-                f"missing required tag '{key}'",
-            )
-            for key in self.keys
-            if key not in table.tags
-        )
+        return tuple(f"missing required tag '{key}'" for key in self.keys if key not in table.tags)

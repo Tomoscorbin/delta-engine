@@ -171,6 +171,39 @@ def test_argument_overrides_the_config_target(runner, write_module, tmp_path, mo
     assert result.exit_code == 1
 
 
+def test_a_non_table_tool_key_is_a_config_error(runner, write_module, tmp_path, monkeypatch):
+    # Given a pyproject whose 'tool' key is not a TOML table
+    monkeypatch.chdir(tmp_path)
+    module = write_module("lint_bad_tool", COMPLIANT_TABLES)
+    write_pyproject(tmp_path, 'tool = "not a table"')
+
+    # When
+    result = runner.invoke(app, ["lint", f"{module}:all_tables"])
+
+    # Then the malformed file is rejected, not silently treated as defaults
+    assert result.exit_code == 1
+    assert "error:" in result.stderr
+
+
+def test_a_non_string_declarations_target_is_a_config_error(runner, tmp_path, monkeypatch):
+    # Given a declarations target that is not a string
+    monkeypatch.chdir(tmp_path)
+    write_pyproject(
+        tmp_path,
+        """
+        [tool.delta-engine.lint]
+        declarations = ["pkg.tables:all_tables"]
+        """,
+    )
+
+    # When invoked bare
+    result = runner.invoke(app, ["lint"])
+
+    # Then
+    assert result.exit_code == 1
+    assert "declarations" in result.stderr
+
+
 def test_missing_target_everywhere_is_a_config_error(runner, tmp_path, monkeypatch):
     # Given no argument and no config
     monkeypatch.chdir(tmp_path)

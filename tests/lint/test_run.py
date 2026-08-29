@@ -1,13 +1,6 @@
 """Behavioural tests for lint_tables: severity attachment, report shape, ordering."""
 
-from delta_engine.lint import (
-    ConfiguredRule,
-    LintPolicy,
-    RequiredTagRule,
-    Severity,
-    TableCommentRule,
-    lint_tables,
-)
+from delta_engine.lint import Severity, lint_tables, parse_lint_config
 from delta_engine.schema import Column, DeltaTable, String
 
 
@@ -41,14 +34,15 @@ class TestCleanRun:
         assert report.findings == ()
         assert report.tables_checked == 1
         assert not report.has_errors
-        assert not report.has_warnings
 
 
 class TestSeverityAttachment:
     def test_findings_carry_the_severity_configured_for_their_rule(self) -> None:
         # Given
         table = build_declared_table(comment="")
-        policy = LintPolicy(rules=(ConfiguredRule(TableCommentRule(), Severity.WARNING),))
+        policy = parse_lint_config(
+            {"table-comment": "warning", "column-comment": "off", "primary-key": "off"}
+        )
 
         # When
         report = lint_tables(table, policy=policy)
@@ -56,7 +50,6 @@ class TestSeverityAttachment:
         # Then
         assert [finding.severity for finding in report.findings] == [Severity.WARNING]
         assert not report.has_errors
-        assert report.has_warnings
 
     def test_default_policy_reports_missing_comment_as_an_error(self) -> None:
         # Given
@@ -90,11 +83,12 @@ class TestReportProjection:
     def test_report_projects_findings_and_counts_as_plain_data(self) -> None:
         # Given
         table = build_declared_table(comment="", tags={})
-        policy = LintPolicy(
-            rules=(
-                ConfiguredRule(TableCommentRule(), Severity.ERROR),
-                ConfiguredRule(RequiredTagRule(keys=("owner",)), Severity.WARNING),
-            )
+        policy = parse_lint_config(
+            {
+                "column-comment": "off",
+                "primary-key": "off",
+                "required-tag": {"keys": ["owner"], "severity": "warning"},
+            }
         )
 
         # When

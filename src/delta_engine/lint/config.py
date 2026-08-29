@@ -51,20 +51,14 @@ class LintPolicy:
         object.__setattr__(self, "rules", tuple(self.rules))
 
 
-@dataclass(frozen=True, slots=True)
-class LintConfig:
-    """Everything the lint config section declares: the policy and the target."""
-
-    policy: LintPolicy
-    declarations: str | None = None
-
-
-def parse_lint_config(section: Mapping[str, object]) -> LintConfig:
+def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
     """
-    Parse one ``[tool.delta-engine.lint]`` mapping into a ``LintConfig``.
+    Parse one ``[tool.delta-engine.lint]`` mapping into a ``LintPolicy``.
 
     An empty mapping yields the defaults: every parameter-free rule enabled at
     error severity and no ``required-tag`` rule (it cannot run without keys).
+    The reserved ``declarations`` key is accepted but carries no policy; the
+    CLI reads it to locate the declarations.
 
     Raises:
         LintConfigError: On an unknown setting, an invalid severity, or a
@@ -87,10 +81,7 @@ def parse_lint_config(section: Mapping[str, object]) -> LintConfig:
     if required_tag is not None:
         rules.append(required_tag)
 
-    return LintConfig(
-        policy=LintPolicy(tuple(rules)),
-        declarations=_parse_declarations_target(section.get(_DECLARATIONS)),
-    )
+    return LintPolicy(tuple(rules))
 
 
 def _parse_rule_severity(name: str, value: object) -> Severity | None:
@@ -137,12 +128,3 @@ def _parse_required_tag(value: object) -> ConfiguredRule | None:
     if severity is None:
         raise LintConfigError('required-tag: severity cannot be "off"; omit the rule to disable it')
     return ConfiguredRule(RequiredTagRule(keys=tuple(keys)), severity)
-
-
-def _parse_declarations_target(value: object) -> str | None:
-    """Parse the optional ``declarations`` MODULE:ATTRIBUTE target."""
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise LintConfigError(f"declarations: expected a 'module:attribute' string, got {value!r}")
-    return value

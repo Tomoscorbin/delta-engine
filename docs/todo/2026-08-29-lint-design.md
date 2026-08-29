@@ -58,23 +58,18 @@ class Severity(StrEnum):
     ERROR = "error"
     WARNING = "warning"
 
-@dataclass(frozen=True, slots=True)
-class Violation:
-    """One fact: a table failed one rule."""
-    rule: str                  # rule id, e.g. "column-comment"
-    table: QualifiedName
-    message: str               # e.g. "column 'customer_id' has no comment"
-
 class LintRule(Protocol):
     name: str                  # the rule id used in config and output
-    def evaluate(self, table: DesiredTable) -> tuple[Violation, ...]: ...
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]: ...
 ```
 
 Rules are small frozen classes, one per policy, mirroring `validation.py`. A rule
-returns violations — facts only. The runner pairs each violation with the severity
-configured for its rule, producing a `Finding` (violation + severity), and collects
-findings into a `LintReport` with `has_errors`, `has_warnings`, and `to_dict()`
-(the same report/render split as `SyncReport`).
+returns messages — facts only. The runner already knows which rule and table it is
+evaluating, so a rule states only what is wrong (e.g. `"column 'customer_id' has
+no comment"`). The runner pairs each message with its rule id, table, and the
+configured severity, producing a `Finding`, and collects findings into a
+`LintReport` with `has_errors` and `to_dict()` (the same report/render split as
+`SyncReport`).
 
 The entry point matches the engine's lowering contract:
 
@@ -88,12 +83,12 @@ deterministic qualified-name ordering. Rules see `DesiredTable` only.
 
 ### Built-in rules
 
-| Rule id          | Emits                                                                        |
+| Rule id          | Emits                                                                       |
 | ---------------- | ---------------------------------------------------------------------------- |
-| `table-comment`  | one violation when the table `comment` is blank                              |
-| `column-comment` | one violation **per uncommented column**, naming the column                   |
-| `primary-key`    | one violation when `primary_key` is `None`                                   |
-| `required-tag`   | one violation per configured tag key missing from `tags` (key presence only) |
+| `table-comment`  | one message when the table `comment` is blank                               |
+| `column-comment` | one message **per uncommented column**, naming the column                    |
+| `primary-key`    | one message when `primary_key` is `None`                                    |
+| `required-tag`   | one message per configured tag key missing from `tags` (key presence only)  |
 
 `required-tag` is the only parameterized rule — constructed with the keys from
 config. Tag *values* are not checked in v1.
@@ -133,14 +128,15 @@ Defaults with no file or no section — the linter is useful bare:
 | `required-tag`   | off (cannot run without keys) |
 
 Parsing rules (`lint/config.py`, a pure function from a mapping to `LintPolicy`;
-the CLI owns reading the file):
+the CLI owns reading the file and the reserved `declarations` key, which carries
+no policy):
 
 - `"off"` exists only in config space. Parsing yields a `LintPolicy` holding only
   enabled rules, each paired with its severity. Nothing downstream branches on
   enablement.
-- Unknown rule ids and invalid severity strings raise `ConfigError` — a silently
-  ignored `primary_key = "error"` typo would be a policy hole.
-- `required-tag` with an empty `keys` list is a `ConfigError`, not a no-op.
+- Unknown rule ids and invalid severity strings raise `LintConfigError` — a
+  silently ignored `primary_key = "error"` typo would be a policy hole.
+- `required-tag` with an empty `keys` list is a `LintConfigError`, not a no-op.
   `severity` inside its inline table is optional and defaults to `"error"`.
 
 ## CLI
@@ -149,8 +145,9 @@ the CLI owns reading the file):
 delta-engine lint [MODULE:ATTRIBUTE] [--output text|json] [--config PATH]
 ```
 
-Same shape as `plan`, minus the connection. Flow: resolve target →
-`load_declarations` → parse config → `lint_tables` → render → exit code.
+Same shape as `plan`, minus the connection. Flow: read config section →
+parse policy → resolve target → `load_declarations` → `lint_tables` →
+render → exit code.
 
 - **Target resolution:** positional argument wins; otherwise the `declarations`
   config key; neither present is a `ConfigError` naming both fixes.
@@ -197,10 +194,11 @@ def test_tables_pass_lint() -> None:
 
 ```
 src/delta_engine/lint/
-    __init__.py     public surface: lint_tables, LintPolicy, LintReport, Severity
-    findings.py     Severity, Violation, Finding, LintReport
-    rules.py        LintRule protocol, four built-in rules, default registry
-    config.py       mapping -> LintPolicy (pure; ConfigError on bad input)
+    __init__.py     public surface: lint_tables, parse_lint_config, LintPolicy,
+                    LintReport, Finding, Severity, LintConfigError
+    findings.py     Severity, Finding, LintReport
+    rules.py        LintRule protocol, four built-in rules
+    config.py       mapping -> LintPolicy (pure; LintConfigError on bad input)
     run.py          lint_tables(): lower, evaluate, attach severity, report
 src/delta_engine/cli/
     app.py          lint command (target resolution, config read, exit code)
@@ -218,10 +216,10 @@ Black-box through public entry points, Given/When/Then, behaviour-named, no mock
   present/missing/multiple. Facts only — no severity assertions here.
 - `tests/lint/test_config.py` — mapping → `LintPolicy`: absent section yields
   defaults, `"off"` removes a rule, unknown rule id / bad severity / empty `keys`
-  each raise `ConfigError`, `declarations` parses and is absent-safe.
+  each raise `LintConfigError`, the reserved `declarations` key carries no policy.
 - `tests/lint/test_run.py` — `lint_tables`: severity attached per policy,
-  `has_errors` / `has_warnings`, `to_dict()` shape, clean run yields no findings,
-  accepts `DeltaTable` sources directly.
+  `has_errors`, `to_dict()` shape, clean run yields no findings, accepts
+  `DeltaTable` sources directly.
 - `tests/cli/test_lint.py` — typer `CliRunner` end-to-end in the style of
   `tests/cli/conftest.py`: exit 0 clean, exit 0 warnings-only, exit 1 with errors,
   exit 1 on config error, `--output json` parses, argument overrides config

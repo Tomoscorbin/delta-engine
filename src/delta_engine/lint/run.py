@@ -7,7 +7,7 @@ from delta_engine.application.ports import DesiredTableSource
 from delta_engine.lint.config import LintPolicy, parse_lint_config
 from delta_engine.lint.findings import Finding, LintReport
 
-DEFAULT_POLICY: Final[LintPolicy] = parse_lint_config({}).policy
+DEFAULT_POLICY: Final[LintPolicy] = parse_lint_config({})
 
 
 def lint_tables(
@@ -32,9 +32,14 @@ def lint_tables(
     """
     desired_tables = lower_desired_tables(*tables)
     findings = tuple(
-        Finding.from_violation(violation, configured.severity)
+        Finding(
+            rule=configured.rule.name,
+            table=table.qualified_name,
+            message=message,
+            severity=configured.severity,
+        )
         for table in desired_tables
         for configured in policy.rules
-        for violation in configured.rule.evaluate(table)
+        for message in configured.rule.evaluate(table)
     )
     return LintReport(findings=findings, tables_checked=len(desired_tables))

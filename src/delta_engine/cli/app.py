@@ -24,13 +24,7 @@ from delta_engine.cli.errors import ConfigError
 from delta_engine.cli.rendering import render_lint, render_sync
 from delta_engine.databricks import build_reader, build_sql_engine
 from delta_engine.domain.model import QualifiedName
-from delta_engine.lint import (
-    LintConfig,
-    LintConfigError,
-    LintReport,
-    lint_tables,
-    parse_lint_config,
-)
+from delta_engine.lint import LintConfigError, LintReport, lint_tables, parse_lint_config
 
 app = typer.Typer(
     name="delta-engine",
@@ -191,19 +185,20 @@ def lint(
 ) -> None:
     """Check declarations against the configured lint rules; never opens a connection."""
     with _anticipated_errors():
-        lint_config = _load_lint_config(config)
-        reference = _resolve_lint_target(declaration, lint_config)
+        section = _load_lint_section(config)
+        policy = parse_lint_config(section)
+        reference = _resolve_lint_target(declaration, section)
         with _engine_logging(), redirect_stdout(sys.stderr):
             tables = load_declarations(reference)
-        report = lint_tables(*tables, policy=lint_config.policy)
+        report = lint_tables(*tables, policy=policy)
         typer.echo(_render_lint_report(report, output))
         raise typer.Exit(code=_EXIT_FAILURE if report.has_errors else _EXIT_SUCCESS)
 
 
-def _load_lint_config(path: Path | None) -> LintConfig:
-    """Read the lint settings; a missing default file simply means the defaults."""
+def _load_lint_section(path: Path | None) -> Mapping[str, object]:
+    """Read ``[tool.delta-engine.lint]``; a missing default file means an empty section."""
     if path is None and not _DEFAULT_CONFIG_PATH.exists():
-        return parse_lint_config({})
+        return {}
     selected = path if path is not None else _DEFAULT_CONFIG_PATH
     try:
         content = selected.read_text()
@@ -213,29 +208,30 @@ def _load_lint_config(path: Path | None) -> LintConfig:
         data = tomllib.loads(content)
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"invalid TOML in {selected}: {error}") from None
-    return parse_lint_config(_lint_section(data, selected))
+    return _lint_section(data, selected)
 
 
 def _lint_section(data: Mapping[str, object], path: Path) -> Mapping[str, object]:
-    """Select ``[tool.delta-engine.lint]``; absent tables mean an empty section."""
-    section: object = data
+    """Select ``[tool.delta-engine.lint]``; an absent table means an empty section."""
+    section: Mapping[str, object] = data
     for key in ("tool", "delta-engine", "lint"):
-        if not isinstance(section, Mapping):
-            return {}
-        section = section.get(key, {})
-    if not isinstance(section, Mapping):
-        raise ConfigError(f"[tool.delta-engine.lint] in {path} must be a TOML table")
+        value = section.get(key, {})
+        if not isinstance(value, Mapping):
+            raise ConfigError(f"'{key}' in {path} must be a TOML table")
+        section = value
     return section
 
 
-def _resolve_lint_target(argument: str | None, config: LintConfig) -> DeclarationRef:
+def _resolve_lint_target(argument: str | None, section: Mapping[str, object]) -> DeclarationRef:
     """Pick the declarations to lint: the argument, else the configured target."""
-    target = argument if argument is not None else config.declarations
+    target = argument if argument is not None else section.get("declarations")
     if target is None:
         raise ConfigError(
             "no declarations given; pass MODULE:ATTRIBUTE or set"
             " 'declarations' in [tool.delta-engine.lint]"
         )
+    if not isinstance(target, str):
+        raise ConfigError(f"declarations: expected a 'module:attribute' string, got {target!r}")
     return DeclarationRef.parse(target)
 
 

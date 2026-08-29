@@ -1,4 +1,4 @@
-"""Lint findings: violations stated by rules, severities attached by the runner."""
+"""Lint findings: facts stated by rules, severities attached by the runner."""
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,32 +16,13 @@ class Severity(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class Violation:
-    """One fact: a table failed one rule."""
-
-    rule: str
-    table: QualifiedName
-    message: str
-
-
-@dataclass(frozen=True, slots=True)
 class Finding:
-    """One violation paired with the severity the policy assigns its rule."""
+    """One fact a rule stated about one table, at the severity the policy assigns."""
 
     rule: str
     table: QualifiedName
     message: str
     severity: Severity
-
-    @classmethod
-    def from_violation(cls, violation: Violation, severity: Severity) -> "Finding":
-        """Attach ``severity`` to ``violation``."""
-        return cls(
-            rule=violation.rule,
-            table=violation.table,
-            message=violation.message,
-            severity=severity,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,11 +49,6 @@ class LintReport:
     def has_errors(self) -> bool:
         """Whether any finding carries error severity."""
         return self.error_count > 0
-
-    @property
-    def has_warnings(self) -> bool:
-        """Whether any finding carries warning severity."""
-        return self.warning_count > 0
 
     def to_dict(self) -> dict[str, Any]:
         """Project the report as plain, JSON-serialisable data."""

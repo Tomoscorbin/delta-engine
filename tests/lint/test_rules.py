@@ -9,7 +9,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     String,
 )
-from delta_engine.lint import (
+from delta_engine.lint.rules import (
     ColumnCommentRule,
     PrimaryKeyRule,
     RequiredTagRule,
@@ -40,49 +40,47 @@ def build_table(
 
 
 class TestTableCommentRule:
-    def test_table_with_comment_produces_no_violations(self) -> None:
+    def test_table_with_comment_produces_no_messages(self) -> None:
         # Given
         table = build_table(comment="Orders placed by customers")
 
         # When
-        violations = TableCommentRule().evaluate(table)
+        messages = TableCommentRule().evaluate(table)
 
         # Then
-        assert violations == ()
+        assert messages == ()
 
     def test_table_without_comment_is_reported(self) -> None:
         # Given
         table = build_table(comment="")
 
         # When
-        violations = TableCommentRule().evaluate(table)
+        messages = TableCommentRule().evaluate(table)
 
         # Then
-        assert len(violations) == 1
-        assert violations[0].rule == "table-comment"
-        assert violations[0].table == QualifiedName("dev", "silver", "orders")
+        assert messages == ("table has no comment",)
 
     def test_whitespace_only_table_comment_is_reported(self) -> None:
         # Given
         table = build_table(comment="   ")
 
         # When
-        violations = TableCommentRule().evaluate(table)
+        messages = TableCommentRule().evaluate(table)
 
         # Then
-        assert len(violations) == 1
+        assert messages == ("table has no comment",)
 
 
 class TestColumnCommentRule:
-    def test_table_with_all_columns_commented_produces_no_violations(self) -> None:
+    def test_table_with_all_columns_commented_produces_no_messages(self) -> None:
         # Given
         table = build_table(columns=_COMMENTED_COLUMNS)
 
         # When
-        violations = ColumnCommentRule().evaluate(table)
+        messages = ColumnCommentRule().evaluate(table)
 
         # Then
-        assert violations == ()
+        assert messages == ()
 
     def test_each_uncommented_column_is_reported_by_name(self) -> None:
         # Given
@@ -95,68 +93,67 @@ class TestColumnCommentRule:
         )
 
         # When
-        violations = ColumnCommentRule().evaluate(table)
+        messages = ColumnCommentRule().evaluate(table)
 
         # Then
-        assert len(violations) == 2
-        assert all(violation.rule == "column-comment" for violation in violations)
-        assert "status" in violations[0].message
-        assert "amount" in violations[1].message
+        assert messages == (
+            "column 'status' has no comment",
+            "column 'amount' has no comment",
+        )
 
 
 class TestPrimaryKeyRule:
-    def test_table_with_primary_key_produces_no_violations(self) -> None:
+    def test_table_with_primary_key_produces_no_messages(self) -> None:
         # Given
         table = build_table(primary_key=PrimaryKeyConstraint(("id",)))
 
         # When
-        violations = PrimaryKeyRule().evaluate(table)
+        messages = PrimaryKeyRule().evaluate(table)
 
         # Then
-        assert violations == ()
+        assert messages == ()
 
     def test_table_without_primary_key_is_reported(self) -> None:
         # Given
         table = build_table(primary_key=None)
 
         # When
-        violations = PrimaryKeyRule().evaluate(table)
+        messages = PrimaryKeyRule().evaluate(table)
 
         # Then
-        assert len(violations) == 1
-        assert violations[0].rule == "primary-key"
+        assert messages == ("table has no primary key",)
 
 
 class TestRequiredTagRule:
-    def test_table_carrying_all_required_tags_produces_no_violations(self) -> None:
+    def test_table_carrying_all_required_tags_produces_no_messages(self) -> None:
         # Given
         table = build_table(tags={"owner": "dse", "domain": "sales"})
 
         # When
-        violations = RequiredTagRule(keys=("owner", "domain")).evaluate(table)
+        messages = RequiredTagRule(keys=("owner", "domain")).evaluate(table)
 
         # Then
-        assert violations == ()
+        assert messages == ()
 
     def test_each_missing_required_tag_is_reported_by_key(self) -> None:
         # Given
         table = build_table(tags={"owner": "dse"})
 
         # When
-        violations = RequiredTagRule(keys=("owner", "domain", "steward")).evaluate(table)
+        messages = RequiredTagRule(keys=("owner", "domain", "steward")).evaluate(table)
 
         # Then
-        assert len(violations) == 2
-        assert all(violation.rule == "required-tag" for violation in violations)
-        assert "domain" in violations[0].message
-        assert "steward" in violations[1].message
+        assert messages == (
+            "missing required tag 'domain'",
+            "missing required tag 'steward'",
+        )
 
     def test_tag_values_are_not_checked(self) -> None:
         # Given a required tag present with an empty value
         table = build_table(tags={"owner": ""})
 
         # When
-        violations = RequiredTagRule(keys=("owner",)).evaluate(table)
+        messages = RequiredTagRule(keys=("owner",)).evaluate(table)
 
         # Then
-        assert violations == ()
+        assert messages == ()
