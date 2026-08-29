@@ -202,7 +202,7 @@ id = "hexagonal-layers"
 name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
-layers = ["cli", "databricks | schema | adapters | api | lint", "application", "domain"]
+layers = ["cli", "databricks | schema | adapters | api | lint | generate", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
@@ -214,6 +214,9 @@ ignore_imports = [
   # (same layer, so the facade edge is exempted). Property is imported downward
   # from application.properties, which the layer order already permits.
   "delta_engine.schema -> delta_engine.api.delta_table",
+  # Module generation renders declaration source and proves it round-trips by
+  # constructing the DeltaTable it prints (same layer, so the edge is exempted).
+  "delta_engine.generate.declaration -> delta_engine.api.delta_table",
 ]
 
 [[tool.importlinter.contracts]]
@@ -226,6 +229,7 @@ source_modules = [
   "delta_engine.application",
   "delta_engine.domain",
   "delta_engine.lint",
+  "delta_engine.generate",
 ]
 forbidden_modules = ["delta", "pyspark"]
 

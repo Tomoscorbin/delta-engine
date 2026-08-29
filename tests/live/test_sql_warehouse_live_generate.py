@@ -1,11 +1,11 @@
 """Live round trip for declaration generation: create, generate, diff clean."""
 
-from delta_engine.api.codegen import generate_module
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.application.ports import TablePresent
 from delta_engine.databricks import build_reader
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import diff_table
+from delta_engine.generate import generate_module
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     live_catalog,

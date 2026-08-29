@@ -2,7 +2,6 @@
 
 import pytest
 
-from delta_engine.api.codegen import GeneratedModule, GenerationError, generate_module
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.domain.model import (
     Array,
@@ -26,6 +25,7 @@ from delta_engine.domain.model import (
     data_type as data_type_module,
 )
 from delta_engine.domain.plan import diff_table
+from delta_engine.generate import GeneratedModule, GenerationError, generate_module
 
 # Concrete samples for the data types whose constructors take arguments; every
 # other DataType subclass is constructed bare. A new parametrised type fails
