@@ -45,11 +45,6 @@ from delta_engine.application.ports import CatalogState, TableAbsent, TablePrese
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind
 
-
-class UnsupportedRelationError(Exception):
-    """The described relation is not a kind of table the engine manages."""
-
-
 # The engine reads and reconciles the Delta relations it can ALTER: ordinary
 # tables, managed or external (existing external tables can be altered;
 # creating one is not yet supported — CREATE TABLE emits no LOCATION), and
@@ -68,6 +63,10 @@ _TABLE_KINDS_BY_RELATION_TYPE: Final[Mapping[str, TableKind]] = MappingProxyType
     }
 )
 _SUPPORTED_PROVIDERS: Final = {"delta"}
+
+
+class UnsupportedRelationError(Exception):
+    """The described relation is not a kind of table the engine manages."""
 
 
 def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:

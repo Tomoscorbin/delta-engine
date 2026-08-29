@@ -12,6 +12,8 @@ from delta_engine.application.engine import lower_desired_tables
 from delta_engine.cli.errors import ConfigError
 from delta_engine.schema import DeltaTable
 
+_MISSING = object()
+
 
 @dataclass(frozen=True, slots=True)
 class DeclarationRef:
@@ -90,9 +92,6 @@ def _import_module(module_name: str) -> ModuleType:
                 "or install the package that contains it"
             ) from error
         raise
-
-
-_MISSING = object()
 
 
 def _attribute(module: ModuleType, reference: DeclarationRef) -> object:

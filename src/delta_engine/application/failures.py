@@ -20,6 +20,11 @@ from typing import ClassVar, Final, assert_never
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import QualifiedName
 
+# Failure messages are recorded in full (a backend stack trace can run to
+# hundreds of lines); rendered reports show only this many leading lines.
+# The complete text stays on the failure's ``message`` field.
+_MESSAGE_HEAD_LINES: Final = 5
+
 
 class FailurePhase(IntEnum):
     """The sync phase that produced a failure. Ordered so the earliest wins."""
@@ -66,11 +71,6 @@ class ForeignKeyFailureReason(StrEnum):
 
 
 # ---------- Failure value objects ----------
-
-# Failure messages are recorded in full (a backend stack trace can run to
-# hundreds of lines); rendered reports show only this many leading lines.
-# The complete text stays on the failure's ``message`` field.
-_MESSAGE_HEAD_LINES: Final = 5
 
 
 def _message_head(message: str) -> str:
