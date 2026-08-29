@@ -30,7 +30,7 @@ Delta Engine is a reconciler, not a data pipeline or migration ledger. Existing 
 
 5. **Lint declarations against governance policy**
 
-   Check every declaration against governance rules — required table and column comments, primary keys, and tag keys — before anything is deployed. `delta-engine lint` is fully offline: it imports the declarations exactly like `plan` does but never opens a connection, so it can run first in CI before any credentials exist. Each rule's severity (`error`, `warning`, or `off`) is configured per repository in `pyproject.toml`, so a team can adopt a rule as a warning and promote it to blocking once the estate complies. The same check runs programmatically, letting a declarations repository enforce its policy in plain pytest.
+   Enforce governance standards — comments, primary keys, required tags — across every declared table before anything is deployed. Linting runs entirely offline, so a pull request can be checked before any Databricks credentials exist, and each rule's severity is configurable so policy can be adopted gradually.
 
 6. **Manage only the parts of a table you own**
 
