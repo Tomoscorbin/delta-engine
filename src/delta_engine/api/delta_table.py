@@ -287,21 +287,14 @@ def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str 
 def _validate_column_names(
     columns: tuple[Column, ...],
     properties: Mapping[str, str | None],
-    scope: TableScope,
 ) -> None:
     """
     Reject column names the declared properties make invalid on Delta.
 
     Two naming rules depend on properties: characters such as spaces are only
     permitted under column mapping, and change data feed reserves its output
-    column names. Both bind only when the declaration manages column
-    structure — a restricted scope mirrors columns the live table already
-    accepted, so it must be able to declare names this engine would reject
-    to create.
+    column names.
     """
-    if not scope.manages(TableAspect.COLUMN_STRUCTURE):
-        return
-
     if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
         offending = [
             declared_name
@@ -659,18 +652,24 @@ def _normalize_declaration(
 
 
 def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """Reject invalid frozen declarations before lowering."""
+    """
+    Reject invalid frozen declarations before lowering.
+
+    Rules judge; this orchestrator decides which of them bind for the
+    declaration's scope.
+    """
     DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
     _validate_layout(
         declaration.columns,
         declaration.partitioned_by,
         declaration.clustered_by,
     )
-    _validate_column_names(
-        declaration.columns,
-        declaration.properties,
-        declaration.scope,
-    )
+    # The naming rules bind only when the declaration manages column
+    # structure: a restricted scope mirrors columns the live table already
+    # accepted, so it must be able to declare names this engine would
+    # refuse to create.
+    if declaration.scope.manages(TableAspect.COLUMN_STRUCTURE):
+        _validate_column_names(declaration.columns, declaration.properties)
     _validate_renames(declaration.columns, declaration.properties)
 
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
