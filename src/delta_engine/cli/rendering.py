@@ -1,8 +1,13 @@
 """CLI-private rendering for one complete sync run."""
 
+from collections.abc import Iterable
+from itertools import groupby
+
 from delta_engine.application import SyncReport, render_diff, render_report
 from delta_engine.cli.connection import Target
 from delta_engine.cli.declarations import DeclarationRef
+from delta_engine.domain.model import QualifiedName
+from delta_engine.lint import Finding, LintReport
 
 
 def render_sync(
@@ -47,3 +52,37 @@ def _render_sql(report: SyncReport) -> str:
 def _heading(text: str) -> str:
     """Render a CLI section heading."""
     return f"{text}\n{'=' * len(text)}"
+
+
+def render_lint(report: LintReport) -> str:
+    """Render findings grouped per table, then one summary line."""
+    grouped = groupby(report.findings, key=lambda finding: finding.table)
+    tables = [_render_table_findings(table, findings) for table, findings in grouped]
+    return "\n\n".join([*tables, _render_lint_summary(report)])
+
+
+def _render_table_findings(table: QualifiedName, findings: Iterable[Finding]) -> str:
+    """Render one table heading over its indented findings."""
+    lines = [
+        f"  {finding.severity.value:<9}{finding.rule:<16}{finding.message}" for finding in findings
+    ]
+    return "\n".join([str(table), *lines])
+
+
+def _render_lint_summary(report: LintReport) -> str:
+    """Render the closing tally, e.g. '3 tables checked: 1 error, 2 warnings'."""
+    checked = _count(report.tables_checked, "table")
+    if not report.findings:
+        return f"{checked} checked: no findings"
+    counts = [
+        _count(count, noun)
+        for count, noun in ((report.error_count, "error"), (report.warning_count, "warning"))
+        if count
+    ]
+    return f"{checked} checked: {', '.join(counts)}"
+
+
+def _count(number: int, noun: str) -> str:
+    """Render a count with its pluralised noun."""
+    suffix = "" if number == 1 else "s"
+    return f"{number} {noun}{suffix}"
