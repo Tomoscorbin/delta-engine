@@ -6,25 +6,14 @@ from typing import Final
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.lint.findings import Severity
-from delta_engine.lint.rules import (
-    ColumnCommentRule,
-    LintRule,
-    PrimaryKeyRule,
-    RequiredTagRule,
-    TableCommentRule,
-)
+from delta_engine.lint.rules import PARAMETER_FREE_RULES, LintRule, RequiredTagRule
 
 _OFF: Final = "off"
 _SEVERITIES: Final[Mapping[str, Severity]] = {severity.value: severity for severity in Severity}
-_PARAMETER_FREE_RULES: Final[Mapping[str, type[LintRule]]] = {
-    TableCommentRule.name: TableCommentRule,
-    ColumnCommentRule.name: ColumnCommentRule,
-    PrimaryKeyRule.name: PrimaryKeyRule,
-}
 _DECLARATIONS: Final = "declarations"
 _KNOWN_SETTINGS: Final = (
     _DECLARATIONS,
-    *_PARAMETER_FREE_RULES,
+    *(rule.name for rule in PARAMETER_FREE_RULES),
     RequiredTagRule.name,
 )
 
@@ -71,12 +60,11 @@ def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
                 f"unknown lint setting '{key}'; expected one of: " + ", ".join(_KNOWN_SETTINGS)
             )
 
-    rules = [
-        ConfiguredRule(rule_type(), severity)
-        for name, rule_type in _PARAMETER_FREE_RULES.items()
-        if (severity := _parse_rule_severity(name, section.get(name, Severity.ERROR.value)))
-        is not None
-    ]
+    rules: list[ConfiguredRule] = []
+    for rule in PARAMETER_FREE_RULES:
+        severity = _parse_rule_severity(rule.name, section.get(rule.name, Severity.ERROR.value))
+        if severity is not None:
+            rules.append(ConfiguredRule(rule, severity))
     required_tag = _parse_required_tag(section.get(RequiredTagRule.name))
     if required_tag is not None:
         rules.append(required_tag)

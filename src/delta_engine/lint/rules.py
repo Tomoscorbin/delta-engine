@@ -1,7 +1,7 @@
 """The built-in lint rules: each states facts about one desired table."""
 
 from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from typing import ClassVar, Final, Protocol
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable
@@ -74,3 +74,12 @@ class RequiredTagRule:
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each required tag key missing from the table's tags."""
         return tuple(f"missing required tag '{key}'" for key in self.keys if key not in table.tags)
+
+
+# The rules config can enable with a bare severity string. Registering a rule
+# here is all the wiring a new parameter-free rule needs.
+PARAMETER_FREE_RULES: Final[tuple[LintRule, ...]] = (
+    TableCommentRule(),
+    ColumnCommentRule(),
+    PrimaryKeyRule(),
+)

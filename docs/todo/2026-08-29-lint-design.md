@@ -93,6 +93,10 @@ deterministic qualified-name ordering. Rules see `DesiredTable` only.
 `required-tag` is the only parameterized rule — constructed with the keys from
 config. Tag *values* are not checked in v1.
 
+Parameter-free rules register themselves in `PARAMETER_FREE_RULES` in
+`rules.py`; config derives its known keys and defaults from that registry, so
+adding such a rule touches only `rules.py`.
+
 ### Deliberate choices
 
 - **Per-table signature.** `evaluate(table)`, not `evaluate(tables)`. Every
@@ -197,7 +201,7 @@ src/delta_engine/lint/
     __init__.py     public surface: lint_tables, parse_lint_config, LintPolicy,
                     LintReport, Finding, Severity, LintConfigError
     findings.py     Severity, Finding, LintReport
-    rules.py        LintRule protocol, four built-in rules
+    rules.py        LintRule protocol, four built-in rules, registry
     config.py       mapping -> LintPolicy (pure; LintConfigError on bad input)
     run.py          lint_tables(): lower, evaluate, attach severity, report
 src/delta_engine/cli/
