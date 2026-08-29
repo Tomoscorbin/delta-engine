@@ -90,12 +90,26 @@ class TestRequiredTag:
         with pytest.raises(LintConfigError):
             parse_lint_config({"required-tag": {"key": ["owner"]}})
 
+    def test_required_tag_severity_off_inside_the_table_disables_the_rule(self) -> None:
+        # Given / When
+        policy = parse_lint_config({"required-tag": {"keys": ["owner"], "severity": "off"}})
 
-class TestShapeErrors:
-    def test_an_inline_table_for_a_parameter_free_rule_is_rejected(self) -> None:
+        # Then
+        assert "required-tag" not in severities_by_rule(policy)
+
+
+class TestInlineTableForm:
+    def test_a_parameter_free_rule_accepts_the_inline_table_form(self) -> None:
+        # Given / When
+        policy = parse_lint_config({"table-comment": {"severity": "warning"}})
+
+        # Then
+        assert severities_by_rule(policy)["table-comment"] is Severity.WARNING
+
+    def test_unknown_parameters_for_a_rule_are_rejected(self) -> None:
         # Given / When / Then
         with pytest.raises(LintConfigError):
-            parse_lint_config({"table-comment": {"severity": "error"}})
+            parse_lint_config({"table-comment": {"keys": ["owner"]}})
 
 
 class TestDeclarationsKey:

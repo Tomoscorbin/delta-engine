@@ -69,17 +69,27 @@ class RequiredTagRule:
     name: ClassVar[str] = "required-tag"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "keys", tuple(self.keys))
+        if isinstance(self.keys, str):
+            raise ValueError("'keys' must be a list of tag key strings, not a bare string")
+        keys = tuple(self.keys)
+        if not keys or not all(isinstance(key, str) and key.strip() for key in keys):
+            raise ValueError("'keys' must be a non-empty list of tag key strings")
+        object.__setattr__(self, "keys", keys)
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each required tag key missing from the table's tags."""
         return tuple(f"missing required tag '{key}'" for key in self.keys if key not in table.tags)
 
 
-# The rules config can enable with a bare severity string. Registering a rule
-# here is all the wiring a new parameter-free rule needs.
-PARAMETER_FREE_RULES: Final[tuple[LintRule, ...]] = (
-    TableCommentRule(),
-    ColumnCommentRule(),
-    PrimaryKeyRule(),
+# Every rule the config section can name. A rule's dataclass fields are its
+# config parameters: an inline TOML table is `severity` plus constructor
+# keyword arguments, so no rule may have a field called `severity`. A rule
+# constructible without arguments defaults to enabled at error severity; one
+# with required fields stays off until configured. Registering a rule here is
+# all the wiring it needs.
+ALL_RULES: Final = (
+    TableCommentRule,
+    ColumnCommentRule,
+    PrimaryKeyRule,
+    RequiredTagRule,
 )

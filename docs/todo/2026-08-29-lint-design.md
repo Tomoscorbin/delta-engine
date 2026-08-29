@@ -93,9 +93,14 @@ deterministic qualified-name ordering. Rules see `DesiredTable` only.
 `required-tag` is the only parameterized rule — constructed with the keys from
 config. Tag *values* are not checked in v1.
 
-Parameter-free rules register themselves in `PARAMETER_FREE_RULES` in
-`rules.py`; config derives its known keys and defaults from that registry, so
-adding such a rule touches only `rules.py`.
+Every rule registers in `ALL_RULES` in `rules.py`, and a rule's dataclass
+fields are its config parameters: an inline table is `severity` plus
+constructor keyword arguments (`severity` is a reserved name), and each rule
+validates its own parameters at construction. A rule constructible without
+arguments defaults to enabled at error severity; one with required fields
+stays off until configured. Adding any rule — parameterized or not — touches
+only `rules.py`; the parser, known-settings validation, and defaults all
+derive from the registry.
 
 ### Deliberate choices
 

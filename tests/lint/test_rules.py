@@ -2,6 +2,8 @@
 
 from collections.abc import Mapping
 
+import pytest
+
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -157,3 +159,18 @@ class TestRequiredTagRule:
 
         # Then
         assert messages == ()
+
+    def test_empty_keys_are_rejected_at_construction(self) -> None:
+        # Given / When / Then
+        with pytest.raises(ValueError):
+            RequiredTagRule(keys=())
+
+    def test_a_bare_string_for_keys_is_rejected_at_construction(self) -> None:
+        # Given / When / Then
+        with pytest.raises(ValueError):
+            RequiredTagRule(keys="owner")
+
+    def test_blank_keys_are_rejected_at_construction(self) -> None:
+        # Given / When / Then
+        with pytest.raises(ValueError):
+            RequiredTagRule(keys=("owner", "   "))
