@@ -137,8 +137,16 @@ jobs:
             body.md
           if-no-files-found: error
 
-  publish:
+  live:
+    # Gate publishing on the credentialed suite passing against a real
+    # warehouse. Skipped on a dry run, which never publishes.
     needs: build
+    if: needs.build.outputs.publish == 'true'
+    uses: ./.github/workflows/live.yaml
+    secrets: inherit
+
+  publish:
+    needs: [build, live]
     if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
     environment:
