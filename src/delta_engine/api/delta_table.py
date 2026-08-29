@@ -1,12 +1,27 @@
 """
 Schema declaration implementation for Delta tables and foreign keys.
 
-Validation here is declaration-time deployability: rules Delta or Unity
-Catalog enforce when an author creates a table (layout key types, quotas,
-property-dependent naming rules). Structural coherence — columns exist,
-names are unique, at least one column — is the domain ``DesiredTable``'s
-job, enforced the moment a declaration is lowered; this module skips names
-it cannot resolve rather than re-checking existence.
+Each rule here is judged against the smallest context that can decide it,
+and the file is laid out in those sections:
+
+- Value rules judge one value in isolation: can it exist on the platform
+  at all? (Object-name length and characters, tag quotas.)
+- Declaration rules judge one whole declaration: can it deploy as
+  declared? (Layout, property-dependent naming, nested NOT NULL.)
+  ``_validate_declaration`` owns which of them bind for a scope.
+- Reference rules judge a declaration against the tables it references:
+  a foreign key against its parent's declaration, at lowering time.
+
+Normalization runs before any judgment: input is frozen and every column
+reference is resolved to its declared spelling (``_NormalizedDeclaration``).
+Structural coherence — columns exist, names are unique, at least one column
+— is the domain ``DesiredTable``'s job, enforced the moment a declaration
+is lowered; a name that resolves to no column passes through for the domain
+to reject.
+
+Most rules restate what Delta or Unity Catalog would enforce at creation.
+A few are this engine's own policy (the cross-catalog foreign key rule, the
+scope gate on naming rules) rather than platform limits.
 """
 
 from __future__ import annotations
@@ -84,27 +99,7 @@ _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
 )
 
 
-class _SelfReference:
-    """Sentinel marking a foreign key that references its own table."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "Self"
-
-
-Self: Final = _SelfReference()
-
-
-def _parse_name_reference(raw: str) -> QualifiedName:
-    """
-    Parse a ``catalog.schema.table`` string into the referenced table's name.
-
-    Every part must be a name Unity Catalog can store.
-    """
-    name = QualifiedName.parse(raw)
-    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
-    return name
+# ---------- Value rules ----------
 
 
 def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "Table") -> None:
@@ -141,6 +136,114 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
                 f"Tag {key!r} on {subject} has a {len(value)}-character"
                 f" value; delta-engine accepts at most {_MAX_TAG_VALUE_LENGTH}"
             )
+
+
+# ---------- Normalization ----------
+
+
+def _declared_spelling(columns_by_name: Mapping[str, Column], name: str) -> Identifier:
+    """
+    Return ``name`` in its declared spelling.
+
+    A name that resolves to no declared column is returned as written, for
+    the domain to reject (see ``_NormalizedDeclaration``).
+    """
+    column = columns_by_name.get(Identifier(name))
+    return Identifier(column.name) if column is not None else Identifier(name)
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedDeclaration:
+    """
+    One frozen representation of public ``DeltaTable`` input.
+
+    Every column reference is already canonicalized to its declared spelling
+    through ``columns_by_name``. A name that matches no declared column
+    passes through as written: existence is the domain ``DesiredTable``'s
+    invariant, and its error shows the user's spelling. Rules and lowering
+    look columns up here and never re-derive the mapping.
+    """
+
+    qualified_name: QualifiedName
+    columns: tuple[Column, ...]
+    columns_by_name: Mapping[str, Column]
+    comment: str
+    properties: Mapping[str, str | None]
+    tags: Mapping[str, str]
+    partitioned_by: tuple[Identifier, ...]
+    clustered_by: tuple[Identifier, ...]
+    primary_key: tuple[Identifier, ...] | None
+    primary_key_name: Identifier | None
+    foreign_key_declarations: tuple[ForeignKey, ...]
+    scope: TableScope
+
+
+def _normalize_declaration(
+    *,
+    catalog: str,
+    schema: str,
+    name: str,
+    columns: Iterable[Column],
+    comment: str,
+    properties: Mapping[str, str | None] | None,
+    tags: Mapping[str, str] | None,
+    partitioned_by: ListOrTuple[str],
+    clustered_by: ListOrTuple[str],
+    primary_key: ListOrTuple[str] | None,
+    primary_key_name: str | None,
+    foreign_keys: Iterable[ForeignKey] | None,
+    scope: ScopeName,
+) -> _NormalizedDeclaration:
+    """Freeze public inputs before judging them."""
+    # Annotations are not enforced at runtime, so fail clearly rather than
+    # treating a bare string as an iterable of one-character column names.
+    string_collections: tuple[tuple[str, object], ...] = (
+        ("partitioned_by", partitioned_by),
+        ("clustered_by", clustered_by),
+        ("primary_key", primary_key),
+    )
+    for field_name, value in string_collections:
+        if isinstance(value, str):
+            raise TypeError(
+                f"{field_name} must be a list or tuple of column names, not a string;"
+                f" write {field_name}=[{value!r}] for one column"
+            )
+
+    if primary_key_name is not None:
+        if not isinstance(primary_key_name, str):
+            raise TypeError("primary_key_name must be a string or None")
+        if primary_key is None:
+            raise ValueError("primary_key_name requires primary_key")
+        if not primary_key_name.strip():
+            raise ValueError("primary_key_name must not be blank")
+
+    declared_columns = tuple(columns)
+    columns_by_name: dict[str, Column] = {column.name: column for column in declared_columns}
+    return _NormalizedDeclaration(
+        qualified_name=QualifiedName(catalog, schema, name),
+        columns=declared_columns,
+        columns_by_name=MappingProxyType(columns_by_name),
+        comment=comment,
+        properties=MappingProxyType(dict(properties or {})),
+        tags=MappingProxyType(dict(tags or {})),
+        partitioned_by=tuple(
+            _declared_spelling(columns_by_name, column_name) for column_name in partitioned_by
+        ),
+        clustered_by=tuple(
+            _declared_spelling(columns_by_name, column_name) for column_name in clustered_by
+        ),
+        primary_key=(
+            tuple(_declared_spelling(columns_by_name, column_name) for column_name in primary_key)
+            if primary_key is not None
+            else None
+        ),
+        primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
+        foreign_key_declarations=tuple(foreign_keys or ()),
+        scope=table_scope_for(scope),
+    )
+
+
+# ---------- Declaration rules ----------
 
 
 class _NestedStructFieldContext(NamedTuple):
@@ -317,6 +420,57 @@ def _validate_column_names(
             )
 
 
+def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
+    """
+    Reject invalid frozen declarations before lowering.
+
+    Rules judge; this orchestrator decides which of them bind for the
+    declaration's scope.
+    """
+    DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
+    _validate_layout(declaration)
+    # The naming rules bind only when the declaration manages column
+    # structure: a restricted scope mirrors columns the live table already
+    # accepted, so it must be able to declare names this engine would
+    # refuse to create.
+    if declaration.scope.manages(TableAspect.COLUMN_STRUCTURE):
+        _validate_column_names(declaration.columns, declaration.properties)
+    _validate_renames(declaration.columns, declaration.properties)
+
+    _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
+    for column in declaration.columns:
+        _validate_tags(f"column '{column.name}'", column.tags)
+        _validate_nested_not_null(column)
+
+    _validate_object_name_parts(declaration.qualified_name)
+
+
+# ---------- Reference rules ----------
+
+
+class _SelfReference:
+    """Sentinel marking a foreign key that references its own table."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "Self"
+
+
+Self: Final = _SelfReference()
+
+
+def _parse_name_reference(raw: str) -> QualifiedName:
+    """
+    Parse a ``catalog.schema.table`` string into the referenced table's name.
+
+    Every part must be a name Unity Catalog can store.
+    """
+    name = QualifiedName.parse(raw)
+    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
+    return name
+
+
 def _validate_same_catalog(owner_name: QualifiedName, referenced_table: QualifiedName) -> None:
     """Reject a foreign key whose referenced table lives in another catalog."""
     if referenced_table.catalog != owner_name.catalog:
@@ -324,17 +478,6 @@ def _validate_same_catalog(owner_name: QualifiedName, referenced_table: Qualifie
             f"cross-catalog foreign keys are not currently supported:"
             f" {owner_name} cannot reference {referenced_table}"
         )
-
-
-def _declared_spelling(columns_by_name: Mapping[str, Column], name: str) -> Identifier:
-    """
-    Return ``name`` in its declared spelling.
-
-    A name that resolves to no declared column is returned as written, for
-    the domain to reject (see ``_NormalizedDeclaration``).
-    """
-    column = columns_by_name.get(Identifier(name))
-    return Identifier(column.name) if column is not None else Identifier(name)
 
 
 class _ParentDeclaration(NamedTuple):
@@ -603,120 +746,7 @@ class ForeignKey:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _NormalizedDeclaration:
-    """
-    One frozen representation of public ``DeltaTable`` input.
-
-    Every column reference is already canonicalized to its declared spelling
-    through ``columns_by_name``. A name that matches no declared column
-    passes through as written: existence is the domain ``DesiredTable``'s
-    invariant, and its error shows the user's spelling. Rules and lowering
-    look columns up here and never re-derive the mapping.
-    """
-
-    qualified_name: QualifiedName
-    columns: tuple[Column, ...]
-    columns_by_name: Mapping[str, Column]
-    comment: str
-    properties: Mapping[str, str | None]
-    tags: Mapping[str, str]
-    partitioned_by: tuple[Identifier, ...]
-    clustered_by: tuple[Identifier, ...]
-    primary_key: tuple[Identifier, ...] | None
-    primary_key_name: Identifier | None
-    foreign_key_declarations: tuple[ForeignKey, ...]
-    scope: TableScope
-
-
-def _normalize_declaration(
-    *,
-    catalog: str,
-    schema: str,
-    name: str,
-    columns: Iterable[Column],
-    comment: str,
-    properties: Mapping[str, str | None] | None,
-    tags: Mapping[str, str] | None,
-    partitioned_by: ListOrTuple[str],
-    clustered_by: ListOrTuple[str],
-    primary_key: ListOrTuple[str] | None,
-    primary_key_name: str | None,
-    foreign_keys: Iterable[ForeignKey] | None,
-    scope: ScopeName,
-) -> _NormalizedDeclaration:
-    """Freeze public inputs before judging them."""
-    # Annotations are not enforced at runtime, so fail clearly rather than
-    # treating a bare string as an iterable of one-character column names.
-    string_collections: tuple[tuple[str, object], ...] = (
-        ("partitioned_by", partitioned_by),
-        ("clustered_by", clustered_by),
-        ("primary_key", primary_key),
-    )
-    for field_name, value in string_collections:
-        if isinstance(value, str):
-            raise TypeError(
-                f"{field_name} must be a list or tuple of column names, not a string;"
-                f" write {field_name}=[{value!r}] for one column"
-            )
-
-    if primary_key_name is not None:
-        if not isinstance(primary_key_name, str):
-            raise TypeError("primary_key_name must be a string or None")
-        if primary_key is None:
-            raise ValueError("primary_key_name requires primary_key")
-        if not primary_key_name.strip():
-            raise ValueError("primary_key_name must not be blank")
-
-    declared_columns = tuple(columns)
-    columns_by_name: dict[str, Column] = {column.name: column for column in declared_columns}
-    return _NormalizedDeclaration(
-        qualified_name=QualifiedName(catalog, schema, name),
-        columns=declared_columns,
-        columns_by_name=MappingProxyType(columns_by_name),
-        comment=comment,
-        properties=MappingProxyType(dict(properties or {})),
-        tags=MappingProxyType(dict(tags or {})),
-        partitioned_by=tuple(
-            _declared_spelling(columns_by_name, column_name) for column_name in partitioned_by
-        ),
-        clustered_by=tuple(
-            _declared_spelling(columns_by_name, column_name) for column_name in clustered_by
-        ),
-        primary_key=(
-            tuple(_declared_spelling(columns_by_name, column_name) for column_name in primary_key)
-            if primary_key is not None
-            else None
-        ),
-        primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
-        foreign_key_declarations=tuple(foreign_keys or ()),
-        scope=table_scope_for(scope),
-    )
-
-
-def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """
-    Reject invalid frozen declarations before lowering.
-
-    Rules judge; this orchestrator decides which of them bind for the
-    declaration's scope.
-    """
-    DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
-    _validate_layout(declaration)
-    # The naming rules bind only when the declaration manages column
-    # structure: a restricted scope mirrors columns the live table already
-    # accepted, so it must be able to declare names this engine would
-    # refuse to create.
-    if declaration.scope.manages(TableAspect.COLUMN_STRUCTURE):
-        _validate_column_names(declaration.columns, declaration.properties)
-    _validate_renames(declaration.columns, declaration.properties)
-
-    _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
-    for column in declaration.columns:
-        _validate_tags(f"column '{column.name}'", column.tags)
-        _validate_nested_not_null(column)
-
-    _validate_object_name_parts(declaration.qualified_name)
+# ---------- Lowering ----------
 
 
 def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
