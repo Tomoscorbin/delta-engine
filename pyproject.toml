@@ -202,7 +202,7 @@ id = "hexagonal-layers"
 name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
-layers = ["cli", "databricks | schema | adapters | api", "application", "domain"]
+layers = ["cli", "databricks | schema | adapters | api | lint", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
@@ -225,6 +225,7 @@ source_modules = [
   "delta_engine.api",
   "delta_engine.application",
   "delta_engine.domain",
+  "delta_engine.lint",
 ]
 forbidden_modules = ["delta", "pyspark"]
 
