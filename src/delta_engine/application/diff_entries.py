@@ -46,6 +46,8 @@ from delta_engine.domain.plan import (
     UnsetTableTag,
 )
 
+_OPTIMIZE_FULL_HINT: Final[str] = "run OPTIMIZE FULL to recluster existing data"
+
 
 class DiffCategory(IntEnum):
     """
@@ -487,9 +489,6 @@ def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
             subject=f"foreign key {action.name}",
         ),
     )
-
-
-_OPTIMIZE_FULL_HINT: Final[str] = "run OPTIMIZE FULL to recluster existing data"
 
 
 @action_entries.register

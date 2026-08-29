@@ -36,6 +36,9 @@ from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, CreateTable, TableDiff, TableDrift
 
+# The versioned wire format `to_dict` emits; additive keys do not bump it.
+_SCHEMA_VERSION: Final = 2
+
 # ---------- Status enums ----------
 
 
@@ -104,10 +107,6 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
         FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
     }
 )
-
-
-# The versioned wire format `to_dict` emits; additive keys do not bump it.
-_SCHEMA_VERSION: Final = 2
 
 
 def _entry_records(entries: Iterable[DiffEntry]) -> list[dict[str, str]]:

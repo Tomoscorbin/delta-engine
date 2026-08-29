@@ -76,6 +76,13 @@ _MAX_TAGS_PER_SECURABLE: Final[int] = 50
 _MAX_TAG_KEY_LENGTH: Final[int] = 256
 _MAX_TAG_VALUE_LENGTH: Final[int] = 256
 
+_NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
+    "foreign key with a name reference requires an explicit"
+    " {local: referenced} column mapping; the string and sequence"
+    " shorthand forms resolve against the referenced table's primary key,"
+    " which a name does not carry"
+)
+
 
 class _SelfReference:
     """Sentinel marking a foreign key that references its own table."""
@@ -87,14 +94,6 @@ class _SelfReference:
 
 
 Self: Final = _SelfReference()
-
-
-_NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
-    "foreign key with a name reference requires an explicit"
-    " {local: referenced} column mapping; the string and sequence"
-    " shorthand forms resolve against the referenced table's primary key,"
-    " which a name does not carry"
-)
 
 
 def _parse_name_reference(raw: str) -> QualifiedName:

@@ -43,6 +43,27 @@ from delta_engine.domain.model import (
     Variant,
 )
 
+_SIMPLE_TYPES: Final[dict[str, DataType]] = {
+    "int": Integer(),
+    "integer": Integer(),
+    "bigint": Long(),
+    "long": Long(),
+    "smallint": Short(),
+    "short": Short(),
+    "tinyint": Byte(),
+    "byte": Byte(),
+    "float": Float(),
+    "real": Float(),
+    "double": Double(),
+    "boolean": Boolean(),
+    "date": Date(),
+    "timestamp": Timestamp(),
+    "timestamp_ltz": Timestamp(),
+    "timestamp_ntz": TimestampNtz(),
+    "binary": Binary(),
+    "variant": Variant(),
+}
+
 
 def render_data_type(data_type: DataType) -> str:
     """Return a Spark SQL type string for a domain :class:`DataType`."""
@@ -90,28 +111,6 @@ def render_data_type(data_type: DataType) -> str:
         case _:
             cls = data_type.__class__.__name__
             raise TypeError(f"Unsupported DataType variant: {cls}")
-
-
-_SIMPLE_TYPES: Final[dict[str, DataType]] = {
-    "int": Integer(),
-    "integer": Integer(),
-    "bigint": Long(),
-    "long": Long(),
-    "smallint": Short(),
-    "short": Short(),
-    "tinyint": Byte(),
-    "byte": Byte(),
-    "float": Float(),
-    "real": Float(),
-    "double": Double(),
-    "boolean": Boolean(),
-    "date": Date(),
-    "timestamp": Timestamp(),
-    "timestamp_ltz": Timestamp(),
-    "timestamp_ntz": TimestampNtz(),
-    "binary": Binary(),
-    "variant": Variant(),
-}
 
 
 def data_type_from_json(type_obj: object) -> DataType | None:
