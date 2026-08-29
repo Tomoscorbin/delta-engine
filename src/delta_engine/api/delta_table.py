@@ -12,7 +12,7 @@ it cannot resolve rather than re-checking existence.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from types import MappingProxyType
 from typing import Final, NamedTuple
 
@@ -327,6 +327,15 @@ def _validate_column_names(
             )
 
 
+def _validate_same_catalog(owner_name: QualifiedName, referenced_table: QualifiedName) -> None:
+    """Reject a foreign key whose referenced table lives in another catalog."""
+    if referenced_table.catalog != owner_name.catalog:
+        raise ValueError(
+            f"cross-catalog foreign keys are not currently supported:"
+            f" {owner_name} cannot reference {referenced_table}"
+        )
+
+
 class _ParentDeclaration(NamedTuple):
     """
     A referenced table's declared primary key and column types.
@@ -338,6 +347,20 @@ class _ParentDeclaration(NamedTuple):
 
     primary_key: PrimaryKeyConstraint | None
     column_types: dict[str, DataType]
+
+
+class _NameReference(NamedTuple):
+    """
+    A referenced table resolved from a name reference at declaration time.
+
+    Carries the parsed table name and the explicit ``{local: referenced}``
+    column mapping the name form requires. A name supplies no declaration to
+    judge, so this is everything lowering needs; holding the mapping here
+    makes a name reference without one unrepresentable after construction.
+    """
+
+    table: QualifiedName
+    columns: Mapping[Identifier, Identifier]
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,14 +393,20 @@ class ForeignKey:
     columns: str | ListOrTuple[str] | Mapping[str, str]
     references: DeltaTable | _SelfReference | str
     name: str | None = None
+    _reference: _NameReference | DeltaTable | _SelfReference = dataclass_field(
+        init=False, repr=False, compare=False
+    )
+    _lowered_columns: tuple[Identifier, ...] | Mapping[Identifier, Identifier] = dataclass_field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
-        # Freeze user input once; resolve it when the owning DeltaTable is constructed.
         frozen: tuple[str, ...] | Mapping[str, str]
+        lowered: tuple[Identifier, ...] | Mapping[Identifier, Identifier]
         match self.columns:
             case str():
-                Identifier(self.columns)
                 frozen = (self.columns,)
+                lowered = (Identifier(self.columns),)
             case Mapping():
                 mapping = dict(self.columns)
                 if not mapping:
@@ -387,19 +416,22 @@ class ForeignKey:
                     for local, referenced in mapping.items()
                 ):
                     raise TypeError("foreign key mapping keys and values must be strings")
+                lowered_mapping: dict[Identifier, Identifier] = {}
                 for local, referenced in mapping.items():
-                    Identifier(local)
-                    Identifier(referenced)
+                    local_identifier = Identifier(local)
+                    if local_identifier in lowered_mapping:
+                        raise ValueError(f"Duplicate foreign key local column: {local}")
+                    lowered_mapping[local_identifier] = Identifier(referenced)
                 frozen = MappingProxyType(mapping)
+                lowered = MappingProxyType(lowered_mapping)
             case list() | tuple():
                 sequence = tuple(self.columns)
                 if not sequence:
                     raise ValueError("foreign key columns must not be empty")
                 if not all(isinstance(column, str) for column in sequence):
                     raise TypeError("foreign key columns must be strings")
-                for column in sequence:
-                    Identifier(column)
                 frozen = sequence
+                lowered = tuple(Identifier(column) for column in sequence)
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
@@ -410,13 +442,14 @@ class ForeignKey:
         if self.name is not None:
             Identifier(self.name)
 
+        reference: _NameReference | DeltaTable | _SelfReference
         match self.references:
             case str() as raw:
-                if not isinstance(frozen, Mapping):
+                if not isinstance(lowered, Mapping):
                     raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-                _parse_name_reference(raw)
+                reference = _NameReference(_parse_name_reference(raw), lowered)
             case DeltaTable() | _SelfReference():
-                pass
+                reference = self.references
             case _:
                 raise TypeError(
                     "foreign key references must be a DeltaTable, Self, or a"
@@ -424,6 +457,8 @@ class ForeignKey:
                 )
 
         object.__setattr__(self, "columns", frozen)
+        object.__setattr__(self, "_lowered_columns", lowered)
+        object.__setattr__(self, "_reference", reference)
 
     def _to_constraint(
         self,
@@ -444,11 +479,20 @@ class ForeignKey:
         in the owner's catalog. Local column existence is never checked here
         — the ``DesiredTable`` built right after enforces it.
         """
-        declared: _ParentDeclaration | None
-        match self.references:
-            case str() as raw:
-                referenced_table = _parse_name_reference(raw)
-                declared = None
+        # Identity maps canonicalize any spelling of a column name to its
+        # declared spelling: keys are Identifiers, so lookups are case-insensitive.
+        local_names: dict[str, str] = {column.name: column.name for column in owner_columns}
+
+        declared: _ParentDeclaration
+        match self._reference:
+            case _NameReference(referenced_table, mapping):
+                _validate_same_catalog(owner_name, referenced_table)
+                return ForeignKeyConstraint(
+                    local_columns=tuple(local_names.get(local, local) for local in mapping),
+                    referenced_table=referenced_table,
+                    referenced_columns=tuple(mapping.values()),
+                    name=self.name,
+                )
             case _SelfReference():
                 referenced_table = owner_name
                 declared = _ParentDeclaration(
@@ -463,29 +507,7 @@ class ForeignKey:
                     {column.name: column.data_type for column in desired.columns},
                 )
 
-        if referenced_table.catalog != owner_name.catalog:
-            raise ValueError(
-                f"cross-catalog foreign key not supported: {owner_name} cannot"
-                f" reference {referenced_table}. information_schema is"
-                " per-catalog, so the engine could create the constraint but"
-                " never observe it afterwards; declare both tables in the same"
-                " catalog."
-            )
-
-        local_names = {column.name: column.name for column in owner_columns}
-
-        if declared is None:
-            # Re-asserts the construction invariant; also narrows columns for typing.
-            if not isinstance(self.columns, Mapping):
-                raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-            return ForeignKeyConstraint(
-                local_columns=tuple(
-                    local_names.get(Identifier(local), local) for local in self.columns
-                ),
-                referenced_table=referenced_table,
-                referenced_columns=tuple(self.columns.values()),
-                name=self.name,
-            )
+        _validate_same_catalog(owner_name, referenced_table)
 
         primary_key = declared.primary_key
         if primary_key is None:
@@ -493,11 +515,8 @@ class ForeignKey:
                 f"foreign key references {referenced_table}, which declares no primary key"
             )
 
-        pairs = tuple(
-            (Identifier(local), Identifier(parent))
-            for local, parent in self._resolve_column_pairs(referenced_table, primary_key)
-        )
-        referenced_names = {name: name for name in declared.column_types}
+        pairs = self._resolve_column_pairs(referenced_table, primary_key)
+        referenced_names: dict[str, str] = {name: name for name in declared.column_types}
         local_columns = tuple(local_names.get(local, local) for local, _ in pairs)
         referenced_columns = tuple(referenced_names.get(parent, parent) for _, parent in pairs)
 
@@ -517,7 +536,9 @@ class ForeignKey:
                 f" {'; '.join(details)}"
             )
 
-        local_types = {column.name: column.data_type for column in owner_columns}
+        local_types: dict[str, DataType] = {
+            column.name: column.data_type for column in owner_columns
+        }
         for local_name, referenced_name in pairs:
             local_type = local_types.get(local_name)
             if local_type is None:
@@ -543,10 +564,10 @@ class ForeignKey:
         primary_key: PrimaryKeyConstraint,
     ) -> tuple[tuple[str, str], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
-        if isinstance(self.columns, Mapping):
-            return tuple(self.columns.items())
+        if isinstance(self._lowered_columns, Mapping):
+            return tuple(self._lowered_columns.items())
 
-        local_columns = tuple(self.columns)
+        local_columns = self._lowered_columns
         parent_columns = tuple(primary_key.columns)
 
         # a single-column parent has only one possible pairing

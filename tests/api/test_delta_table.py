@@ -738,6 +738,11 @@ def test_foreign_key_name_rejects_invalid_values(
         pytest.param("  ", ValueError, id="blank-string"),
         pytest.param(["  "], ValueError, id="blank-sequence-entry"),
         pytest.param({"customer_id": "  "}, ValueError, id="blank-mapping-entry"),
+        pytest.param(
+            {"customer_id": "id", "CUSTOMER_ID": "region_id"},
+            ValueError,
+            id="case-duplicate-mapping-keys",
+        ),
     ],
 )
 def test_foreign_key_rejects_invalid_column_input(
