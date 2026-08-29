@@ -11,6 +11,7 @@ from delta_engine.domain.model import (
     ObservedPrimaryKeyConstraint,
     ObservedTable,
     QualifiedName,
+    TableKind,
 )
 from tests.cli.conftest import observed_orders
 
@@ -29,7 +30,7 @@ def test_generate_prints_an_importable_module_and_exits_cleanly(runner, fake_rea
     assert result.stderr == ""
 
 
-def test_generate_reports_dropped_foreign_keys_on_stderr_only(runner, fake_reader) -> None:
+def test_generate_declares_foreign_keys_with_nothing_to_warn_about(runner, fake_reader) -> None:
     # Given a live table owning a foreign key
     fake_reader.states["dev.silver.orders"] = TablePresent(
         table=ObservedTable(
@@ -53,11 +54,33 @@ def test_generate_reports_dropped_foreign_keys_on_stderr_only(runner, fake_reade
     # When
     result = runner.invoke(app, ["generate", "dev.silver.orders"])
 
+    # Then the module declares the key and stderr stays silent
+    assert result.exit_code == 0
+    assert (
+        'ForeignKey(columns={"customer_id": "id"},'
+        ' references="dev.silver.customers", name="fk_orders_customer"),'
+    ) in result.stdout
+    assert result.stderr == ""
+
+
+def test_generate_reports_the_streaming_table_warning_on_stderr_only(runner, fake_reader) -> None:
+    # Given a live streaming table
+    fake_reader.states["dev.silver.orders_live"] = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName("dev", "silver", "orders_live"),
+            columns=(ObservedColumn("id", Long(), nullable=False),),
+            kind=TableKind.STREAMING_TABLE,
+        )
+    )
+
+    # When
+    result = runner.invoke(app, ["generate", "dev.silver.orders_live"])
+
     # Then the warning goes to stderr and the module stays importable
     assert result.exit_code == 0
-    assert "warning: foreign key fk_orders_customer" in result.stderr
+    assert "warning: streaming table" in result.stderr
     assert "warning" not in result.stdout
-    assert "orders = DeltaTable(\n" in result.stdout
+    assert "orders_live = DeltaTable(\n" in result.stdout
 
 
 def test_generate_fails_when_the_table_does_not_exist(runner, fake_reader) -> None:

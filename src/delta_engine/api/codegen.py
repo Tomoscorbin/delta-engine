@@ -8,7 +8,7 @@ import json
 import keyword
 import re
 
-from delta_engine.api.delta_table import DeltaTable
+from delta_engine.api.delta_table import DeltaTable, ForeignKey, Self
 from delta_engine.application.scopes import ScopeName
 from delta_engine.domain.model import (
     Array,
@@ -27,6 +27,7 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedForeignKeyConstraint,
     ObservedTable,
+    QualifiedName,
     Short,
     String,
     Struct,
@@ -79,6 +80,10 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     # pipeline-owned property values stay out of the module entirely.
     properties = dict(observed.properties) if scope == "full" else {}
     try:
+        foreign_keys = tuple(
+            _raise_foreign_key(constraint, observed.qualified_name)
+            for constraint in observed.foreign_keys
+        )
         DeltaTable(
             catalog=observed.qualified_name.catalog,
             schema=observed.qualified_name.schema,
@@ -95,6 +100,7 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
                 else None
             ),
             primary_key_name=str(primary_key.name) if primary_key is not None else None,
+            foreign_keys=foreign_keys,
             scope=scope,
         )
     except ValueError as error:
@@ -126,9 +132,15 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     if primary_key is not None:
         argument_lines.append(f"    primary_key={_render_name_list(primary_key.columns)},")
         argument_lines.append(f"    primary_key_name={_string_literal(str(primary_key.name))},")
+    if observed.foreign_keys:
+        argument_lines.append("    foreign_keys=[")
+        argument_lines.extend(
+            f"        {_render_foreign_key(constraint, observed.qualified_name, used_names)},"
+            for constraint in observed.foreign_keys
+        )
+        argument_lines.append("    ],")
     if scope != "full":
         argument_lines.append(f"    scope={_string_literal(scope)},")
-    argument_lines.extend(_render_foreign_key_hints(observed))
 
     variable = _variable_name_for(observed.qualified_name.name)
     lines = [
@@ -139,12 +151,11 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
         *argument_lines,
         ")",
     ]
-    warnings = tuple(_foreign_key_warning(constraint) for constraint in observed.foreign_keys)
+    warnings: tuple[str, ...] = ()
     if observed.kind is TableKind.STREAMING_TABLE:
         warnings = (
             'streaming table: generated with scope="annotations"; structure,'
             " properties, and keys belong to the owning pipeline",
-            *warnings,
         )
     return GeneratedModule(
         source="\n".join(lines) + "\n",
@@ -153,45 +164,44 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     )
 
 
-def _foreign_key_warning(constraint: ObservedForeignKeyConstraint) -> str:
-    """State that one observed foreign key was left out and what planning does."""
-    local = ", ".join(str(name) for name in constraint.local_columns)
-    referenced = ", ".join(str(name) for name in constraint.referenced_columns)
-    return (
-        f"foreign key {constraint.name} ({local} -> {constraint.referenced_table}.{referenced})"
-        " is not rendered; planning this module as written will drop it"
+def _raise_foreign_key(
+    constraint: ObservedForeignKeyConstraint, owner: QualifiedName
+) -> ForeignKey:
+    """Raise one observed foreign key into its declaration counterpart."""
+    references = Self if constraint.referenced_table == owner else str(constraint.referenced_table)
+    return ForeignKey(
+        columns=_foreign_key_columns(constraint),
+        references=references,
+        name=str(constraint.name),
     )
 
 
-def _render_foreign_key_hints(observed: ObservedTable) -> list[str]:
-    """Render observed foreign keys as a commented repair hint inside the call."""
-    if not observed.foreign_keys:
-        return []
-    lines = [
-        "    # Foreign keys are not rendered: a ForeignKey references another",
-        "    # DeltaTable object, which this module does not define. Planning this",
-        "    # module as written will DROP the constraints below. Restore them by",
-        "    # importing ForeignKey (and Self) and declaring:",
-        "    # foreign_keys=[",
-    ]
-    for constraint in observed.foreign_keys:
-        columns = ", ".join(
-            f"{_string_literal(str(local))}: {_string_literal(str(referenced))}"
-            for local, referenced in zip(
-                constraint.local_columns, constraint.referenced_columns, strict=True
-            )
+def _render_foreign_key(
+    constraint: ObservedForeignKeyConstraint,
+    owner: QualifiedName,
+    used_names: set[str],
+) -> str:
+    """Render one observed foreign key as ``ForeignKey(...)`` source, recording used names."""
+    used_names.add("ForeignKey")
+    if constraint.referenced_table == owner:
+        used_names.add("Self")
+        references = "Self"
+    else:
+        references = _string_literal(str(constraint.referenced_table))
+    return (
+        f"ForeignKey(columns={_render_string_mapping(_foreign_key_columns(constraint))},"
+        f" references={references}, name={_string_literal(str(constraint.name))})"
+    )
+
+
+def _foreign_key_columns(constraint: ObservedForeignKeyConstraint) -> dict[str, str]:
+    """Pair each local column with the referenced column it points at."""
+    return {
+        str(local): str(referenced)
+        for local, referenced in zip(
+            constraint.local_columns, constraint.referenced_columns, strict=True
         )
-        references = (
-            "Self"
-            if constraint.referenced_table == observed.qualified_name
-            else f"<{constraint.referenced_table}>"
-        )
-        lines.append(
-            "    #     ForeignKey(columns={" + columns + "},"
-            f" references={references}, name={_string_literal(str(constraint.name))}),"
-        )
-    lines.append("    # ],")
-    return lines
+    }
 
 
 def _variable_name_for(table_name: str) -> str:

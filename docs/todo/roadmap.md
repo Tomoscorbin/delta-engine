@@ -175,10 +175,9 @@ without abandoning the tool for that table.
 **Status.** Explicit primary- and foreign-key names shipped in 2026-08.
 Single-table generation shipped in 2026-08 as `delta-engine generate
 CATALOG.SCHEMA.TABLE`: it reads one live table and prints a ready-to-plan
-declaration module, with foreign keys emitted as commented placeholders and
-streaming tables scoped to annotations. Whole-schema generation — emitting
-tables in dependency order and wiring `ForeignKey` references — remains the
-follow-on.
+declaration module, with foreign keys declared by `"catalog.schema.table"`
+name and streaming tables scoped to annotations. Whole-schema generation
+remains the follow-on.
 
 **Why.** The biggest barrier to adopting the tool is an existing estate of
 hundreds of tables nobody wants to hand-transcribe. The hard half — parsing
@@ -192,9 +191,8 @@ observed state into a typed model — already exists in the reader.
 - Explicit PK/FK names are available when generated source should request that
   name for future creation. Existing constraints are adopted by structural
   definition regardless of their catalog names.
-- FK declarations reference `DeltaTable` objects, so whole-schema generation
-  must emit tables in dependency order and wire the references; single-table
-  generation can emit a commented placeholder.
+- FK declarations reference other tables by name, so each generated module is
+  self-contained; whole-schema generation needs no dependency ordering.
 
 ### 8. CHECK constraints
 
