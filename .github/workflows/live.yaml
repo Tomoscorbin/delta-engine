@@ -19,11 +19,9 @@ on:
         description: "Optional pytest -k expression to run a subset of the suite"
         required: false
         default: ""
-  schedule:
-    # Weekly drift check (Mondays 07:00 UTC): catches Databricks-side
-    # behaviour changes the hermetic suite cannot see. Non-blocking — it
-    # never gates a PR.
-    - cron: "0 7 * * 1"
+  # Called by the release workflow between build and publish, so a release
+  # only publishes once the suite passes against a real warehouse.
+  workflow_call:
 
 # One live run at a time: the suite shares a schema and a warehouse.
 concurrency:
