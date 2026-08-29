@@ -27,6 +27,15 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Default token for jobs that don't set their own permissions. The `live` job
+# calls the reusable live.yaml, which requests id-token: write for Databricks
+# OIDC; a reusable workflow can't be granted more than the caller offers, so
+# that permission has to be available here. Jobs that set their own
+# `permissions:` (build, publish, github-release) override this default.
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
