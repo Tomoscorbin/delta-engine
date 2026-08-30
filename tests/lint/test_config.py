@@ -3,7 +3,7 @@
 import pytest
 
 from delta_engine.lint import LintConfigError, LintPolicy, Severity, parse_lint_config
-from delta_engine.lint.rules import RequiredTagRule
+from delta_engine.lint.rules import NamingConventionRule, RequiredTagRule
 
 
 def severities_by_rule(policy: LintPolicy) -> dict[str, Severity]:
@@ -20,6 +20,7 @@ class TestDefaults:
             "table-comment": Severity.ERROR,
             "column-comment": Severity.ERROR,
             "primary-key": Severity.ERROR,
+            "naming-convention": Severity.ERROR,
         }
 
 
@@ -84,6 +85,30 @@ class TestRequiredTag:
 
         # Then
         assert "required-tag" not in severities_by_rule(policy)
+
+
+class TestNamingConvention:
+    def test_a_custom_pattern_is_passed_through_to_the_rule(self) -> None:
+        # Given / When
+        policy = parse_lint_config({"naming-convention": {"pattern": r"[A-Za-z][A-Za-z0-9]*"}})
+
+        # Then
+        rules = {configured.rule.name: configured.rule for configured in policy.rules}
+        rule = rules["naming-convention"]
+        assert isinstance(rule, NamingConventionRule)
+        assert rule.pattern == r"[A-Za-z][A-Za-z0-9]*"
+
+    def test_an_invalid_pattern_is_rejected(self) -> None:
+        # Given / When / Then
+        with pytest.raises(LintConfigError):
+            parse_lint_config({"naming-convention": {"pattern": "[unclosed"}})
+
+    def test_it_can_be_turned_off(self) -> None:
+        # Given / When
+        policy = parse_lint_config({"naming-convention": "off"})
+
+        # Then
+        assert "naming-convention" not in severities_by_rule(policy)
 
 
 class TestInlineTableForm:

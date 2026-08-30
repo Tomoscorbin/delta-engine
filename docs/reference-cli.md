@@ -210,10 +210,11 @@ is opened, so the command works without any Databricks configuration.
 
 | Rule id          | Checks                                                              | Default |
 | ---------------- | ------------------------------------------------------------------- | ------- |
-| `table-comment`  | The table has a comment                                             | error   |
-| `column-comment` | Every column has a comment (one finding per column)                 | error   |
-| `primary-key`    | The table declares a primary key                                    | error   |
-| `required-tag`   | The table carries each configured tag key (values are not checked) | off     |
+| `table-comment`     | The table has a comment                                             | error   |
+| `column-comment`    | Every column has a comment (one finding per column)                 | error   |
+| `primary-key`       | The table declares a primary key                                    | error   |
+| `naming-convention` | The table name and every column name match a pattern (snake_case by default) | error   |
+| `required-tag`      | The table carries each configured tag key (values are not checked) | off     |
 
 Configure severities in `pyproject.toml`; each rule takes `"error"`,
 `"warning"`, or `"off"`:
@@ -222,10 +223,13 @@ Configure severities in `pyproject.toml`; each rule takes `"error"`,
 [tool.delta-engine.lint]
 declarations = "myproject.tables:all_tables"
 column-comment = "warning"
+naming-convention = { pattern = "[a-z][a-z0-9_]*" }
 required-tag = { keys = ["owner"] }
 ```
 
-`required-tag` is off until its keys are listed; `severity` inside its inline
+`naming-convention` matches the whole name against `pattern` (the default is
+snake_case), so a partial match does not pass; an invalid regular expression is
+a configuration error. `required-tag` is off until its keys are listed; `severity` inside its inline
 table is optional and defaults to `"error"`. An unknown rule name or an
 invalid severity is a configuration error, so a typo cannot silently disable
 a rule.

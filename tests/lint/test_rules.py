@@ -13,6 +13,7 @@ from delta_engine.domain.model import (
 )
 from delta_engine.lint.rules import (
     ColumnCommentRule,
+    NamingConventionRule,
     PrimaryKeyRule,
     RequiredTagRule,
     TableCommentRule,
@@ -112,6 +113,96 @@ class TestPrimaryKeyRule:
 
         # Then
         assert messages == ("table has no primary key",)
+
+
+class TestNamingConventionRule:
+    def test_snake_case_table_and_columns_produce_no_messages(self) -> None:
+        # Given a table and columns that are all snake_case
+        table = build_table(
+            columns=(
+                DesiredColumn("id", String(), comment="Row identifier"),
+                DesiredColumn("created_at", String(), comment="When the row was created"),
+            )
+        )
+
+        # When
+        messages = NamingConventionRule().evaluate(table)
+
+        # Then
+        assert messages == ()
+
+    def test_a_table_name_that_is_not_snake_case_is_reported(self) -> None:
+        # Given a table whose name contains a hyphen (which survives lowercasing)
+        table = DesiredTable(
+            qualified_name=QualifiedName("dev", "silver", "order-items"),
+            columns=_COMMENTED_COLUMNS,
+            comment="Orders placed by customers",
+            tags={},
+            primary_key=None,
+        )
+
+        # When
+        messages = NamingConventionRule().evaluate(table)
+
+        # Then
+        assert messages == (
+            "table name 'order-items' does not match naming convention '[a-z][a-z0-9_]*'",
+        )
+
+    def test_each_column_name_that_breaks_the_convention_is_reported(self) -> None:
+        # Given columns with a capitalised name and a hyphenated name
+        table = build_table(
+            columns=(
+                DesiredColumn("id", String(), comment="Row identifier"),
+                DesiredColumn("CreatedAt", String(), comment="When the row was created"),
+                DesiredColumn("unit-price", String(), comment="Price per unit"),
+            )
+        )
+
+        # When
+        messages = NamingConventionRule().evaluate(table)
+
+        # Then
+        assert messages == (
+            "column name 'CreatedAt' does not match naming convention '[a-z][a-z0-9_]*'",
+            "column name 'unit-price' does not match naming convention '[a-z][a-z0-9_]*'",
+        )
+
+    def test_a_custom_pattern_overrides_the_default(self) -> None:
+        # Given a pattern that permits capitals
+        table = build_table(
+            columns=(DesiredColumn("CreatedAt", String(), comment="When the row was created"),)
+        )
+
+        # When
+        messages = NamingConventionRule(pattern=r"[A-Za-z][A-Za-z0-9]*").evaluate(table)
+
+        # Then the CamelCase column now passes
+        assert messages == ()
+
+    def test_a_name_that_only_matches_the_pattern_as_a_prefix_is_reported(self) -> None:
+        # Given a column name that matches the default pattern up to a trailing symbol
+        table = build_table(
+            columns=(DesiredColumn("total_$", String(), comment="Total amount"),)
+        )
+
+        # When
+        messages = NamingConventionRule().evaluate(table)
+
+        # Then the whole name must match, so the trailing '$' fails it
+        assert messages == (
+            "column name 'total_$' does not match naming convention '[a-z][a-z0-9_]*'",
+        )
+
+    def test_a_blank_pattern_is_rejected_at_construction(self) -> None:
+        # Given / When / Then
+        with pytest.raises(ValueError):
+            NamingConventionRule(pattern="   ")
+
+    def test_an_invalid_regular_expression_is_rejected_at_construction(self) -> None:
+        # Given / When / Then
+        with pytest.raises(ValueError):
+            NamingConventionRule(pattern="[unclosed")
 
 
 class TestRequiredTagRule:

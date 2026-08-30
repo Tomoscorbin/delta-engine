@@ -1,6 +1,7 @@
 """The built-in lint rules: each states facts about one desired table."""
 
 from dataclasses import dataclass
+import re
 from typing import ClassVar, Final, Protocol
 
 from delta_engine.domain.collection_types import ListOrTuple
@@ -81,6 +82,40 @@ class RequiredTagRule:
         return tuple(f"missing required tag '{key}'" for key in self.keys if key not in table.tags)
 
 
+# Snake_case: a lowercase letter followed by lowercase letters, digits, or
+# underscores. The whole name must match, so hyphens, spaces, leading digits,
+# and capitals are all reported.
+_DEFAULT_NAME_PATTERN: Final = r"[a-z][a-z0-9_]*"
+
+
+@dataclass(frozen=True, slots=True)
+class NamingConventionRule:
+    """Every table and column name matches a naming convention (snake_case by default)."""
+
+    pattern: str = _DEFAULT_NAME_PATTERN
+    name: ClassVar[str] = "naming-convention"
+
+    def __post_init__(self) -> None:
+        if not self.pattern.strip():
+            raise ValueError("'pattern' must not be blank")
+        try:
+            re.compile(self.pattern)
+        except re.error as error:
+            raise ValueError(f"'pattern' is not a valid regular expression: {error}") from None
+
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
+        """Report the table name and each column name the pattern does not fully match."""
+        names = (
+            ("table", table.qualified_name.name),
+            *(("column", str(column.name)) for column in table.columns),
+        )
+        return tuple(
+            f"{kind} name '{value}' does not match naming convention '{self.pattern}'"
+            for kind, value in names
+            if re.fullmatch(self.pattern, value) is None
+        )
+
+
 # Every rule the config section can name. A rule's dataclass fields are its
 # config parameters: an inline TOML table is `severity` plus constructor
 # keyword arguments, so no rule may have a field called `severity`. A rule
@@ -91,5 +126,6 @@ ALL_RULES: Final = (
     TableCommentRule,
     ColumnCommentRule,
     PrimaryKeyRule,
+    NamingConventionRule,
     RequiredTagRule,
 )
