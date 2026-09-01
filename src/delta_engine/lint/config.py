@@ -47,6 +47,8 @@ class TablePattern:
     table: str
 
     def __post_init__(self) -> None:
+        if not all(segment.strip() for segment in (self.catalog, self.schema, self.table)):
+            raise ValueError("a pattern segment must not be blank")
         object.__setattr__(self, "catalog", self.catalog.lower())
         object.__setattr__(self, "schema", self.schema.lower())
         object.__setattr__(self, "table", self.table.lower())
@@ -100,15 +102,15 @@ class LintPolicy:
 
     def resolve_rules(self, table: QualifiedName) -> tuple[ConfiguredRule, ...]:
         """
-        Return the configured rules in effect for ``table``, in registry order.
+        Return the configured rules in effect for ``table``.
 
         Matching overrides apply in order on top of the global rules, each
         changing only the rules it names, so the last override to name a rule
         wins for that table.
         """
-        effective: dict[str, ConfiguredRule | None] = {name: None for name in _RULE_TYPES_BY_NAME}
-        for configured in self.rules:
-            effective[configured.rule.name] = configured
+        effective: dict[str, ConfiguredRule | None] = {
+            configured.rule.name: configured for configured in self.rules
+        }
         for override in self.overrides:
             if override.matches(table):
                 effective.update(override.settings)
@@ -177,57 +179,60 @@ def _parse_rule_setting(rule_type: type[LintRule], value: object) -> ConfiguredR
 
 
 def _parse_overrides(value: object) -> tuple[PolicyOverride, ...]:
-    """Parse the ``overrides`` array into per-table policy overrides."""
+    """Parse the ``overrides`` array, prefixing any error with the entry's index."""
     if not isinstance(value, (list, tuple)):
         raise LintConfigError("'overrides' must be an array of override tables")
-    return tuple(_parse_override(f"overrides[{index}]", entry) for index, entry in enumerate(value))
+    overrides = []
+    for index, entry in enumerate(value):
+        try:
+            overrides.append(_parse_override(entry))
+        except LintConfigError as error:
+            raise LintConfigError(f"overrides[{index}]: {error}") from None
+    return tuple(overrides)
 
 
-def _parse_override(label: str, entry: object) -> PolicyOverride:
+def _parse_override(entry: object) -> PolicyOverride:
     """Parse one overrides entry: table patterns plus the rule settings for them."""
     if not isinstance(entry, Mapping):
-        raise LintConfigError(f"{label}: expected a table with 'tables' and rule settings")
-    patterns = _parse_table_patterns(label, entry.get(_TABLES_SETTING))
+        raise LintConfigError("expected a table with 'tables' and rule settings")
+    patterns = _parse_table_patterns(entry.get(_TABLES_SETTING))
     rule_values = {key: value for key, value in entry.items() if key != _TABLES_SETTING}
     if not rule_values:
-        raise LintConfigError(f"{label}: an override must set at least one rule")
+        raise LintConfigError("an override must set at least one rule")
     settings: dict[str, ConfiguredRule | None] = {}
     for key, value in rule_values.items():
         rule_type = _RULE_TYPES_BY_NAME.get(key)
         if rule_type is None:
             raise LintConfigError(
-                f"{label}: unknown rule '{key}'; expected one of: " + ", ".join(_RULE_TYPES_BY_NAME)
+                f"unknown rule '{key}'; expected one of: " + ", ".join(_RULE_TYPES_BY_NAME)
             )
-        try:
-            settings[key] = _parse_rule_setting(rule_type, value)
-        except LintConfigError as error:
-            raise LintConfigError(f"{label}: {error}") from None
+        settings[key] = _parse_rule_setting(rule_type, value)
     return PolicyOverride(patterns, settings)
 
 
-def _parse_table_patterns(label: str, value: object) -> tuple[TablePattern, ...]:
+def _parse_table_patterns(value: object) -> tuple[TablePattern, ...]:
     """Parse one override's ``tables`` list into patterns."""
     if (
         not isinstance(value, (list, tuple))
         or not value
         or not all(isinstance(item, str) for item in value)
     ):
-        raise LintConfigError(
-            f"{label}: 'tables' must be a non-empty list of qualified-name patterns"
-        )
-    return tuple(_parse_table_pattern(label, item) for item in value)
+        raise LintConfigError("'tables' must be a non-empty list of qualified-name patterns")
+    return tuple(_parse_table_pattern(item) for item in value)
 
 
-def _parse_table_pattern(label: str, pattern: str) -> TablePattern:
+def _parse_table_pattern(pattern: str) -> TablePattern:
     """Parse one ``catalog.schema.table`` glob string."""
     parts = pattern.split(".")
-    if len(parts) != 3 or not all(part.strip() for part in parts):
+    if len(parts) != 3:
         raise LintConfigError(
-            f"{label}: pattern '{pattern}' must have three dot-separated segments, "
-            "like 'catalog.schema.*'"
+            f"pattern '{pattern}' must have three dot-separated segments, like 'catalog.schema.*'"
         )
     catalog, schema, table = parts
-    return TablePattern(catalog, schema, table)
+    try:
+        return TablePattern(catalog, schema, table)
+    except ValueError as error:
+        raise LintConfigError(f"pattern '{pattern}': {error}") from None
 
 
 def _parse_rule_severity(name: str, value: object) -> Severity | None:

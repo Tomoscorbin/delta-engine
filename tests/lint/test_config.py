@@ -225,6 +225,15 @@ class TestOverrides:
         with pytest.raises(LintConfigError):
             parse_lint_config(section)
 
+    def test_a_pattern_with_a_blank_segment_is_rejected(self) -> None:
+        # Given a pattern whose schema segment is blank
+        section = {"overrides": [{"tables": ["dev..orders"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
     def test_an_empty_tables_list_is_rejected(self) -> None:
         # Given an override that matches no tables
         section = {"overrides": [{"tables": [], "primary-key": "off"}]}

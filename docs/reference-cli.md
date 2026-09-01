@@ -252,9 +252,10 @@ naming-convention = "error"
 ```
 
 `tables` is a list of `catalog.schema.table` globs. A pattern always has three
-dot-separated segments and a `*` matches within its segment only, so
-`dev.bronze.*` covers one schema and every table in a catalog is spelled
-`dev.*.*`. Matching is case-insensitive, like the names themselves.
+dot-separated segments, each a shell-style glob (`*`, `?`, and `[...]`) that
+matches within its segment only, so `dev.bronze.*` covers one schema and every
+table in a catalog is spelled `dev.*.*`. Matching is case-insensitive, like
+the names themselves.
 
 Rule settings inside a block take the same form as the top level — a severity
 string or an inline table with parameters — so an override can disable a rule,
