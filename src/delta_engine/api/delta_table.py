@@ -429,13 +429,14 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     """
     DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
     _validate_layout(declaration)
-    # The naming rules bind only when the declaration manages column
+    # The column rules bind only when the declaration manages column
     # structure: a restricted scope mirrors columns the live table already
     # accepted, so it must be able to declare names this engine would
-    # refuse to create.
+    # refuse to create, and its rename hints are the domain's scope rule
+    # to reject with the accurate error.
     if declaration.scope.manages(TableAspect.COLUMN_STRUCTURE):
         _validate_column_names(declaration.columns, declaration.properties)
-    _validate_renames(declaration.columns, declaration.properties)
+        _validate_renames(declaration.columns, declaration.properties)
 
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
     for column in declaration.columns:
