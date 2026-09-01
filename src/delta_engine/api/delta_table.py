@@ -563,6 +563,58 @@ def _validate_reference_coherence(
             )
 
 
+def _lower_column_mapping(columns: Mapping[str, str]) -> Mapping[Identifier, Identifier]:
+    """Lower an explicit ``{local: referenced}`` mapping, rejecting duplicate locals."""
+    if not columns:
+        raise ValueError("foreign key columns must not be empty")
+    if not all(
+        isinstance(local, str) and isinstance(referenced, str)
+        for local, referenced in columns.items()
+    ):
+        raise TypeError("foreign key mapping keys and values must be strings")
+    lowered: dict[Identifier, Identifier] = {}
+    for local, referenced in columns.items():
+        local_identifier = Identifier(local)
+        if local_identifier in lowered:
+            raise ValueError(f"Duplicate foreign key local column: {local}")
+        lowered[local_identifier] = Identifier(referenced)
+    return MappingProxyType(lowered)
+
+
+def _lower_column_sequence(columns: ListOrTuple[str]) -> tuple[Identifier, ...]:
+    """Lower a same-name column list, rejecting duplicates by identifier."""
+    if not columns:
+        raise ValueError("foreign key columns must not be empty")
+    if not all(isinstance(column, str) for column in columns):
+        raise TypeError("foreign key columns must be strings")
+    lowered = tuple(Identifier(column) for column in columns)
+    seen: set[Identifier] = set()
+    for column in lowered:
+        if column in seen:
+            raise ValueError(f"Duplicate foreign key local column: {column}")
+        seen.add(column)
+    return lowered
+
+
+def _resolve_reference(
+    references: DeltaTable | _SelfReference | str,
+    lowered_columns: tuple[Identifier, ...] | Mapping[Identifier, Identifier],
+) -> _NameReference | DeltaTable | _SelfReference:
+    """Resolve the ``references`` argument into its internal form at construction."""
+    match references:
+        case str() as raw:
+            if not isinstance(lowered_columns, Mapping):
+                raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
+            return _NameReference(_parse_name_reference(raw), lowered_columns)
+        case DeltaTable() | _SelfReference():
+            return references
+        case _:
+            raise TypeError(
+                "foreign key references must be a DeltaTable, Self, or a"
+                f" 'catalog.schema.table' name; got {references!r}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ForeignKey:
     """
@@ -604,40 +656,12 @@ class ForeignKey:
         frozen: tuple[str, ...] | Mapping[str, str]
         lowered: tuple[Identifier, ...] | Mapping[Identifier, Identifier]
         match self.columns:
-            case str():
-                frozen = (self.columns,)
-                lowered = (Identifier(self.columns),)
-            case Mapping():
-                mapping = dict(self.columns)
-                if not mapping:
-                    raise ValueError("foreign key columns must not be empty")
-                if not all(
-                    isinstance(local, str) and isinstance(referenced, str)
-                    for local, referenced in mapping.items()
-                ):
-                    raise TypeError("foreign key mapping keys and values must be strings")
-                lowered_mapping: dict[Identifier, Identifier] = {}
-                for local, referenced in mapping.items():
-                    local_identifier = Identifier(local)
-                    if local_identifier in lowered_mapping:
-                        raise ValueError(f"Duplicate foreign key local column: {local}")
-                    lowered_mapping[local_identifier] = Identifier(referenced)
-                frozen = MappingProxyType(mapping)
-                lowered = MappingProxyType(lowered_mapping)
-            case list() | tuple():
-                sequence = tuple(self.columns)
-                if not sequence:
-                    raise ValueError("foreign key columns must not be empty")
-                if not all(isinstance(column, str) for column in sequence):
-                    raise TypeError("foreign key columns must be strings")
-                lowered_sequence = tuple(Identifier(column) for column in sequence)
-                seen: set[Identifier] = set()
-                for column in lowered_sequence:
-                    if column in seen:
-                        raise ValueError(f"Duplicate foreign key local column: {column}")
-                    seen.add(column)
-                frozen = sequence
-                lowered = lowered_sequence
+            case str() as column_name:
+                frozen, lowered = (column_name,), (Identifier(column_name),)
+            case Mapping() as mapping:
+                frozen, lowered = MappingProxyType(dict(mapping)), _lower_column_mapping(mapping)
+            case list() | tuple() as sequence:
+                frozen, lowered = tuple(sequence), _lower_column_sequence(sequence)
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
@@ -646,25 +670,11 @@ class ForeignKey:
                 )
 
         if self.name is not None:
-            Identifier(self.name)
-
-        reference: _NameReference | DeltaTable | _SelfReference
-        match self.references:
-            case str() as raw:
-                if not isinstance(lowered, Mapping):
-                    raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-                reference = _NameReference(_parse_name_reference(raw), lowered)
-            case DeltaTable() | _SelfReference():
-                reference = self.references
-            case _:
-                raise TypeError(
-                    "foreign key references must be a DeltaTable, Self, or a"
-                    f" 'catalog.schema.table' name; got {self.references!r}"
-                )
+            Identifier(self.name)  # rejects an invalid physical name
 
         object.__setattr__(self, "columns", frozen)
         object.__setattr__(self, "_lowered_columns", lowered)
-        object.__setattr__(self, "_reference", reference)
+        object.__setattr__(self, "_reference", _resolve_reference(self.references, lowered))
 
     def _to_constraint(
         self,
