@@ -3,7 +3,7 @@
 import pytest
 
 from delta_engine.lint import LintConfigError, LintPolicy, Severity, parse_lint_config
-from delta_engine.lint.rules import RequiredTagRule
+from delta_engine.lint.rules import NamingConventionRule, RequiredTagRule
 
 
 def severities_by_rule(policy: LintPolicy) -> dict[str, Severity]:
@@ -11,7 +11,7 @@ def severities_by_rule(policy: LintPolicy) -> dict[str, Severity]:
 
 
 class TestDefaults:
-    def test_empty_config_enables_the_parameter_free_rules_as_errors(self) -> None:
+    def test_empty_config_enables_the_default_rules_as_errors(self) -> None:
         # Given / When
         policy = parse_lint_config({})
 
@@ -84,6 +84,50 @@ class TestRequiredTag:
 
         # Then
         assert "required-tag" not in severities_by_rule(policy)
+
+
+class TestNamingConvention:
+    def test_it_is_off_by_default(self) -> None:
+        # Given a config that does not mention the rule
+        section: dict[str, object] = {}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule is absent from the policy
+        assert "naming-convention" not in severities_by_rule(policy)
+
+    def test_a_custom_pattern_is_passed_through_to_the_rule(self) -> None:
+        # Given a config that sets a custom pattern
+        section = {"naming-convention": {"pattern": r"[A-Za-z][A-Za-z0-9]*"}}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule carries that pattern
+        rules = {configured.rule.name: configured.rule for configured in policy.rules}
+        rule = rules["naming-convention"]
+        assert isinstance(rule, NamingConventionRule)
+        assert rule.pattern == r"[A-Za-z][A-Za-z0-9]*"
+
+    def test_an_invalid_pattern_is_rejected(self) -> None:
+        # Given a config with a pattern that is not a valid regular expression
+        section = {"naming-convention": {"pattern": "[unclosed"}}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_it_can_be_turned_off(self) -> None:
+        # Given a config that sets the rule to off
+        section = {"naming-convention": "off"}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule is absent from the policy
+        assert "naming-convention" not in severities_by_rule(policy)
 
 
 class TestInlineTableForm:

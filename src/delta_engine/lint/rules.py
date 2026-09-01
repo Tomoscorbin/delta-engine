@@ -1,6 +1,7 @@
 """The built-in lint rules: each states facts about one desired table."""
 
 from dataclasses import dataclass
+import re
 from typing import ClassVar, Final, Protocol
 
 from delta_engine.domain.collection_types import ListOrTuple
@@ -9,6 +10,8 @@ from delta_engine.domain.model import DesiredTable
 
 class LintRule(Protocol):
     """One governance policy evaluated per table."""
+
+    enabled_by_default: ClassVar[bool]
 
     @property
     def name(self) -> str:
@@ -25,6 +28,7 @@ class TableCommentRule:
     """Every table has a non-blank comment."""
 
     name: ClassVar[str] = "table-comment"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when its comment is blank."""
@@ -38,6 +42,7 @@ class ColumnCommentRule:
     """Every column has a non-blank comment."""
 
     name: ClassVar[str] = "column-comment"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each column whose comment is blank, by name."""
@@ -53,6 +58,7 @@ class PrimaryKeyRule:
     """Every table declares a primary key."""
 
     name: ClassVar[str] = "primary-key"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when it has no primary key."""
@@ -67,6 +73,7 @@ class RequiredTagRule:
 
     keys: ListOrTuple[str]
     name: ClassVar[str] = "required-tag"
+    enabled_by_default: ClassVar[bool] = False
 
     def __post_init__(self) -> None:
         if isinstance(self.keys, str):
@@ -81,15 +88,51 @@ class RequiredTagRule:
         return tuple(f"missing required tag '{key}'" for key in self.keys if key not in table.tags)
 
 
+# Snake_case: a lowercase letter followed by lowercase letters, digits, or
+# underscores. The whole name must match, so hyphens, spaces, leading digits,
+# and capitals are all reported.
+_DEFAULT_NAME_PATTERN: Final = r"[a-z][a-z0-9_]*"
+
+
+@dataclass(frozen=True, slots=True)
+class NamingConventionRule:
+    """Every table and column name matches a naming convention (snake_case by default)."""
+
+    pattern: str = _DEFAULT_NAME_PATTERN
+    name: ClassVar[str] = "naming-convention"
+    enabled_by_default: ClassVar[bool] = False
+
+    def __post_init__(self) -> None:
+        if not self.pattern.strip():
+            raise ValueError("'pattern' must not be blank")
+        try:
+            re.compile(self.pattern)
+        except re.error as error:
+            raise ValueError(f"'pattern' is not a valid regular expression: {error}") from None
+
+    def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
+        """Report the table name and each column name the pattern does not fully match."""
+        named_values: list[tuple[str, str]] = [("table", table.qualified_name.name)]
+        named_values += [("column", str(column.name)) for column in table.columns]
+
+        messages: list[str] = []
+        for kind, value in named_values:
+            if re.fullmatch(self.pattern, value) is None:
+                messages.append(
+                    f"{kind} name '{value}' does not match naming convention '{self.pattern}'"
+                )
+        return tuple(messages)
+
+
 # Every rule the config section can name. A rule's dataclass fields are its
 # config parameters: an inline TOML table is `severity` plus constructor
-# keyword arguments, so no rule may have a field called `severity`. A rule
-# constructible without arguments defaults to enabled at error severity; one
-# with required fields stays off until configured. Registering a rule here is
-# all the wiring it needs.
+# keyword arguments, so no rule may have a field called `severity`. A rule's
+# `enabled_by_default` decides whether it runs when the config is silent.
+# Registering a rule here is all the wiring it needs.
 ALL_RULES: Final = (
     TableCommentRule,
     ColumnCommentRule,
     PrimaryKeyRule,
+    NamingConventionRule,
     RequiredTagRule,
 )

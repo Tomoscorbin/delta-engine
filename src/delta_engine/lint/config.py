@@ -1,7 +1,7 @@
 """Parse the ``[tool.delta-engine.lint]`` section into a lint policy."""
 
 from collections.abc import Mapping
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Final
 
 from delta_engine.domain.collection_types import ListOrTuple
@@ -45,10 +45,10 @@ def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
 
     A rule's value is either a bare severity string or an inline table holding
     ``severity`` plus the rule's own parameters. A rule absent from the mapping
-    is enabled at error severity when it needs no parameters and off otherwise,
-    so an empty mapping yields the defaults. The reserved ``declarations`` key
-    is accepted but carries no policy; the CLI reads it to locate the
-    declarations.
+    falls back to its own default: enabled at error severity when the rule is
+    enabled by default, off otherwise, so an empty mapping yields the defaults.
+    The reserved ``declarations`` key is accepted but carries no policy; the CLI
+    reads it to locate the declarations.
 
     Raises:
         LintConfigError: On an unknown setting, an invalid severity, or rule
@@ -83,12 +83,9 @@ def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
     return LintPolicy(rules)
 
 
-def _default_setting_for(rule_type: type[Any]) -> str:
-    """Pick an absent rule's setting: error when it can run bare, off otherwise."""
-    requires_parameters = any(
-        field.default is MISSING and field.default_factory is MISSING for field in fields(rule_type)
-    )
-    return _OFF if requires_parameters else Severity.ERROR.value
+def _default_setting_for(rule_type: type[LintRule]) -> str:
+    """Pick an absent rule's setting from whether the rule is enabled by default."""
+    return Severity.ERROR.value if rule_type.enabled_by_default else _OFF
 
 
 def _parse_rule_severity(name: str, value: object) -> Severity | None:
