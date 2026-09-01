@@ -67,6 +67,8 @@ def test_configure_logging_routes_records_to_the_given_stream():
 
 
 def test_safe_stream_handler_ignores_a_stream_closed_during_teardown(capsys):
+    # Given a handler whose stream has already been closed, as happens when a
+    # notebook tears down sys.stdout before the last records flush
     stream = io.StringIO()
     handler = SafeStreamHandler(stream)
     stream.close()
@@ -82,4 +84,6 @@ def test_safe_stream_handler_ignores_a_stream_closed_during_teardown(capsys):
 
     handler.emit(record)
 
+    # Then the late record is dropped silently instead of printing a
+    # "Logging error" traceback to stderr
     assert "Logging error" not in capsys.readouterr().err

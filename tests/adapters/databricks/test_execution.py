@@ -1,7 +1,5 @@
 """Databricks statement execution translates backend exceptions."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from delta_engine.adapters.databricks.execution import execute_statement
@@ -32,43 +30,15 @@ def test_execute_statement_returns_normally_after_success():
 
 
 def test_execute_statement_raises_normalized_error_for_backend_failure():
+    # Given a runner whose backend fails on the statement
     runner = RecordingRunner()
 
     with pytest.raises(ExecutionError) as exc_info:
         execute_statement(runner, "SELECT * FROM __nope__")
 
+    # Then the failure surfaces as an execution error carrying the backend
+    # exception's type and message (how those are derived is pinned in
+    # test_errors.py)
     assert runner.executed == ["SELECT * FROM __nope__"]
     assert exc_info.value.exception_type == "Exception"
     assert str(exc_info.value) == "boom: table not found"
-
-
-def test_execute_statement_contains_an_exception_with_an_unrenderable_message():
-    class UnrenderableError(Exception):
-        def __str__(self) -> str:
-            raise RuntimeError("rendering failed")
-
-    def fail(_statement: str) -> None:
-        raise UnrenderableError()
-
-    with pytest.raises(ExecutionError) as exc_info:
-        execute_statement(fail, "SELECT 1")
-
-    assert exc_info.value.exception_type == "UnrenderableError"
-    assert str(exc_info.value) == "<exception message unavailable>"
-
-
-def test_execute_statement_names_wrapped_jvm_exception_by_java_class():
-    class WrappingRunner:
-        def __call__(self, _statement: str) -> None:
-            error = Exception("boom")
-            error.java_exception = SimpleNamespace(  # type: ignore[attr-defined]
-                getClass=lambda: SimpleNamespace(
-                    getName=lambda: "org.apache.spark.sql.AnalysisException"
-                )
-            )
-            raise error
-
-    with pytest.raises(ExecutionError) as exc_info:
-        execute_statement(WrappingRunner(), "SELECT 1")
-
-    assert exc_info.value.exception_type == "org.apache.spark.sql.AnalysisException"

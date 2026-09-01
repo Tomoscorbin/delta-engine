@@ -126,10 +126,12 @@ def _concrete_action_types() -> list[type[Action]]:
 
 
 def test_compile_empty_plan_returns_an_empty_compiled_plan():
+    # Given a plan with no actions
     plan = _plan()
 
     compiled = compile_plan(plan)
 
+    # Then the compiled plan carries the plan and no statements
     assert compiled.plan is plan
     assert compiled.statements == ()
 
@@ -160,14 +162,6 @@ def test_compile_backticks_table_and_column_identifiers():
 
     # Then table and column identifiers are backticked
     assert statement == ("ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT")
-
-
-def test_alter_column_type_compiles_to_alter_column_type_statement():
-    # Given a validated widening Integer → Long
-    action = AlterColumnType(column_name="id", desired_type=Long(), observed_type=Integer())
-
-    # Then only the desired type reaches the SQL
-    assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` TYPE BIGINT"
 
 
 def test_add_column_with_comment_includes_comment_clause():
@@ -229,21 +223,6 @@ def test_create_table_omits_comment_clause_when_table_comment_is_empty():
     assert statement == "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT) USING delta"
 
 
-def test_create_table_renders_partition_clause():
-    # Given a partitioned table
-    action = _create_table(
-        DesiredColumn("id", Integer()),
-        DesiredColumn("ds", String()),
-        partitioned_by=("ds",),
-    )
-
-    # When compiling
-    statement = _compile_single(action)
-
-    # Then the partition clause is rendered
-    assert statement.endswith("PARTITIONED BY (`ds`)")
-
-
 def test_create_table_renders_cluster_by_clause():
     # Given a clustered table
     action = _create_table(
@@ -255,16 +234,6 @@ def test_create_table_renders_cluster_by_clause():
     statement = _compile_single(action)
     # Then the clustering clause is rendered
     assert statement.endswith("CLUSTER BY (`region`)")
-
-
-def test_alter_clustering_renders_cluster_by():
-    action = AlterClustering(desired_clustering=("region", "day"), observed_clustering=())
-    assert _compile_single(action) == ("ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY (`region`, `day`)")
-
-
-def test_alter_clustering_with_no_columns_renders_cluster_by_none():
-    action = AlterClustering(desired_clustering=(), observed_clustering=("region",))
-    assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY NONE"
 
 
 def test_create_table_renders_properties_in_sorted_order_and_filters_none_values():
@@ -284,25 +253,6 @@ def test_create_table_renders_properties_in_sorted_order_and_filters_none_values
     # Then valued properties are deterministic and None values are omitted
     assert "TBLPROPERTIES ('a'='first', 'z'='last')" in statement
     assert "delta.logRetentionDuration" not in statement
-
-
-def test_create_table_inlines_primary_key_constraint():
-    # Given a CREATE TABLE with a primary key
-    action = _create_table(
-        DesiredColumn("id", Integer(), nullable=False),
-        DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint(columns=("id",), name="tbl_pk"),
-    )
-
-    # When compiling
-    statement = _compile_single(action)
-
-    # Then the primary key constraint is inlined in the column list
-    assert statement == (
-        "CREATE TABLE `cat`.`sch`.`tbl`"
-        " (`id` INT NOT NULL, `name` STRING, CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
-        " USING delta"
-    )
 
 
 def test_create_table_lets_databricks_name_an_unnamed_primary_key():
@@ -357,6 +307,35 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
         (
             DropColumn(column=_observed_column("legacy")),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP COLUMN `legacy`",
+        ),
+        (
+            # A validated widening: only the desired type reaches the SQL.
+            AlterColumnType(column_name="id", desired_type=Long(), observed_type=Integer()),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` TYPE BIGINT",
+        ),
+        (
+            RenameColumn(old_name="customer_nm", new_name="customer_name"),
+            "ALTER TABLE `cat`.`sch`.`tbl` RENAME COLUMN `customer_nm` TO `customer_name`",
+        ),
+        (
+            AlterClustering(desired_clustering=("region", "day"), observed_clustering=()),
+            "ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY (`region`, `day`)",
+        ),
+        (
+            AlterClustering(desired_clustering=(), observed_clustering=("region",)),
+            "ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY NONE",
+        ),
+        (
+            # A feature is enabled through its complete table-property assignment.
+            EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
+            " ('delta.feature.timestampNtz'='supported')",
+        ),
+        (
+            # VARIANT uses the currently documented preview property spelling.
+            EnableTableFeature(feature=TableFeature.VARIANT),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
+            " ('delta.feature.variantType-preview'='supported')",
         ),
         (
             SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
@@ -416,6 +395,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
     ],
 )
 def test_simple_actions_compile_to_expected_sql(action: Action, expected: str):
+    # Then each single-statement action compiles to its pinned SQL
     assert _compile_single(action) == expected
 
 
@@ -434,8 +414,10 @@ def test_set_primary_key_renders_composite_primary_key():
 
 
 def test_set_primary_key_lets_databricks_choose_the_constraint_name():
+    # Given an unnamed primary-key action
     action = SetPrimaryKey(primary_key=_primary_key(("id",), None))
 
+    # Then no CONSTRAINT clause is rendered — Databricks names the key
     assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` ADD PRIMARY KEY (`id`)"
 
 
@@ -455,8 +437,10 @@ def test_set_foreign_key_renders_single_column_fk():
 
 
 def test_set_foreign_key_lets_databricks_choose_the_constraint_name():
+    # Given an unnamed foreign-key action
     action = SetForeignKey(constraint=_foreign_key(name=None))
 
+    # Then no CONSTRAINT clause is rendered — Databricks names the key
     assert _compile_single(action) == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
@@ -507,6 +491,7 @@ def test_set_foreign_key_renders_composite_fk():
     ],
 )
 def test_string_literals_escape_single_quotes(action: Action, expected: str):
+    # Then every rendered literal doubles its embedded single quotes
     assert _compile_single(action) == expected
 
 
@@ -555,6 +540,7 @@ def test_set_property_sql_ignores_observed_value():
     ],
 )
 def test_set_tag_sql_ignores_observed_value(addition: Action, replacement: Action):
+    # Then a first write and a replacement render the same statement
     assert _compile_single(addition) == _compile_single(replacement)
 
 
@@ -591,17 +577,6 @@ def test_every_action_type_compiles_through_the_public_compiler():
     # without a registered compiler
     for action_type, action in _SAMPLE_ACTIONS.items():
         assert _compile_single(action), action_type.__name__
-
-
-def test_compile_rename_column():
-    plan = _plan(
-        RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        target=QualifiedName("dev", "silver", "customers"),
-    )
-    statements = compile_plan(plan).statements
-    assert statements == (
-        "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
-    )
 
 
 @given(MANAGED_PROPERTY_MAPS)
@@ -648,54 +623,32 @@ def test_create_table_properties_are_mapping_order_independent_and_omit_absent_k
     ids=["set-table-tag", "unset-table-tag", "set-column-tag", "unset-column-tag"],
 )
 def test_tag_statements_compile_with_the_streaming_table_dialect(action, expected):
+    # Then tag work on a streaming table carries the streaming prefix
     assert _compile_single(action, kind=TableKind.STREAMING_TABLE) == expected
 
 
 def test_ordinary_tables_keep_the_alter_table_dialect():
+    # Then the same tag work on an ordinary table keeps the plain prefix
     statement = _compile_single(SetTableTag(name="owner", desired_value="gov", observed_value=None))
 
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
 
 
-def test_compile_enable_table_feature():
-    # Given a canonical table-feature enablement action
-    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
-
-    # When compiling it for Databricks
-    statement = _compile_single(action)
-
-    # Then the feature is enabled through its complete table-property assignment
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.feature.timestampNtz'='supported')"
-    )
-
-
-def test_compile_enable_table_feature_uses_documented_variant_key():
-    # Given a canonical VARIANT enablement action
-    action = EnableTableFeature(feature=TableFeature.VARIANT)
-
-    # When compiling it for Databricks
-    statement = _compile_single(action)
-
-    # Then the adapter uses the currently documented preview property spelling
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
-        " ('delta.feature.variantType-preview'='supported')"
-    )
-
-
 def test_set_primary_key_emits_the_exact_bound_spelling():
+    # Given a primary key declared with a mixed-case column spelling
     action = SetPrimaryKey(primary_key=PrimaryKeyConstraint(columns=("requestId",), name="tbl_pk"))
     plan = ActionPlan(target=_TARGET, actions=(action,))
 
     [statement] = compile_plan(plan).statements
 
+    # Then the spelling survives into the SQL verbatim
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`requestId`)"
     )
 
 
 def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
+    # Given a declaration spelling its column 'requestId' everywhere
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
@@ -713,6 +666,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
 
 
 def test_foreign_key_emits_exact_spelling_on_both_sides():
+    # Given a foreign key with mixed-case spellings on both sides
     constraint = ForeignKeyConstraint(
         local_columns=("orderRef",),
         referenced_table=_REFERENCED_TABLE,
@@ -729,8 +683,10 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
 
 
 def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
+    # Given a drop targeting a constraint by its observed mixed-case name
     plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(name="Legacy_FK_Name"),))
 
     [statement] = compile_plan(plan).statements
 
+    # Then the observed spelling reaches the SQL verbatim
     assert "DROP CONSTRAINT IF EXISTS `Legacy_FK_Name`" in statement

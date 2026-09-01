@@ -134,18 +134,24 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
 
 
 def test_relation_type_and_provider_are_carried():
-    # Whether the engine reads a relation of this kind is the reader's
-    # decision; the parse carries the facts verbatim.
+    # Given a relation the engine does not manage
     description = _parse(_doc(type="VIEW", provider="iceberg"))
+
+    # Then the parse carries the facts verbatim — whether the engine reads a
+    # relation of this kind is the reader's decision
     assert description.relation_type == "VIEW"
     assert description.provider == "iceberg"
 
 
 def test_missing_or_non_string_relation_fields_carry_as_none():
+    # Given a document missing its type and carrying a non-string provider
     doc = json.loads(_doc())
     doc.pop("type")
     doc["provider"] = 7
+
     description = _parse(json.dumps(doc))
+
+    # Then both facts carry as unknown rather than failing the parse
     assert description.relation_type is None
     assert description.provider is None
 
@@ -155,6 +161,8 @@ def test_missing_or_non_string_relation_fields_carry_as_none():
 
 def test_columns_types_nullability_comments_and_order():
     description = _parse(_doc())
+
+    # Then columns carry their declared order, types, nullability, and comments
     assert [c.name for c in description.columns] == ["id", "name"]
     assert description.columns[0].data_type == Integer()
     assert description.columns[0].nullable is False
@@ -164,6 +172,7 @@ def test_columns_types_nullability_comments_and_order():
 
 
 def test_empty_table_comment_is_empty_string():
+    # Then an empty and an omitted comment both read as the empty string
     assert _parse(_doc(comment="")).comment == ""
     doc = json.loads(_doc())
     doc.pop("comment")
@@ -171,28 +180,30 @@ def test_empty_table_comment_is_empty_string():
 
 
 def test_mixed_case_column_name_is_preserved_verbatim():
-    # DESCRIBE echoes the creator's casing ('MyCol'); the reader carries that
-    # spelling through without lowercasing, so the observed column displays its
-    # exact casing while its identity stays case-insensitive.
+    # Given DESCRIBE echoing the creator's casing ('MyCol')
     description = _parse(
         _doc(columns=[{"name": "MyCol", "type": {"name": "int"}, "nullable": True}])
     )
+
+    # Then the spelling carries without lowercasing, so the observed column
+    # displays its exact casing while its identity stays case-insensitive
     assert str(description.columns[0].name) == "MyCol"
-    assert description.columns[0].name == "mycol"  # case-insensitive identity
+    assert description.columns[0].name == "mycol"
 
 
 def test_lowercase_unicode_column_name_is_preserved_verbatim():
-    # 'straße' is already lowercase; casefold would rewrite it to 'strasse',
-    # a different identifier from the one the catalog stores
+    # Given 'straße', which is already lowercase; casefold would rewrite it to
+    # 'strasse', a different identifier from the one the catalog stores
     description = _parse(
         _doc(columns=[{"name": "straße", "type": {"name": "int"}, "nullable": True}])
     )
+
+    # Then the catalog's spelling survives
     assert str(description.columns[0].name) == "straße"
 
 
 def test_partitioning_and_clustering_carried_verbatim_in_order():
-    # The description carries the catalog's spelling; identifier normalization
-    # happens once, in the domain constructors, not in the adapter carrier.
+    # Given layout lists carrying the catalog's mixed-case spelling
     description = _parse(
         _doc(
             partition_columns=["Region", "Store"],
@@ -204,23 +215,30 @@ def test_partitioning_and_clustering_carried_verbatim_in_order():
             ],
         )
     )
+
+    # Then the spelling and order carry verbatim — identifier normalization
+    # happens once, in the domain constructors, not in the adapter carrier
     assert description.partitioned_by == ("Region", "Store")
     assert description.clustered_by == ("ID",)
 
 
 def test_table_properties_are_carried_verbatim():
-    # Which property keys the engine manages is the reader's decision; the
-    # parse carries every observed key, protocol internals included.
+    # Given observed properties including protocol internals
     properties = {
         "delta.columnMapping.mode": "name",
         "delta.feature.clustering": "supported",
         "delta.minReaderVersion": "3",
     }
+
     description = _parse(_doc(table_properties=properties))
+
+    # Then every observed key carries — which keys the engine manages is the
+    # reader's decision, not the parser's
     assert dict(description.table_properties) == properties
 
 
 def test_absent_table_properties_carry_as_empty():
+    # Then a document without properties reads as an empty mapping
     assert dict(_parse(_doc()).table_properties) == {}
 
 
@@ -311,8 +329,12 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_real_order_fact_fixture():
+    # Given a real DESCRIBE document captured from Unity Catalog
     text = (_FIXTURES / "order_fact.json").read_text()
+
     description = _parse(text, QualifiedName("dev", "gold", "order_fact"))
+
+    # Then the parse reads the captured table faithfully
     assert len(description.columns) == 7
     assert description.columns[0].name == "order_id"
     assert description.columns[0].nullable is False
@@ -339,10 +361,10 @@ def test_valid_describe_documents_preserve_values_and_identifier_spelling(
 
 
 def test_unknown_describe_fields_are_ignored() -> None:
-    # Unity Catalog grows the document over time; fields the parser does not
-    # know must not affect the read.
+    # Given a document carrying a field the parser does not know
     baseline = _parse(_doc())
 
+    # Then the read is unaffected — Unity Catalog grows the document over time
     assert _parse(_doc(future_metadata={"ignored": [1, 2, 3]})) == baseline
 
 
