@@ -141,7 +141,7 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
 # ---------- Normalization ----------
 
 
-def _declared_spelling(columns_by_name: Mapping[str, Column], name: str) -> Identifier:
+def _declared_spelling(columns_by_name: Mapping[Identifier, Column], name: str) -> Identifier:
     """
     Return ``name`` in its declared spelling.
 
@@ -162,11 +162,15 @@ class _NormalizedDeclaration:
     passes through as written: existence is the domain ``DesiredTable``'s
     invariant, and its error shows the user's spelling. Rules and lowering
     look columns up here and never re-derive the mapping.
+
+    ``columns`` is the declaration itself: it carries even duplicate names
+    through for the domain to reject. ``columns_by_name`` is the derived
+    lookup index, which collapses them, so it can never replace the tuple.
     """
 
     qualified_name: QualifiedName
     columns: tuple[Column, ...]
-    columns_by_name: Mapping[str, Column]
+    columns_by_name: Mapping[Identifier, Column]
     comment: str
     properties: Mapping[str, str | None]
     tags: Mapping[str, str]
@@ -218,7 +222,9 @@ def _normalize_declaration(
             raise ValueError("primary_key_name must not be blank")
 
     declared_columns = tuple(columns)
-    columns_by_name: dict[str, Column] = {column.name: column for column in declared_columns}
+    columns_by_name: dict[Identifier, Column] = {
+        Identifier(column.name): column for column in declared_columns
+    }
     return _NormalizedDeclaration(
         qualified_name=QualifiedName(catalog, schema, name),
         columns=declared_columns,
@@ -492,7 +498,7 @@ class _ParentDeclaration(NamedTuple):
     """
 
     primary_key: PrimaryKeyConstraint
-    columns_by_name: Mapping[str, Column]
+    columns_by_name: Mapping[Identifier, Column]
 
 
 class _NameReference(NamedTuple):
@@ -513,19 +519,17 @@ def _validate_reference_coherence(
     owner: _NormalizedDeclaration,
     referenced_table: QualifiedName,
     declared: _ParentDeclaration,
-    pairs: tuple[tuple[str, str], ...],
+    pairs: tuple[tuple[Identifier, Identifier], ...],
 ) -> None:
     """
-    Judge resolved column pairs against the parent's declaration.
+    Judge column pairs, already in declared spelling, against the parent.
 
     The referenced columns must be exactly the parent's primary key, and
-    each local column's data type must equal its referenced column's. Local
-    columns that resolve to no owner column are the domain's to reject (see
-    ``_NormalizedDeclaration``).
+    each local column's data type must equal its referenced column's.
+    Columns that resolve to no declaration — local or referenced — are the
+    domain's to reject (see ``_NormalizedDeclaration``).
     """
-    referenced_columns = tuple(
-        _declared_spelling(declared.columns_by_name, referenced) for _, referenced in pairs
-    )
+    referenced_columns = tuple(referenced for _, referenced in pairs)
     if not declared.primary_key.matches_columns(referenced_columns):
         mapped = set(referenced_columns)
         key = set(declared.primary_key.columns)
@@ -671,7 +675,8 @@ class ForeignKey:
         Lower this declaration into a domain constraint.
 
         The match arms resolve the reference into the parent to judge
-        against; the judgment itself is :func:`_validate_reference_coherence`.
+        against; column pairs are then resolved to their declared spellings,
+        and the judgment itself is :func:`_validate_reference_coherence`.
         A name reference supplies no declaration to judge, so its checks are
         the sync's when the registered parent is read. Every form's
         referenced table must live in the owner's catalog. Local column
@@ -681,7 +686,7 @@ class ForeignKey:
         owner_name = owner.qualified_name
 
         declared_primary_key: PrimaryKeyConstraint | None
-        parent_columns: Mapping[str, Column]
+        parent_columns: Mapping[Identifier, Column]
         match self._reference:
             case _NameReference(referenced_table, mapping):
                 _validate_same_catalog(owner_name, referenced_table)
@@ -701,7 +706,9 @@ class ForeignKey:
                 desired = parent.to_desired_table()
                 referenced_table = desired.qualified_name
                 declared_primary_key = desired.primary_key
-                parent_columns = {column.name: column for column in desired.columns}
+                parent_columns = MappingProxyType(
+                    {Identifier(column.name): column for column in desired.columns}
+                )
 
         _validate_same_catalog(owner_name, referenced_table)
         if declared_primary_key is None:
@@ -710,17 +717,21 @@ class ForeignKey:
             )
         declared = _ParentDeclaration(declared_primary_key, parent_columns)
 
-        pairs = self._resolve_column_pairs(referenced_table, declared.primary_key)
+        pairs = tuple(
+            (
+                _declared_spelling(owner.columns_by_name, local),
+                _declared_spelling(declared.columns_by_name, referenced),
+            )
+            for local, referenced in self._resolve_column_pairs(
+                referenced_table, declared.primary_key
+            )
+        )
         _validate_reference_coherence(owner, referenced_table, declared, pairs)
 
         return ForeignKeyConstraint(
-            local_columns=tuple(
-                _declared_spelling(owner.columns_by_name, local) for local, _ in pairs
-            ),
+            local_columns=tuple(local for local, _ in pairs),
             referenced_table=referenced_table,
-            referenced_columns=tuple(
-                _declared_spelling(declared.columns_by_name, referenced) for _, referenced in pairs
-            ),
+            referenced_columns=tuple(referenced for _, referenced in pairs),
             name=self.name,
         )
 
@@ -728,13 +739,13 @@ class ForeignKey:
         self,
         referenced_table: QualifiedName,
         primary_key: PrimaryKeyConstraint,
-    ) -> tuple[tuple[str, str], ...]:
+    ) -> tuple[tuple[Identifier, Identifier], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
         if isinstance(self._lowered_columns, Mapping):
             return tuple(self._lowered_columns.items())
 
         local_columns = self._lowered_columns
-        parent_columns = tuple(primary_key.columns)
+        parent_columns = tuple(Identifier(column) for column in primary_key.columns)
 
         # a single-column parent has only one possible pairing
         if len(local_columns) == 1 and len(parent_columns) == 1:
