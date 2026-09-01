@@ -3,6 +3,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from delta_engine.api.delta_table import (
     DeltaTable as DeltaTableImpl,
     ForeignKey as ForeignKeyImpl,
@@ -143,38 +145,21 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     assert result.stdout.strip() == "ok"
 
 
-def test_build_sql_engine_does_not_require_the_connector_or_pyspark():
+@pytest.mark.parametrize("factory", ["build_sql_engine", "build_reader"])
+def test_warehouse_factories_do_not_require_the_connector_or_pyspark(factory: str):
     # Given an interpreter where neither pyspark nor databricks-sql can be imported
     program = (
         "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
-        "from delta_engine.databricks import build_sql_engine\n"
+        f"from delta_engine.databricks import {factory}\n"
         "class DummyConnection: pass\n"
-        "build_sql_engine(DummyConnection())\n"
+        f"{factory}(DummyConnection())\n"
         "print('ok')\n"
     )
 
-    # When building a warehouse engine around a duck-typed connection
+    # When building the warehouse component around a duck-typed connection
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     # Then the whole warehouse backend imports and wires without either dependency
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
-
-
-def test_build_reader_does_not_require_the_connector_or_pyspark():
-    # Given an interpreter where neither pyspark nor databricks-sql can be imported
-    program = (
-        "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
-        "from delta_engine.databricks import build_reader\n"
-        "class DummyConnection: pass\n"
-        "build_reader(DummyConnection())\n"
-        "print('ok')\n"
-    )
-
-    # When building a catalog reader around a duck-typed connection
-    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
-
-    # Then the reader wires without either dependency
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
 
