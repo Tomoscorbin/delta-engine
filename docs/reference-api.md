@@ -50,7 +50,12 @@ Only `"annotations"` and `"tags"` may target streaming tables. A restricted
 scope still declares the full table shape; aspects outside the scope are never
 changed, and any unmanaged drift causes validation to fail. Properties are
 the exception: a declaration that does not manage properties never compares
-them at all.
+them at all. Under any scope narrower than `"full"`, a table that does not
+exist yet is deferred with a warning rather than failed: the declaration
+cannot create it, so the sync applies the declared metadata once something
+else has. See [how to deploy metadata only](how-to-deploy-metadata-only.md)
+for the full treatment, including streaming tables and mirroring the
+pipeline's keys.
 
 ### `clustered_by` (read-only accessor)
 

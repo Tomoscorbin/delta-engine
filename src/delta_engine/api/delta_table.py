@@ -896,26 +896,13 @@ class DeltaTable:
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
-                constraints. ``"annotations"`` restricts it further to the
-                table comment, column comments, table tags, and column tags —
-                for a table whose structure and keys belong to someone else.
-                ``"tags"`` restricts it to table and column tags alone. The
-                scopes nest: tags ⊂ annotations ⊂ metadata ⊂ full.
-                Streaming tables are supported under ``"annotations"`` and
-                ``"tags"``, and no wider scope: their definition — schema,
-                properties, and keys — belongs to the owning pipeline, so a
-                declaration managing more than comments and tags fails
-                validation. Under any scope narrower than ``"full"``, a table
-                that does not exist yet is deferred with a warning rather than
-                failed: the declaration cannot create it, so the sync reports
-                the table as deferred and applies the declared metadata once
-                something else has created it. A restricted scope still declares the full table
-                shape; aspects outside the scope are never changed, and drift
-                on them fails validation. A key the pipeline declared must
-                therefore be mirrored in ``primary_key`` — it is never
-                applied, and mirroring it is what keeps it from reading as
-                drift. Properties are the exception: a declaration that does
-                not manage properties never compares them at all.
+                constraints. ``"annotations"`` restricts it further to table
+                and column comments and tags — for a table whose structure
+                and keys belong to someone else. ``"tags"`` restricts it to
+                table and column tags alone. The scopes nest:
+                tags ⊂ annotations ⊂ metadata ⊂ full. Every scope declares
+                the full table shape; a restricted scope never changes the
+                aspects outside it.
 
         Raises:
             TypeError: ``partitioned_by``, ``clustered_by``, or
