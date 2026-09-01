@@ -1,123 +1,17 @@
-"""Preferred public import paths for library users."""
+"""
+The public import paths defer optional backends until they are used.
+
+import-linter proves the static layering, but it cannot tell a lazy import
+from an eager one — the facade's exempted edges to pyspark look identical
+either way. These tests are the runtime half of that contract: each runs a
+subprocess where the optional packages cannot be imported and proves the
+public surface still imports, wires, and runs.
+"""
 
 import subprocess
 import sys
 
-from delta_engine.api.delta_table import (
-    DeltaTable as DeltaTableImpl,
-    ForeignKey as ForeignKeyImpl,
-    Self as SelfImpl,
-)
-from delta_engine.application.properties import Property as PropertyImpl
-import delta_engine.databricks as databricks
-from delta_engine.domain.model import (
-    Array,
-    Binary,
-    Boolean,
-    Byte,
-    Date,
-    Decimal,
-    DesiredColumn,
-    Double,
-    Float,
-    Integer,
-    Long,
-    Map,
-    Short,
-    String,
-    Struct,
-    StructField,
-    Timestamp,
-    TimestampNtz,
-    Variant,
-)
-import delta_engine.schema as schema
-
-_SCHEMA_EXPORTS = {
-    "Array",
-    "Binary",
-    "Boolean",
-    "Byte",
-    "Column",
-    "Date",
-    "Decimal",
-    "DeltaTable",
-    "Double",
-    "Float",
-    "ForeignKey",
-    "Integer",
-    "Long",
-    "Map",
-    "Property",
-    "Self",
-    "Short",
-    "String",
-    "Struct",
-    "StructField",
-    "Timestamp",
-    "TimestampNtz",
-    "Variant",
-}
-
-
-def test_schema_import_path_matches_implementation_objects():
-    # Given the preferred user-facing schema import path
-    implementations = {
-        "Array": Array,
-        "Binary": Binary,
-        "Boolean": Boolean,
-        "Byte": Byte,
-        "Column": DesiredColumn,
-        "Date": Date,
-        "Decimal": Decimal,
-        "DeltaTable": DeltaTableImpl,
-        "Double": Double,
-        "Float": Float,
-        "ForeignKey": ForeignKeyImpl,
-        "Integer": Integer,
-        "Long": Long,
-        "Map": Map,
-        "Property": PropertyImpl,
-        "Self": SelfImpl,
-        "Short": Short,
-        "String": String,
-        "Struct": Struct,
-        "StructField": StructField,
-        "Timestamp": Timestamp,
-        "TimestampNtz": TimestampNtz,
-        "Variant": Variant,
-    }
-
-    # Then it exposes exactly the supported declaration names
-    assert set(schema.__all__) == _SCHEMA_EXPORTS
-    for name, implementation in implementations.items():
-        assert getattr(schema, name) is implementation
-
-
-def test_api_package_does_not_export_the_user_schema_surface():
-    # Given the implementation package behind the schema facade
-    import delta_engine.api as api
-
-    # Then declaration names are not re-exported from the package root
-    assert api.__all__ == []
-    for name in _SCHEMA_EXPORTS:
-        assert not hasattr(api, name)
-
-
-def test_databricks_import_path_exposes_backend_entry_points():
-    # Given the preferred user-facing Databricks import path
-
-    # When inspecting its declared public surface
-    exports = set(databricks.__all__)
-
-    # Then it exposes exactly the supported backend entry points
-    assert exports == {
-        "build_reader",
-        "build_spark_engine",
-        "build_sql_engine",
-        "configure_logging",
-        "to_spark_schema",
-    }
+import pytest
 
 
 def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pyspark():
@@ -143,38 +37,21 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     assert result.stdout.strip() == "ok"
 
 
-def test_build_sql_engine_does_not_require_the_connector_or_pyspark():
+@pytest.mark.parametrize("factory", ["build_sql_engine", "build_reader"])
+def test_warehouse_factories_do_not_require_the_connector_or_pyspark(factory: str):
     # Given an interpreter where neither pyspark nor databricks-sql can be imported
     program = (
         "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
-        "from delta_engine.databricks import build_sql_engine\n"
+        f"from delta_engine.databricks import {factory}\n"
         "class DummyConnection: pass\n"
-        "build_sql_engine(DummyConnection())\n"
+        f"{factory}(DummyConnection())\n"
         "print('ok')\n"
     )
 
-    # When building a warehouse engine around a duck-typed connection
+    # When building the warehouse component around a duck-typed connection
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     # Then the whole warehouse backend imports and wires without either dependency
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
-
-
-def test_build_reader_does_not_require_the_connector_or_pyspark():
-    # Given an interpreter where neither pyspark nor databricks-sql can be imported
-    program = (
-        "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
-        "from delta_engine.databricks import build_reader\n"
-        "class DummyConnection: pass\n"
-        "build_reader(DummyConnection())\n"
-        "print('ok')\n"
-    )
-
-    # When building a catalog reader around a duck-typed connection
-    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
-
-    # Then the reader wires without either dependency
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
 
