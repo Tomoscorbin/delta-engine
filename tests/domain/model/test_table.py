@@ -59,7 +59,7 @@ def test_rejects_columns_differing_only_by_case_as_duplicates(table_type, column
     # Given two columns whose names differ only in case (case is not identity)
     cols = (column_type("Id", Integer()), column_type("ID", Integer()))
 
-    # When/Then: construction fails as a duplicate
+    # Then construction fails as a duplicate
     with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, cols)
 
@@ -161,7 +161,7 @@ def test_observed_table_requires_observed_constraint_types(
     constraint: object,
 ):
     # Given an observed table built with a declaration-side constraint type
-    # When/Then: construction fails — catalog state carries observed constraints only
+    # Then construction fails — catalog state carries observed constraints only
     with pytest.raises(TypeError):
         ObservedTable(
             qualified_name=_QUALIFIED_NAME,
@@ -330,7 +330,7 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
         name="orders_nonexistent_fk",
     )
 
-    # When / Then the DesiredTable rejects the FK referencing a column that does not exist
+    # Then the DesiredTable rejects the FK referencing a column that does not exist
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -355,7 +355,7 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         name="orders_customer_id_accounts_fk",
     )
 
-    # When / Then building a DesiredTable with both is rejected
+    # Then building a DesiredTable with both is rejected
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -379,7 +379,7 @@ def test_desired_table_rejects_duplicate_explicit_foreign_key_names():
         name="t_a_b_c_fk",
     )
 
-    # When / Then the collision is rejected
+    # Then the collision is rejected
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "t"),
@@ -409,7 +409,7 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
         name="orders_customer_id_tenant_id_fk",
     )
 
-    # When / Then building a DesiredTable with both is rejected
+    # Then building a DesiredTable with both is rejected
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -486,7 +486,7 @@ def test_desired_table_preserves_tag_key_case():
 
 def test_desired_table_rejects_blank_tag_key():
     # Given a tag whose key is blank (would emit a malformed SET TAGS ('') clause)
-    # When / Then construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -535,7 +535,7 @@ def test_desired_table_accepts_a_restricted_scope():
 
 def test_desired_table_rejects_a_raw_scope_name():
     # Given a scope supplied as a plain string
-    # When/Then: construction fails — public strings are resolved before the domain
+    # Then construction fails — public strings are resolved before the domain
     with pytest.raises(TypeError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -636,7 +636,7 @@ def test_table_stores_clustering_columns(table_type, column_type):
 @_EACH_TABLE_AND_COLUMN_TYPE
 def test_table_rejects_clustering_column_not_in_columns(table_type, column_type):
     # Given a clustering column that is not defined
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, (column_type("id", Integer()),), clustered_by=("region",))
 
@@ -655,7 +655,7 @@ def test_clustering_reference_must_use_the_column_spelling(table_type, column_ty
 def test_table_rejects_duplicate_clustering_column(table_type, column_type):
     # Given the same clustering column listed twice
     columns = (column_type("id", Integer()), column_type("region", String()))
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
 
@@ -684,7 +684,7 @@ def test_observed_table_carries_referencing_foreign_keys() -> None:
 
 def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
     # Given a rename whose source column is still declared alongside the target
-    # When/Then: construction fails — the old column must be removed first
+    # Then construction fails — the old column must be removed first
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -697,7 +697,7 @@ def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
 
 def test_desired_table_rejects_duplicate_rename_sources() -> None:
     # Given two columns claiming the same rename source
-    # When/Then: construction fails — a rename source must be unique
+    # Then construction fails — a rename source must be unique
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -737,7 +737,7 @@ def test_desired_table_rejects_partitioning_by_a_rename_source() -> None:
     # Given partitioning keyed by a rename source — layout keys name desired
     # columns and are never resolved through rename hints: renaming a partition
     # column must move partitioned_by to the new name in the same declaration
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -751,7 +751,7 @@ def test_desired_table_rejects_partitioning_by_a_rename_source() -> None:
 
 def test_desired_table_rejects_clustering_by_a_rename_source() -> None:
     # Given clustering keyed by a rename source (same rule as partitioning)
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -767,7 +767,7 @@ def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
     # Given a primary key on a rename source — constraint columns name desired
     # columns, exactly like layout keys: a renamed key column moves the
     # primary_key declaration to the new name
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
@@ -782,7 +782,7 @@ def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
 
 def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -> None:
     # Given a foreign key whose local column is a rename source
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,

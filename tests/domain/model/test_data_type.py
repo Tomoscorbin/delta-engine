@@ -115,7 +115,7 @@ def test_struct_rejects_duplicate_field_names() -> None:
 
 def test_struct_rejects_fields_differing_only_by_case() -> None:
     # Given two fields whose names differ only in case (case is not identity)
-    # When/Then: construction fails as a duplicate
+    # Then construction fails as a duplicate
     with pytest.raises(ValueError):
         Struct((StructField("id", Integer()), StructField("ID", Integer())))
 
@@ -132,7 +132,7 @@ def test_struct_accepts_fields_as_a_list_and_compares_equal_to_tuple_form() -> N
 
 def test_map_rejects_a_map_key_type() -> None:
     # Given a MAP key that is itself a MAP (Databricks allows any other key type)
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         Map(Map(String(), Integer()), String())
 

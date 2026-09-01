@@ -53,7 +53,7 @@ def test_raises_when_name_is_blank(
 ) -> None:
     # Given a blank or whitespace-only column name (would emit a malformed
     # `` `` identifier in DDL)
-    # When/Then: construction fails for desired and observed columns alike
+    # Then construction fails for desired and observed columns alike
     with pytest.raises(ValueError):
         column_type(blank, Integer())
 
@@ -85,7 +85,7 @@ def test_tag_keys_are_case_sensitive() -> None:
 @pytest.mark.parametrize("blank", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
 def test_raises_when_tag_key_is_blank(blank: str) -> None:
     # Given a blank or whitespace-only tag key
-    # When/Then: constructing a DesiredColumn fails
+    # Then constructing a DesiredColumn fails
     with pytest.raises(ValueError):
         DesiredColumn("id", Integer(), tags={blank: "v"})
 
@@ -126,6 +126,6 @@ def test_column_rejects_a_rename_from_itself() -> None:
 def test_case_only_rename_is_rejected_as_a_self_rename() -> None:
     # Given a rename hint differing from the column name only in case
     # (case is not identity, so it still names the same column)
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         DesiredColumn("customer_name", String(), renamed_from="Customer_Name")

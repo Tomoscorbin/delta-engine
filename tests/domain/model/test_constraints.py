@@ -287,7 +287,7 @@ def test_foreign_key_identity_includes_the_referenced_table() -> None:
 
 def test_foreign_key_rejects_mismatched_column_counts() -> None:
     # Given local and referenced column tuples of different lengths
-    # When/Then: construction rejects the mismatch
+    # Then construction rejects the mismatch
     with pytest.raises(ValueError):
         _foreign_key(("a", "b"), ("id",))
 

@@ -111,7 +111,7 @@ def test_actionplan_truthiness_and_length():
 
 def test_actionplan_rejects_create_table_for_a_different_target():
     # Given a CreateTable action for one table inside a plan targeting another
-    # When/Then: construction fails
+    # Then construction fails
     with pytest.raises(ValueError):
         ActionPlan(
             target=QualifiedName("cat", "sch", "other"),

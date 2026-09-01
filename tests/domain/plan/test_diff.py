@@ -149,7 +149,7 @@ def test_drift_rejects_different_desired_and_observed_tables():
     desired = _desired(qualified_name=QualifiedName("cat", "sch", "customers"))
     observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
 
-    # When / Then constructing their comparison is rejected
+    # Then constructing their comparison is rejected
     with pytest.raises(ValueError):
         TableDrift(desired=desired, observed=observed)
 
