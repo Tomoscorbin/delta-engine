@@ -61,8 +61,8 @@ def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
         )
     )
     assert read_live_table(live_connection, table_name)["primary_key"] == (
-        "tenant_id",
         "id",
+        "tenant_id",
     )
 
     engine.sync(DeltaTable(live_catalog(), live_schema(), table_name, columns=columns))
@@ -111,8 +111,8 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
     engine.sync(child, parent)
 
     assert read_live_table(live_connection, parent_name)["primary_key"] == (
-        "tenant_id",
         "account_id",
+        "tenant_id",
     )
     foreign_keys = read_live_table(live_connection, child_name)["foreign_keys"]
     assert len(foreign_keys) == 2
