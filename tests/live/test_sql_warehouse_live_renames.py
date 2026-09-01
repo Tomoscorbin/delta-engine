@@ -159,8 +159,8 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
         )
     )
     assert read_live_table(live_connection, table_name)["primary_key"] == (
-        "tenant_id",
         "customer_nm",
+        "tenant_id",
     )
 
     renamed = DeltaTable(
@@ -187,7 +187,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
     assert "RENAME COLUMN" in statements[1]
     assert "ADD PRIMARY KEY" in statements[2]
     state = read_live_table(live_connection, table_name)
-    assert state["primary_key"] == ("tenant_id", "customer_name")
+    assert state["primary_key"] == ("customer_name", "tenant_id")
     assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
     assert engine.sync(renamed).has_changes is False
 
