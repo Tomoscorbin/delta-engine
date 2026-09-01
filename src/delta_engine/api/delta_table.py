@@ -993,7 +993,7 @@ class DeltaTable:
 
     @property
     def primary_key(self) -> tuple[str, ...]:
-        """Column names declared as the primary key, in declaration order."""
+        """Column names of the primary key, in canonical order (sorted, case-insensitive)."""
         return self._desired_table.primary_key_columns
 
     @property

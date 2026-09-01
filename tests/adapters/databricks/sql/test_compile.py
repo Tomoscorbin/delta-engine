@@ -420,16 +420,16 @@ def test_simple_actions_compile_to_expected_sql(action: Action, expected: str):
 
 
 def test_set_primary_key_renders_composite_primary_key():
-    # Given a composite primary-key action
+    # Given a composite primary-key action declared in non-canonical order
     action = SetPrimaryKey(primary_key=_primary_key(("tenant_id", "order_id"), "tbl_pk"))
 
     # When compiling
     statement = _compile_single(action)
 
-    # Then all columns are rendered in order
+    # Then columns render in the constraint's canonical (sorted) order
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+        " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`order_id`, `tenant_id`)"
     )
 
 

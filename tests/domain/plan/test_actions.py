@@ -174,7 +174,7 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
 def test_unnamed_primary_key_action_uses_columns_as_its_subject():
     action = SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id")))
 
-    assert action.subject == "tenant_id,order_id"
+    assert action.subject == "order_id,tenant_id"
 
 
 def test_drop_foreign_key_exposes_its_observed_name():

@@ -43,13 +43,18 @@ class _PrimaryKey:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _PrimaryKey):
             return NotImplemented
-        return self.matches_columns(other.columns)
+        return self.columns == other.columns
 
     def __hash__(self) -> int:
-        return hash(frozenset(self.columns))
+        return hash(self.columns)
 
     def _normalize_columns(self) -> None:
-        object.__setattr__(self, "columns", _constraint_columns(self.columns, kind="primary key"))
+        columns = _constraint_columns(self.columns, kind="primary key")
+        # Column order is not part of a primary key's meaning. Store one
+        # canonical order while preserving each identifier's spelling, so
+        # identity and rendered DDL are independent of declaration order.
+        canonical = tuple(sorted(columns, key=lambda column: column.lower()))
+        object.__setattr__(self, "columns", canonical)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -61,8 +66,10 @@ class PrimaryKeyConstraint(_PrimaryKey):
     over an ordered set of columns.
 
     Attributes:
-        columns: Ordered tuple of column names, preserving their supplied
-            spelling. Identity and duplicates are judged by identifier key.
+        columns: Tuple of column names, preserving their supplied spelling and
+            stored sorted by identifier key. Column order is not part of a
+            primary key's meaning, so identity and rendered DDL are independent
+            of declaration order. Duplicates are judged by identifier key.
         name: Optional physical name to request when creating the constraint.
             It is not part of structural identity; once created, Databricks
             owns the catalog name.
@@ -147,8 +154,8 @@ class ForeignKeyConstraint(_ForeignKey):
         local_columns: Tuple of local column names in the constraint,
             preserving spelling and stored sorted by identifier key (pairing
             with ``referenced_columns`` preserved). Column order is not part of
-            a foreign key's meaning, mirroring the primary key's set identity,
-            so identity and rendered DDL are independent of declaration order.
+            a foreign key's meaning, mirroring the primary key, so identity and
+            rendered DDL are independent of declaration order.
         referenced_table: Fully qualified name of the referenced table.
         referenced_columns: Tuple of column names in the referenced table,
             positionally aligned with ``local_columns`` after identity-key sorting.
