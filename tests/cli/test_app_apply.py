@@ -10,11 +10,15 @@ from tests.cli.conftest import NOT_NULL_DRIFT_ORDERS, ORDERS_ONLY, observed_orde
 def test_in_sync_apply_exits_zero_and_reports_unchanged(
     runner, fake_engine, databricks_env, write_module
 ):
+    # Given a declaration matching the live catalog
     module = write_module("apply_in_sync", ORDERS_ONLY)
     fake_engine.states["dev.silver.orders"] = observed_orders()
 
+    # When applying the declaration
     result = runner.invoke(app, ["apply", f"{module}:all_tables"])
 
+    # Then the run succeeds, reports the table unchanged, and carries no
+    # dry-run heading
     assert result.exit_code == 0
     assert "TARGET" in result.stdout
     assert "DIFF" in result.stdout
@@ -26,10 +30,14 @@ def test_in_sync_apply_exits_zero_and_reports_unchanged(
 def test_changed_apply_exits_zero_and_prints_the_executed_sql(
     runner, fake_engine, databricks_env, write_module
 ):
+    # Given a declaration absent from the live catalog
     module = write_module("apply_drift", ORDERS_ONLY)
 
+    # When applying the declaration
     result = runner.invoke(app, ["apply", f"{module}:all_tables"])
 
+    # Then the run succeeds and the SQL prints under the executed heading,
+    # never the planned one
     assert result.exit_code == 0
     assert "applied" in result.stdout
     assert "EXECUTED SQL" in result.stdout
@@ -38,9 +46,7 @@ def test_changed_apply_exits_zero_and_prints_the_executed_sql(
     assert "PLAN — no planned SQL executed" not in result.stdout
 
 
-def test_json_output_reports_the_executed_run(
-    runner, fake_engine, databricks_env, write_module
-):
+def test_json_output_reports_the_executed_run(runner, fake_engine, databricks_env, write_module):
     # Given a declaration absent from the live catalog
     module = write_module("apply_json_drift", ORDERS_ONLY)
 
@@ -52,9 +58,7 @@ def test_json_output_reports_the_executed_run(
     report = json.loads(result.stdout)
     assert report["schema_version"] == 2
     assert report["dry_run"] is False
-    assert report["tables"][0]["planned_sql_statements"] == [
-        "-- dev.silver.orders: CreateTable"
-    ]
+    assert report["tables"][0]["planned_sql_statements"] == ["-- dev.silver.orders: CreateTable"]
     assert report["tables"][0]["execution"] == {"applied": 1, "total": 1}
 
 
@@ -112,11 +116,14 @@ def test_read_failure_prints_the_report_and_exits_one(
 def test_validation_failure_executes_nothing_and_exits_one(
     runner, fake_engine, databricks_env, write_module
 ):
+    # Given a declaration whose diff fails validation
     module = write_module("apply_invalid", NOT_NULL_DRIFT_ORDERS)
     fake_engine.states["dev.silver.orders"] = observed_orders()
 
+    # When applying the declaration
     result = runner.invoke(app, ["apply", f"{module}:all_tables"])
 
+    # Then the unsafe plan is rejected before anything executes
     assert result.exit_code == 1
     assert "PLANNING_FAILED" in result.stdout
     assert "EXECUTED SQL" not in result.stdout

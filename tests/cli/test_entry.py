@@ -23,9 +23,10 @@ def test_missing_typer_prints_an_install_hint_instead_of_a_traceback(monkeypatch
 
 
 def test_an_import_error_from_our_own_modules_propagates(monkeypatch):
-    # A bug inside delta-engine must not be masked by the install hint
+    # Given an environment where a delta-engine module itself fails to import
     monkeypatch.delitem(sys.modules, "delta_engine.cli.app", raising=False)
     monkeypatch.setitem(sys.modules, "delta_engine.application", None)
 
+    # Then the bug propagates instead of being masked by the install hint
     with pytest.raises(ImportError):
         main()

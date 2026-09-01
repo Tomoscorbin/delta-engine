@@ -21,7 +21,7 @@ def test_generate_prints_an_importable_module_and_exits_cleanly(runner, fake_rea
     observed = observed_orders()
     fake_reader.states["dev.silver.orders"] = observed
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", "dev.silver.orders"])
 
     # Then the generated module is the entire stdout and stderr stays silent
@@ -51,7 +51,7 @@ def test_generate_declares_foreign_keys_with_nothing_to_warn_about(runner, fake_
         )
     )
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", "dev.silver.orders"])
 
     # Then the module declares the key and stderr stays silent
@@ -73,7 +73,7 @@ def test_generate_reports_the_streaming_table_warning_on_stderr_only(runner, fak
         )
     )
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", "dev.silver.orders_live"])
 
     # Then the warning goes to stderr and the module stays importable
@@ -86,10 +86,10 @@ def test_generate_reports_the_streaming_table_warning_on_stderr_only(runner, fak
 def test_generate_fails_when_the_table_does_not_exist(runner, fake_reader) -> None:
     # Given no live table (the fake reader reports absent by default)
 
-    # When
+    # When generating a declaration for a missing table
     result = runner.invoke(app, ["generate", "dev.silver.missing"])
 
-    # Then
+    # Then the absence is named on stderr and stdout stays empty
     assert result.exit_code == 1
     assert "error: table dev.silver.missing does not exist" in result.stderr
     assert result.stdout == ""
@@ -99,10 +99,10 @@ def test_generate_fails_when_the_catalog_cannot_be_read(runner, fake_reader) -> 
     # Given a table whose state cannot be determined
     fake_reader.states["dev.silver.orders"] = ReadError("PermissionError", "no access")
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", "dev.silver.orders"])
 
-    # Then
+    # Then the read failure is reported on stderr and stdout stays empty
     assert result.exit_code == 1
     assert "error: no access" in result.stderr
     assert result.stdout == ""
@@ -118,10 +118,10 @@ def test_generate_fails_when_the_table_cannot_be_declared(runner, fake_reader) -
         )
     )
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", "dev.silver.legacy"])
 
-    # Then
+    # Then the generation failure names the table and stdout stays empty
     assert result.exit_code == 1
     assert "error: cannot generate a declaration for dev.silver.legacy" in result.stderr
     assert result.stdout == ""
@@ -131,7 +131,7 @@ def test_generate_rejects_a_name_that_is_not_fully_qualified(runner) -> None:
     # Given a name missing its catalog and schema
     table_name = "orders"
 
-    # When
+    # When generating a declaration for it
     result = runner.invoke(app, ["generate", table_name])
 
     # Then no connection is attempted and the mistake is named
