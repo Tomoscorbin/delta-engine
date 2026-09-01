@@ -546,12 +546,16 @@ def _validate_reference_coherence(
         local_column = owner.columns_by_name.get(local_name)
         if local_column is None:
             continue  # local column existence is enforced when the DesiredTable is built
-        referenced_type = declared.columns_by_name[referenced_name].data_type
-        if local_column.data_type != referenced_type:
+        referenced_column = declared.columns_by_name.get(referenced_name)
+        if referenced_column is None:
+            # Only a Self parent can name a missing key column; the
+            # DesiredTable built right after rejects its primary key.
+            continue
+        if local_column.data_type != referenced_column.data_type:
             raise ValueError(
                 f"foreign key column type mismatch: {owner.qualified_name}.{local_name}"
                 f" is {local_column.data_type} but {referenced_table}.{referenced_name}"
-                f" is {referenced_type}"
+                f" is {referenced_column.data_type}"
             )
 
 

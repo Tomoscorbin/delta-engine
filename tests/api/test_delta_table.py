@@ -1865,6 +1865,26 @@ def test_self_referential_foreign_key_rejects_type_mismatch():
         )
 
 
+def test_self_referential_foreign_key_with_nonexistent_primary_key_column_is_rejected() -> None:
+    # Given a primary key naming a column the table does not declare
+    columns = [
+        Column("id", Integer(), nullable=False),
+        Column("manager_id", Integer()),
+    ]
+
+    # When the table also declares a self-referential foreign key against that key
+    # Then the declaration is rejected with a ValueError, not an internal error
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="employees",
+            columns=columns,
+            primary_key=["ghost"],
+            foreign_keys=[ForeignKey(columns="manager_id", references=Self)],
+        )
+
+
 def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
     # Given a composite referenced primary key where only the second local
     # column's type differs
