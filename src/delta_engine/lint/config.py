@@ -39,7 +39,7 @@ class TablePattern:
     Each segment is its own ``fnmatch`` pattern, so a ``*`` never crosses a
     dot: ``dev.bronze.*`` covers one schema, and every table in a catalog is
     spelled ``dev.*.*``. Segments are held lowercase, matching the canonical
-    case of ``QualifiedName``.
+    case of ``QualifiedName``; surrounding whitespace is ignored.
     """
 
     catalog: str
@@ -47,11 +47,11 @@ class TablePattern:
     table: str
 
     def __post_init__(self) -> None:
-        if not all(segment.strip() for segment in (self.catalog, self.schema, self.table)):
-            raise ValueError("a pattern segment must not be blank")
-        object.__setattr__(self, "catalog", self.catalog.lower())
-        object.__setattr__(self, "schema", self.schema.lower())
-        object.__setattr__(self, "table", self.table.lower())
+        for field_name in ("catalog", "schema", "table"):
+            segment = getattr(self, field_name).strip().lower()
+            if not segment:
+                raise ValueError("a pattern segment must not be blank")
+            object.__setattr__(self, field_name, segment)
 
     def matches(self, name: QualifiedName) -> bool:
         """Whether ``name`` matches, each segment against its own glob."""

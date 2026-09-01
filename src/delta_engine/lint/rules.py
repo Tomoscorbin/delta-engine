@@ -122,9 +122,10 @@ class NamingConventionRule:
 
 # Every rule the config section can name. A rule's dataclass fields are its
 # config parameters: an inline TOML table is `severity` plus constructor
-# keyword arguments, so no rule may have a field called `severity`. A rule's
-# `enabled_by_default` decides whether it runs when the config is silent.
-# Registering a rule here is all the wiring it needs.
+# keyword arguments, so no rule may have a field called `severity`. No rule
+# may be named `tables`, which inside an override block selects the tables.
+# A rule's `enabled_by_default` decides whether it runs when the config is
+# silent. Registering a rule here is all the wiring it needs.
 ALL_RULES: Final = (
     TableCommentRule,
     ColumnCommentRule,

@@ -193,6 +193,27 @@ class TestOverrides:
         bronze = QualifiedName("prod", "bronze", "orders")
         assert "naming-convention" not in severities_for(policy, bronze)
 
+    def test_an_override_can_reconfigure_rule_parameters(self) -> None:
+        # Given naming-convention enabled globally and a looser pattern for bronze tables
+        section = {
+            "naming-convention": "error",
+            "overrides": [
+                {"tables": ["dev.bronze.*"], "naming-convention": {"pattern": "[a-z0-9_]+"}}
+            ],
+        }
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule in effect for a bronze table carries the override's pattern
+        bronze = QualifiedName("dev", "bronze", "raw")
+        rules = {
+            configured.rule.name: configured.rule for configured in policy.resolve_rules(bronze)
+        }
+        rule = rules["naming-convention"]
+        assert isinstance(rule, NamingConventionRule)
+        assert rule.pattern == "[a-z0-9_]+"
+
     def test_a_wildcard_matches_within_a_single_segment(self) -> None:
         # Given a pattern with a wildcard schema segment
         section = {"overrides": [{"tables": ["dev.*.orders"], "primary-key": "off"}]}
@@ -214,6 +235,16 @@ class TestOverrides:
         policy = parse_lint_config(section)
 
         # Then it matches the canonical lowercase qualified name
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "raw"))
+
+    def test_whitespace_around_a_segment_is_ignored(self) -> None:
+        # Given a pattern with stray whitespace around a segment
+        section = {"overrides": [{"tables": ["dev. bronze .*"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then it matches as if the whitespace were absent
         assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "raw"))
 
     def test_a_pattern_without_three_segments_is_rejected(self) -> None:
