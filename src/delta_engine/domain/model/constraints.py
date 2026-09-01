@@ -8,6 +8,9 @@ from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
+# Outer layers may pre-check these rules for error locality; this check is the
+# one every producer of a constraint — declaration lowering or a catalog
+# read — must pass.
 def _constraint_columns(columns: object, *, kind: str) -> tuple[Identifier, ...]:
     """Normalize one non-empty, unique list or tuple of constraint columns."""
     if isinstance(columns, str) or not isinstance(columns, (list, tuple)):

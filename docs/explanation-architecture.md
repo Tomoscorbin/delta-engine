@@ -698,6 +698,38 @@ executing.
   names, valid partition columns, valid FK local columns, and non-nullable
   primary-key columns
 
+### When a concept earns an API type
+
+The public vocabulary and the domain vocabulary are not mirrors. The rule:
+a concept gets its own public type only when declaring it is a different act
+from stating it as fact.
+
+`ForeignKey` earns one. A declaration points at a parent that may be a
+`DeltaTable` object, `Self`, or a dotted name; spells its columns in one of
+three shorthands; and cannot be judged until lowering, when the owning table's
+spellings and primary key are known. The lowered fact —
+`ForeignKeyConstraint` — shares no field names with it: `local_columns`,
+`referenced_table`, `referenced_columns`, all resolved and canonically
+ordered.
+
+`Column` does not. Declaring a column already states the finished fact — name,
+type, nullability, comment, tags — so the public `Column` *is* the domain
+`DesiredColumn`, re-exported. A wrapper would be a pass-through layer.
+
+The primary key sits between the two and gets no type at all: declaring one is
+naming columns, so `DeltaTable` takes `primary_key` and `primary_key_name`
+arguments and lowers them into the domain `PrimaryKeyConstraint`. `scope` is
+the same decision at smaller scale — a string at the API, the `TableScope`
+enum in the domain, converted at the boundary.
+
+Where declaring and judging are separate acts, some judgment is deliberately
+repeated. A foreign key's validity against its parent is checked twice: at
+declaration time against the parent object it was declared with, so the error
+lands at the declaring line, and again at sync time against the declaration
+actually registered under that name — the authoritative check, and the only
+possible one for a name reference. A change to what makes a foreign key valid
+must land in both places.
+
 A `ForeignKey` declares its target by passing the referenced `DeltaTable` object
 directly, the `Self` sentinel for a self-reference, or a dotted table name:
 
