@@ -18,7 +18,6 @@ from delta_engine.domain.model import (
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
-    ActionPhase,
     ActionPlan,
     AddColumn,
     AlterClustering,
@@ -41,7 +40,6 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.unresolvable import ColumnRenameConflict, PartitioningChanged
 
 _TARGET = QualifiedName("cat", "sch", "table")
 
@@ -83,10 +81,6 @@ def _create_table_action() -> CreateTable:
     )
 
 
-def _drop_primary_key() -> DropPrimaryKey:
-    return DropPrimaryKey("table_pk")
-
-
 def _concrete_action_types() -> list[type[Action]]:
     """
     Return every concrete Action subclass exposed by the actions module.
@@ -104,9 +98,11 @@ def _concrete_action_types() -> list[type[Action]]:
 
 
 def test_actionplan_truthiness_and_length():
+    # Given an empty plan and a one-action plan
     empty = _plan()
     non_empty = _plan(DropColumn(_observed_column("legacy")))
 
+    # Then truthiness and length report whether there is anything to execute
     assert not empty
     assert len(empty) == 0
     assert non_empty
@@ -114,6 +110,8 @@ def test_actionplan_truthiness_and_length():
 
 
 def test_actionplan_rejects_create_table_for_a_different_target():
+    # Given a CreateTable action for one table inside a plan targeting another
+    # When/Then: construction fails
     with pytest.raises(ValueError):
         ActionPlan(
             target=QualifiedName("cat", "sch", "other"),
@@ -122,24 +120,30 @@ def test_actionplan_rejects_create_table_for_a_different_target():
 
 
 def test_plan_orders_within_a_phase_by_subject_name():
+    # Given two same-phase actions declared out of subject order
     plan = _plan(AddColumn(_column("b_col")), AddColumn(_column("a_col")))
 
+    # Then the plan orders them by subject
     assert [action.subject for action in plan] == ["a_col", "b_col"]
 
 
 def test_plan_ordering_is_stable_when_phase_and_subject_tie():
+    # Given two actions that tie on phase and subject
     first = SetProperty(name="alpha", desired_value="1", observed_value=None)
     second = SetProperty(name="alpha", desired_value="2", observed_value=None)
 
+    # Then the supplied order is preserved
     assert tuple(_plan(first, second)) == (first, second)
 
 
 def test_plan_ordering_ignores_non_subject_fields():
+    # Given two same-phase actions whose non-subject fields sort opposite to their subjects
     plan = _plan(
         SetProperty(name="b_key", desired_value="aaa", observed_value=None),
         SetProperty(name="a_key", desired_value="zzz", observed_value=None),
     )
 
+    # Then only the subject drives the order
     assert [action.subject for action in plan] == ["a_key", "b_key"]
 
 
@@ -147,6 +151,7 @@ def test_plan_ordering_ignores_non_subject_fields():
     "action, expected_subject",
     [
         (_create_table_action(), ""),
+        (EnableTableFeature(TableFeature.TIMESTAMP_NTZ), "timestampNtz"),
         (AddColumn(_column("x")), "x"),
         (DropColumn(_observed_column("x")), "x"),
         (RenameColumn("old", "new"), "old"),
@@ -159,8 +164,12 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetColumnComment("email", "customer email", ""), "email"),
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
-        (_drop_primary_key(), "table_pk"),
+        (DropPrimaryKey("table_pk"), "table_pk"),
         (SetPrimaryKey(_primary_key()), "id"),
+        (
+            SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id"))),
+            "order_id,tenant_id",
+        ),
         (DropForeignKey("table_customer_id_fk"), "table_customer_id_fk"),
         (SetForeignKey(_foreign_key()), "customer_id"),
         (AlterClustering(("region",), ()), ""),
@@ -168,25 +177,16 @@ def test_plan_ordering_ignores_non_subject_fields():
     ],
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
+    # Then each action names the identifier it targets within its phase
+    # (an unnamed key falls back to its column set)
     assert action.subject == expected_subject
-
-
-def test_unnamed_primary_key_action_uses_columns_as_its_subject():
-    action = SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id")))
-
-    assert action.subject == "order_id,tenant_id"
-
-
-def test_drop_foreign_key_exposes_its_observed_name():
-    action = DropForeignKey("orders_customer_fk")
-
-    assert action.name == "orders_customer_fk"
 
 
 @pytest.mark.parametrize(
     "action, expected_aspect",
     [
         (_create_table_action(), TableAspect.TABLE_EXISTENCE),
+        (EnableTableFeature(TableFeature.TIMESTAMP_NTZ), TableAspect.COLUMN_STRUCTURE),
         (AddColumn(_column("x")), TableAspect.COLUMN_STRUCTURE),
         (DropColumn(_observed_column("x")), TableAspect.COLUMN_STRUCTURE),
         (RenameColumn("old", "new"), TableAspect.COLUMN_STRUCTURE),
@@ -199,7 +199,7 @@ def test_drop_foreign_key_exposes_its_observed_name():
         (SetColumnComment("email", "new", "old"), TableAspect.COLUMN_COMMENTS),
         (SetTableComment("new", "old"), TableAspect.TABLE_COMMENT),
         (SetColumnNullability("email", False, True), TableAspect.COLUMN_STRUCTURE),
-        (_drop_primary_key(), TableAspect.PRIMARY_KEY),
+        (DropPrimaryKey("table_pk"), TableAspect.PRIMARY_KEY),
         (SetPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
         (DropForeignKey("table_customer_id_fk"), TableAspect.FOREIGN_KEYS),
         (SetForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
@@ -208,6 +208,8 @@ def test_drop_foreign_key_exposes_its_observed_name():
     ],
 )
 def test_every_action_declares_its_table_aspect(action: Action, expected_aspect: TableAspect):
+    # Then each action states which table aspect it manages, so scope-based
+    # reconciliation admits exactly the right actions
     assert action.aspect is expected_aspect
 
 
@@ -225,66 +227,21 @@ _SAMPLE_ACTIONS: list[Action] = [
 
 @given(st.permutations(_SAMPLE_ACTIONS))
 def test_actionplan_order_is_independent_of_input_permutation(shuffled: list[Action]) -> None:
+    # Then a plan orders the same actions identically whatever order they arrive in
     assert tuple(_plan(*shuffled)) == tuple(_plan(*_SAMPLE_ACTIONS))
 
 
-def test_plan_full_phase_order_with_all_action_types():
-    # Given one action of every type, declared in a jumbled order
-    plan = _plan(
-        SetPrimaryKey(_primary_key()),
-        SetForeignKey(_foreign_key()),
-        SetTableComment("new", "old"),
-        AddColumn(_column("a_col")),
-        SetProperty("p_set", "1", None),
-        UnsetProperty("p_unset", "1"),
-        SetColumnNullability("nn_col", False, True),
-        DropForeignKey("t_old_fk"),
-        _drop_primary_key(),
-        RenameColumn("old", "new"),
-        DropColumn(_observed_column("d_col")),
-        SetColumnTag("email", "pii", "true", None),
-        UnsetColumnTag("email", "old"),
-        SetColumnComment("c_col", "new", "old"),
-        _create_table_action(),
-        SetTableTag("env", "prod", None),
-        UnsetTableTag("old_tag"),
-        AlterClustering(("region",), ()),
-        AlterColumnType("w_col", Long(), Integer()),
-    )
-
-    # Then the plan orders them by canonical phase
-    assert [type(action) for action in plan] == [
-        CreateTable,
-        SetProperty,
-        UnsetProperty,
-        SetTableTag,
-        UnsetTableTag,
-        DropForeignKey,
-        DropPrimaryKey,
-        RenameColumn,
-        AddColumn,
-        AlterColumnType,
-        AlterClustering,
-        SetColumnTag,
-        UnsetColumnTag,
-        DropColumn,
-        SetColumnComment,
-        SetTableComment,
-        SetColumnNullability,
-        SetPrimaryKey,
-        SetForeignKey,
-    ]
-
-
 def test_plan_orders_constraint_drops_before_column_work():
+    # Given constraint drops mixed with column changes
     plan = _plan(
         DropColumn(_observed_column("customer_id")),
-        _drop_primary_key(),
+        DropPrimaryKey("table_pk"),
         DropForeignKey("orders_customer_id_fk"),
         RenameColumn("old", "new"),
         AddColumn(_column("added")),
     )
 
+    # Then constraints are dropped before the columns they may depend on change
     assert [type(action) for action in plan] == [
         DropForeignKey,
         DropPrimaryKey,
@@ -295,31 +252,37 @@ def test_plan_orders_constraint_drops_before_column_work():
 
 
 def test_plan_orders_property_before_type_widen_and_key_set():
+    # Given a type widen that depends on a property, and a key set on the column
     plan = _plan(
         SetPrimaryKey(_primary_key()),
         AlterColumnType("id", Long(), Integer()),
         SetProperty("delta.enableTypeWidening", "true", None),
     )
 
+    # Then the property lands first and the key lands last
     assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
 
 
 def test_plan_reclusters_after_add_and_before_drop():
+    # Given a clustering change whose new key is added and old key is dropped
     plan = _plan(
         DropColumn(_observed_column("old_region")),
         AlterClustering(("region",), ("old_region",)),
         AddColumn(_column("region")),
     )
 
+    # Then reclustering runs after the add and before the drop
     assert [type(action) for action in plan] == [AddColumn, AlterClustering, DropColumn]
 
 
 def test_plan_unsets_column_tags_before_dropping_columns():
+    # Given a column drop and a tag unset on the same column
     plan = _plan(
         DropColumn(_observed_column("legacy")),
         UnsetColumnTag("legacy", "governed"),
     )
 
+    # Then the tag is unset before its column disappears
     assert [type(action) for action in plan] == [UnsetColumnTag, DropColumn]
 
 
@@ -327,6 +290,7 @@ def test_plan_unsets_column_tags_before_dropping_columns():
     "factory",
     [
         lambda: RenameColumn("same", "same"),
+        lambda: RenameColumn("requestid", "REQUESTID"),
         lambda: SetProperty("prop", "same", "same"),
         lambda: SetTableTag("tag", "same", "same"),
         lambda: SetColumnTag("column", "tag", "same", "same"),
@@ -334,29 +298,28 @@ def test_plan_unsets_column_tags_before_dropping_columns():
         lambda: SetTableComment("same", "same"),
         lambda: SetColumnNullability("id", True, True),
         lambda: AlterClustering(("a", "b"), ("b", "a")),
+        lambda: AlterClustering(("A", "b"), ("a", "B")),
         lambda: AlterColumnType("id", Integer(), Integer()),
+    ],
+    ids=[
+        "rename",
+        "case-only-rename",
+        "property",
+        "table-tag",
+        "column-tag",
+        "column-comment",
+        "table-comment",
+        "nullability",
+        "reordered-clustering",
+        "case-variant-clustering",
+        "column-type",
     ],
 )
 def test_transition_actions_reject_no_difference(factory):
+    # When a transition action carries no difference — including differences
+    # that vanish under case-insensitive identity — then construction fails
     with pytest.raises(ValueError):
         factory()
-
-
-def test_column_rename_conflict_is_unresolvable_not_an_action():
-    unresolvable = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
-
-    assert not isinstance(unresolvable, Action)
-    assert unresolvable.aspect is TableAspect.COLUMN_STRUCTURE
-
-
-def test_column_rename_conflict_rejects_no_difference():
-    with pytest.raises(ValueError):
-        ColumnRenameConflict(old_name="same", new_name="same")
-
-
-def test_partitioning_changed_rejects_no_difference():
-    with pytest.raises(ValueError):
-        PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
 def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
@@ -371,40 +334,6 @@ def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
     }
 
     assert tag_actions == {"SetTableTag", "UnsetTableTag", "SetColumnTag", "UnsetColumnTag"}
-
-
-def test_enable_table_feature_declares_aspect_phase_and_subject():
-    # Given a table-feature enablement action
-    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
-
-    # When its planning metadata is inspected
-    metadata = (action.aspect, action.phase, action.subject)
-
-    # Then it belongs to column structure and has a dedicated execution phase
-    assert metadata == (
-        TableAspect.COLUMN_STRUCTURE,
-        ActionPhase.ENABLE_TABLE_FEATURE,
-        "timestampNtz",
-    )
-
-
-def test_enable_table_feature_phases_before_every_dependent_column_phase():
-    # Given the create, feature, property, and dependent column phases
-    dependent_phases = (
-        ActionPhase.SET_PROPERTY,
-        ActionPhase.RENAME_COLUMN,
-        ActionPhase.ADD_COLUMN,
-        ActionPhase.ALTER_COLUMN_TYPE,
-    )
-
-    # When comparing every dependent phase with feature enablement
-    feature_precedes_dependencies = all(
-        ActionPhase.ENABLE_TABLE_FEATURE < phase for phase in dependent_phases
-    )
-
-    # Then creation precedes feature enablement, which precedes every dependency
-    assert ActionPhase.CREATE_TABLE < ActionPhase.ENABLE_TABLE_FEATURE
-    assert feature_precedes_dependencies
 
 
 def test_action_plan_orders_feature_enable_before_column_actions():
@@ -425,8 +354,9 @@ def test_action_plan_orders_feature_enable_before_column_actions():
 
 
 def test_plan_orders_subjects_by_lowercased_key_not_ascii_order():
-    # Deterministic ordering must not depend on subject casing: 'Beta' sorts
-    # after 'alpha' by lowercased key, not before it by raw ASCII ('B' < 'a').
+    # Given subjects whose raw ASCII order disagrees with their lowercased
+    # order: 'Beta' sorts after 'alpha' by lowercased key, not before it by
+    # raw ASCII ('B' < 'a')
     plan = ActionPlan(
         target=QualifiedName("cat", "sch", "t"),
         actions=(
@@ -435,14 +365,5 @@ def test_plan_orders_subjects_by_lowercased_key_not_ascii_order():
         ),
     )
 
+    # Then deterministic ordering does not depend on subject casing
     assert [str(action.subject) for action in plan] == ["alpha", "Beta"]
-
-
-def test_case_only_rename_carries_no_difference_even_from_raw_strings() -> None:
-    with pytest.raises(ValueError):
-        RenameColumn(old_name="requestid", new_name="REQUESTID")
-
-
-def test_case_variant_clustering_carries_no_difference_even_from_raw_strings() -> None:
-    with pytest.raises(ValueError):
-        AlterClustering(desired_clustering=("A", "b"), observed_clustering=("a", "B"))

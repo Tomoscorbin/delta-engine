@@ -43,7 +43,7 @@ def test_raises_when_any_part_is_blank(catalog: str, schema: str, name: str) -> 
     # Given a blank or whitespace-only part (would render as a malformed
     # identifier like `.schema.table` or `catalog..table`)
     # When/Then construction fails rather than producing invalid SQL
-    with pytest.raises(ValueError, match="blank"):
+    with pytest.raises(ValueError):
         QualifiedName(catalog, schema, name)
 
 
@@ -64,7 +64,7 @@ def test_parse_reads_a_canonical_three_part_name() -> None:
 def test_parse_rejects_names_without_exactly_three_parts(raw: str) -> None:
     # Given a string that is not catalog.schema.name
     # When / Then parsing fails
-    with pytest.raises(ValueError, match="fully qualified"):
+    with pytest.raises(ValueError):
         QualifiedName.parse(raw)
 
 

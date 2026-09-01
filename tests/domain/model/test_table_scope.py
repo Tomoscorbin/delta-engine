@@ -25,7 +25,10 @@ STRUCTURE = frozenset(
         (TableScope.FULL, TAGS | COMMENTS | KEYS | STRUCTURE),
     ],
 )
-def test_each_scope_manages_its_part_of_the_table(scope, managed):
+def test_each_scope_manages_its_part_of_the_table(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Then each scope manages exactly its slice of the aspect vocabulary
     assert {aspect for aspect in TableAspect if scope.manages(aspect)} == managed
 
 
@@ -38,5 +41,15 @@ def test_each_scope_manages_its_part_of_the_table(scope, managed):
         (TableScope.FULL, TableScope.ANNOTATIONS, False),
     ],
 )
-def test_scope_knows_whether_it_fits_within_an_authority_limit(scope, limit, expected):
+def test_scope_knows_whether_it_fits_within_an_authority_limit(
+    scope: TableScope, limit: TableScope, expected: bool
+) -> None:
+    # Then a scope fits within a limit exactly when it grants no more authority
     assert scope.is_within(limit) is expected
+
+
+def test_aspect_label_is_human_readable() -> None:
+    # Given an aspect with an underscored name
+    # Then the label reads as prose (used in validation messages)
+    assert TableAspect.COLUMN_STRUCTURE.label == "column structure"
+    assert TableAspect.PROPERTIES.label == "properties"
