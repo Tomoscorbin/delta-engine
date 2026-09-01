@@ -19,10 +19,11 @@ def test_sql_warehouse_preserves_spark_style_variable_expressions(
     live_tables,
 ):
     """`${...}` is literal through both the connector and a convergent engine sync."""
+    # Given an expression the connector itself passes through literally
     expression = "${env:HOME}"
-
     assert fetch_rows(live_connection, f"SELECT '{expression}' AS value") == [{"value": expression}]
 
+    # Given a declaration carrying the expression in every comment and tag slot
     table_name = live_tables("variable_expression")
     comment = f"documentation containing {expression}"
     declaration = DeltaTable(
@@ -42,8 +43,10 @@ def test_sql_warehouse_preserves_spark_style_variable_expressions(
     )
     engine = build_sql_engine(live_connection)
 
+    # When syncing it into the live catalog
     first_report = engine.sync(declaration)
 
+    # Then the expression reads back verbatim everywhere and a resync converges
     assert first_report.has_failures is False
     state = read_live_table(live_connection, table_name)
     assert state["comment"] == comment
