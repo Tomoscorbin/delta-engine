@@ -1,3 +1,9 @@
+## v0.13.1 (2026-09-01)
+
+### Refactor
+
+- **tests**: clean up the domain test suite (#389)
+
 ## v0.13.0 (2026-09-01)
 
 ### Feat
