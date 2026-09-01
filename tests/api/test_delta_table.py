@@ -801,6 +801,38 @@ def test_reordered_mapping_foreign_keys_collapse_in_sets() -> None:
     assert len({first, second}) == 1
 
 
+@pytest.mark.parametrize(
+    ("first_columns", "second_columns", "references"),
+    [
+        pytest.param("Customer_ID", "customer_id", Self, id="single-column"),
+        pytest.param(
+            ["Customer_ID", "Region_ID"],
+            ["customer_id", "region_id"],
+            Self,
+            id="column-sequence",
+        ),
+        pytest.param(
+            {"Customer_ID": "ID"},
+            {"customer_id": "id"},
+            "cat.sch.customers",
+            id="column-mapping",
+        ),
+    ],
+)
+def test_foreign_keys_differing_only_in_column_case_are_equal(
+    first_columns: object,
+    second_columns: object,
+    references: object,
+) -> None:
+    # Given two declarations spelling the same columns in different cases
+    first = ForeignKey(columns=first_columns, references=references)  # type: ignore[arg-type]
+    second = ForeignKey(columns=second_columns, references=references)  # type: ignore[arg-type]
+
+    # Then they are equal and hash equal
+    assert first == second
+    assert hash(first) == hash(second)
+
+
 def test_delta_table_defaults_to_no_foreign_keys():
     # Given a table with no foreign_keys argument
     table = DeltaTable(
@@ -1993,7 +2025,9 @@ def test_foreign_key_accepts_columns_as_any_mapping():
 
     # Then the declaration copies the mapping and the attached constraint uses
     # the actual columns' spelling on both sides.
-    assert dict(declaration.columns) == {"Customer_ID": "ID"}
+    assert {str(local): str(referenced) for local, referenced in declaration.columns.items()} == {
+        "Customer_ID": "ID"
+    }
     [constraint] = orders.to_desired_table().foreign_keys
     assert tuple(str(c) for c in constraint.local_columns) == ("customer_id",)
     assert tuple(str(c) for c in constraint.referenced_columns) == ("id",)

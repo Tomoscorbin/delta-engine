@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field as dataclass_field
 from types import MappingProxyType
-from typing import Final, NamedTuple
+from typing import Final, NamedTuple, cast
 
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
 from delta_engine.application.scopes import ScopeName, table_scope_for
@@ -629,7 +629,8 @@ class ForeignKey:
     key, a list or tuple of local names for a same-name key, or an explicit
     ``{local: referenced}`` mapping. List, tuple, and mapping orders are irrelevant;
     ambiguous composite keys require the explicit form. Identifier spelling is
-    preserved; identifiers differing only in case name the same column.
+    preserved; identifiers differing only in case name the same column, and
+    declarations differing only in column case or mapping order are equal.
 
     ``name`` optionally requests the physical name when the constraint is
     created. When omitted, Databricks chooses the name. Existing constraints
@@ -661,20 +662,16 @@ class ForeignKey:
     _reference: _NameReference | DeltaTable | _SelfReference = dataclass_field(
         init=False, repr=False, compare=False
     )
-    _lowered_columns: tuple[Identifier, ...] | Mapping[Identifier, Identifier] = dataclass_field(
-        init=False, repr=False, compare=False
-    )
 
     def __post_init__(self) -> None:
-        frozen: tuple[str, ...] | Mapping[str, str]
         lowered: tuple[Identifier, ...] | Mapping[Identifier, Identifier]
         match self.columns:
             case str() as column_name:
-                frozen, lowered = (column_name,), (Identifier(column_name),)
+                lowered = (Identifier(column_name),)
             case Mapping() as mapping:
-                frozen, lowered = MappingProxyType(dict(mapping)), _lower_column_mapping(mapping)
+                lowered = _lower_column_mapping(mapping)
             case list() | tuple() as sequence:
-                frozen, lowered = tuple(sequence), _lower_column_sequence(sequence)
+                lowered = _lower_column_sequence(sequence)
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
@@ -685,8 +682,7 @@ class ForeignKey:
         if self.name is not None:
             Identifier(self.name)  # rejects an invalid physical name
 
-        object.__setattr__(self, "columns", frozen)
-        object.__setattr__(self, "_lowered_columns", lowered)
+        object.__setattr__(self, "columns", lowered)
         object.__setattr__(self, "_reference", _resolve_reference(self.references, lowered))
 
     def __hash__(self) -> int:
@@ -775,10 +771,11 @@ class ForeignKey:
         primary_key: PrimaryKeyConstraint,
     ) -> tuple[tuple[Identifier, Identifier], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
-        if isinstance(self._lowered_columns, Mapping):
-            return tuple(self._lowered_columns.items())
+        if isinstance(self.columns, Mapping):
+            mapping = cast(Mapping[Identifier, Identifier], self.columns)
+            return tuple(mapping.items())
 
-        local_columns = self._lowered_columns
+        local_columns = cast(tuple[Identifier, ...], self.columns)
         parent_columns = tuple(Identifier(column) for column in primary_key.columns)
 
         # a single-column parent has only one possible pairing
