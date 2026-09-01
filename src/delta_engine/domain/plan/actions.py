@@ -105,9 +105,6 @@ class EnableTableFeature(Action):
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ENABLE_TABLE_FEATURE
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "feature", TableFeature(self.feature))
-
     @property
     def subject(self) -> str:
         return self.feature.value

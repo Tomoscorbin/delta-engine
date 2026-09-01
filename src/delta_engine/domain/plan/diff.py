@@ -136,8 +136,6 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
 
 def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> TableDrift:
     """Describe every difference between two states of the same existing table."""
-    _require_same_table(desired, observed)
-
     renames = _resolve_column_renames(desired, observed)
 
     feature_actions = _diff_required_features(
@@ -244,18 +242,11 @@ class _RenameResolution:
     drops them.
     """
 
-    columns: ListOrTuple[ObservedColumn]
-    partitioned_by: ListOrTuple[str]
-    clustered_by: ListOrTuple[str]
-    actions: ListOrTuple[RenameColumn]
-    conflicts: ListOrTuple[ColumnRenameConflict]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "columns", tuple(self.columns))
-        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
-        object.__setattr__(self, "actions", tuple(self.actions))
-        object.__setattr__(self, "conflicts", tuple(self.conflicts))
+    columns: tuple[ObservedColumn, ...]
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    actions: tuple[RenameColumn, ...]
+    conflicts: tuple[ColumnRenameConflict, ...]
 
 
 def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameResolution:
@@ -292,11 +283,11 @@ def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _
         if column.name not in conflicted_sources
     ]
     return _RenameResolution(
-        columns=projected_columns,
+        columns=tuple(projected_columns),
         partitioned_by=_project_names(observed.partitioned_by, new_names_by_old),
         clustered_by=_project_names(observed.clustered_by, new_names_by_old),
-        actions=actions,
-        conflicts=conflicts,
+        actions=tuple(actions),
+        conflicts=tuple(conflicts),
     )
 
 
@@ -309,14 +300,9 @@ def _project_names(names: Sequence[str], renames: Mapping[str, str]) -> tuple[st
 class _ColumnAlignment:
     """Desired and rename-projected observed columns classified by name."""
 
-    added: ListOrTuple[DesiredColumn]
-    removed: ListOrTuple[ObservedColumn]
-    matched: ListOrTuple[tuple[DesiredColumn, ObservedColumn]]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "added", tuple(self.added))
-        object.__setattr__(self, "removed", tuple(self.removed))
-        object.__setattr__(self, "matched", tuple(self.matched))
+    added: tuple[DesiredColumn, ...]
+    removed: tuple[ObservedColumn, ...]
+    matched: tuple[tuple[DesiredColumn, ObservedColumn], ...]
 
 
 def _diff_columns(
@@ -356,9 +342,9 @@ def _align_columns(
     ]
 
     return _ColumnAlignment(
-        added=added,
-        removed=removed,
-        matched=matched,
+        added=tuple(added),
+        removed=tuple(removed),
+        matched=tuple(matched),
     )
 
 
