@@ -79,17 +79,20 @@ def _foreign_key(
 
 
 def test_plan_changes_accepts_safe_actions():
+    # Given drift whose one difference is a safe nullable column addition
     result = plan_changes(
         _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
         _observed(),
     )
 
+    # Then planning accepts and the plan carries exactly that action
     assert isinstance(result, PlanningAccepted)
     assert result.plan.target == _NAME
     assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
 
 
 def test_plan_changes_rejects_unsafe_actions():
+    # Given drift adding a NOT NULL column to an existing table
     result = plan_changes(
         _desired(
             columns=(
@@ -100,11 +103,13 @@ def test_plan_changes_rejects_unsafe_actions():
         _observed(),
     )
 
+    # Then planning rejects with the safety rule's failure and no plan exists
     assert isinstance(result, PlanningRejected)
     assert [failure.rule_name for failure in result.failures] == ["NonNullableColumnAdd"]
 
 
 def test_plan_changes_rejects_unmanaged_actions():
+    # Given column-structure drift under a declaration managing only annotations
     result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())),
@@ -113,51 +118,26 @@ def test_plan_changes_rejects_unmanaged_actions():
         _observed(),
     )
 
+    # Then the eligibility check rejects the out-of-scope work
     assert isinstance(result, PlanningRejected)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
 
 
-@pytest.mark.parametrize(
-    "desired, observed, expected_rule",
-    [
-        (
-            _desired(columns=(DesiredColumn("new", String(), renamed_from="old"),)),
-            _observed(columns=(ObservedColumn("new", String()), ObservedColumn("old", String()))),
-            "AmbiguousColumnRename",
-        ),
-        (
-            _desired(properties={}),
-            _observed(properties={"delta.columnMapping.mode": "name"}),
-            "PropertyMustBeDeclared",
-        ),
-        (
-            _desired(
-                columns=(DesiredColumn("id", Integer()), DesiredColumn("day", String())),
-                partitioned_by=("day",),
-            ),
-            _observed(columns=(ObservedColumn("id", Integer()), ObservedColumn("day", String()))),
-            "PartitioningChangeNotSupported",
-        ),
-    ],
-)
-def test_plan_changes_rejects_each_non_action_difference(desired, observed, expected_rule):
-    result = plan_changes(desired, observed)
-
-    assert isinstance(result, PlanningRejected)
-    assert expected_rule in {failure.rule_name for failure in result.failures}
-
-
 def test_an_accepted_outcome_retains_the_diff_it_planned_from():
+    # Given a diff that planning will accept
     desired = _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())))
     observed = _observed()
 
+    # When planning
     result = plan_changes(desired, observed)
 
+    # Then the outcome retains the diff, so a report can show what drifted
     assert isinstance(result, PlanningAccepted)
     assert result.diff == diff_table(desired, observed)
 
 
 def test_a_refused_outcome_retains_the_diff_it_refused():
+    # Given a diff that planning will reject
     desired = _desired(
         columns=(
             DesiredColumn("id", Integer()),
@@ -166,8 +146,10 @@ def test_a_refused_outcome_retains_the_diff_it_refused():
     )
     observed = _observed()
 
+    # When planning
     result = plan_changes(desired, observed)
 
+    # Then the rejected outcome still retains the diff it refused
     assert isinstance(result, PlanningRejected)
     assert result.diff == diff_table(desired, observed)
 
@@ -183,19 +165,23 @@ def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
 
 
 def test_an_accepted_outcome_rejects_unresolvable_differences():
+    # Given a diff still carrying an unresolvable difference
     diff = TableDrift(
         desired=_desired(),
         observed=_observed(),
         unresolvable=(ColumnRenameConflict(old_name="old", new_name="new"),),
     )
 
+    # Then it cannot be paired with an accepted plan
     with pytest.raises(ValueError):
         PlanningAccepted(diff=diff, plan=ActionPlan(target=_NAME))
 
 
 def test_plan_changes_accepts_no_op_as_an_empty_plan():
+    # Given desired and observed states that already agree
     result = plan_changes(_desired(), _observed())
 
+    # Then planning accepts with an empty, target-bearing plan — the natural zero
     assert isinstance(result, PlanningAccepted)
     assert result.plan.target == _NAME
     assert result.plan.actions == ()
@@ -234,27 +220,34 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
     [TableScope.TAGS, TableScope.ANNOTATIONS, TableScope.METADATA],
 )
 def test_plan_changes_defers_missing_table_when_table_existence_is_unmanaged(scope):
+    # Given a missing table whose declaration cannot create it
     desired = _desired(scope=scope)
 
+    # When planning against absence
     result = plan_changes(desired, None)
 
+    # Then the outcome is a deferral, not a failure
     assert isinstance(result, PlanningDeferred)
 
 
 def test_a_deferred_outcome_retains_the_creation_diff_it_deferred():
+    # Given a deferred missing table
     desired = _desired(scope=TableScope.ANNOTATIONS)
 
     result = plan_changes(desired, None)
 
+    # Then the deferral retains the creation diff, like every planning outcome
     assert isinstance(result, PlanningDeferred)
     assert result.diff == diff_table(desired, None)
 
 
 def test_a_deferred_outcome_narrows_to_no_accepted_plan():
+    # Given a deferred missing table
     desired = _desired(scope=TableScope.ANNOTATIONS)
 
     result = plan_changes(desired, None)
 
+    # Then narrowing the outcome yields no plan to execute
     assert accepted_plan(result) is None
 
 

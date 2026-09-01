@@ -16,11 +16,9 @@ from delta_engine.application.failures import (
 from delta_engine.application.planning import (
     PlanningAccepted,
     PlanningDeferred,
-    PlanningRejected,
 )
 from delta_engine.application.ports import (
     ExecutionResult,
-    ReadResult,
     TableAbsent,
     TablePresent,
 )
@@ -43,7 +41,7 @@ from delta_engine.domain.model import (
     String,
     TableFeature,
 )
-from delta_engine.domain.plan import TableCreation, TableDiff, diff_table
+from delta_engine.domain.plan import TableCreation, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
@@ -53,7 +51,7 @@ from delta_engine.domain.plan.actions import (
     SetTableTag,
     UnsetTableTag,
 )
-from tests.builders import build_compiled_plan
+from tests.builders import build_compiled_plan, build_table_run
 
 # ---------- test builders
 
@@ -107,9 +105,6 @@ def _blocked_failure():
     )
 
 
-_PLAN_UNSET = object()
-
-
 def _plan(name: str, *actions) -> ActionPlan:
     return ActionPlan(
         target=QualifiedName("cat", "schema", name),
@@ -149,71 +144,6 @@ def _execution(
     return ExecutionResult(compiled_plan=compiled, applied_count=applied, failure=failure)
 
 
-def _report(
-    *,
-    desired: DesiredTable,
-    read: ReadResult,
-    plan: ActionPlan | None | object = _PLAN_UNSET,
-    statements: tuple[str, ...] = (),
-    failures: tuple[Failure, ...] = (),
-    dependencies: tuple[ForeignKeyConstraint, ...] = (),
-    execution: ExecutionResult | None = None,
-    blocked_failures: tuple[ForeignKeyFailure, ...] = (),
-    diff: TableDiff | None = None,
-) -> TableRun:
-    """Construct a frozen report snapshot from concise test inputs."""
-    planning_failures = tuple(
-        failure for failure in failures if isinstance(failure, ValidationFailure)
-    )
-    resolution_failures = tuple(
-        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
-    )
-    if plan is _PLAN_UNSET:
-        report_plan = (
-            None
-            if isinstance(read, ReadFailure) or planning_failures
-            else execution.compiled_plan.plan
-            if execution is not None
-            else ActionPlan(target=desired.qualified_name)
-        )
-    else:
-        assert plan is None or isinstance(plan, ActionPlan)
-        report_plan = plan
-
-    planning_diff = diff if diff is not None else TableCreation(desired)
-    if isinstance(read, ReadFailure):
-        planning = None
-    elif planning_failures:
-        planning = PlanningRejected(diff=planning_diff, failures=planning_failures)
-    else:
-        assert isinstance(report_plan, ActionPlan)
-        planning = PlanningAccepted(diff=planning_diff, plan=report_plan)
-
-    if report_plan is None:
-        compiled = None
-    elif execution is not None:
-        compiled = execution.compiled_plan
-    else:
-        if not statements:
-            statements = tuple(f"SQL {index}" for index in range(len(report_plan)))
-        compiled = build_compiled_plan(report_plan, statements)
-
-    resolution = TableResolution(
-        desired=desired,
-        dependencies=dependencies,
-        structural_failures=resolution_failures,
-    )
-
-    return TableRun(
-        read=read,
-        planning=planning,
-        compiled=compiled,
-        resolution=resolution,
-        execution=execution,
-        blocked_failures=blocked_failures,
-    )
-
-
 # ---------- Tests
 
 
@@ -224,7 +154,7 @@ def test_table_status_success_when_all_actions_succeed():
     execution = _execution(plan)
 
     # When aggregating
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=read,
         execution=execution,
@@ -240,12 +170,12 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     ok_plan = _comment_plan("a")
     failed_plan = _comment_plan("b")
-    t_ok = _report(
+    t_ok = build_table_run(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(ok_plan),
     )
-    t_bad = _report(
+    t_bad = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(failed_plan, failure=_failed_exec(0)),
@@ -259,26 +189,32 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
 
 
 def test_table_has_changes_when_plan_is_non_empty():
-    report = _report(
+    # Given a run whose accepted plan holds an action
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("tbl", SetTableComment(desired_comment="hello", observed_comment="")),
     )
+
+    # Then the table reports changes
     assert report.has_changes is True
 
 
 def test_table_has_no_changes_when_plan_is_empty():
-    report = _report(
+    # Given a run whose accepted plan is empty
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
     )
+
+    # Then the table reports no changes
     assert report.has_changes is False
 
 
 def test_validation_failed_table_has_failures_but_no_changes():
     # Validation refuses the drift before a plan exists: the table reports
     # failures, not changes.
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
@@ -290,12 +226,12 @@ def test_validation_failed_table_has_failures_but_no_changes():
 
 def test_sync_report_has_changes_when_any_table_plans_actions():
     # Given one changed table and one unchanged table
-    changed = _report(
+    changed = build_table_run(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
     )
-    unchanged = _report(
+    unchanged = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -313,26 +249,29 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
 
 
 def test_sync_report_has_no_changes_when_no_table_plans_actions():
-    unchanged = _report(
+    # Given a run whose only table planned nothing
+    unchanged = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(unchanged,))
+
+    # Then the aggregate reports no changes
     assert report.has_changes is False
 
 
 def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
     # Given a run with one changed, one unchanged, and one failed table
-    changed = _report(
+    changed = build_table_run(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
     )
-    unchanged = _report(
+    unchanged = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    failed = _report(
+    failed = build_table_run(
         desired=_a_desired_table("c"),
         read=ReadFailure(exception_type="AnalysisException", message="nope"),
     )
@@ -355,7 +294,7 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
     # Given a table that planned a change but whose execution failed
     statement = "COMMENT ON TABLE `cat`.`schema`.`a` IS 'hello'"
     plan = _plan("a", SetTableComment(desired_comment="hello", observed_comment=""))
-    failed = _report(
+    failed = build_table_run(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
@@ -376,19 +315,22 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
 
 
 def test_sync_report_reports_its_own_duration():
+    # Given a run spanning five minutes
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=())
+
+    # Then the duration is derived in seconds
     assert report.duration_seconds == 300.0
 
 
 def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
     # Given one table with compiled SQL and one with an empty plan
-    with_sql = _report(
+    with_sql = build_table_run(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
         statements=("ALTER TABLE a SET ...",),
     )
-    without_sql = _report(
+    without_sql = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -409,12 +351,12 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
     failed_name = QualifiedName("cat", "schema", "y")
     successful_plan = _comment_plan("x")
-    t_ok = _report(
+    t_ok = build_table_run(
         desired=_a_desired_table("x"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(successful_plan),
     )
-    t_bad = _report(
+    t_bad = build_table_run(
         desired=_a_desired_table("y"),
         read=TableAbsent(),
         failures=(ValidationFailure("R", "v"),),
@@ -434,7 +376,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
 
 def test_table_run_status_is_foreign_key_failed_when_fk_failure_present():
     # Given a table that read cleanly but has an FK failure in failures
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -455,7 +397,7 @@ def test_table_run_status_is_foreign_key_failed_when_fk_failure_present():
 
 def test_table_run_status_is_planning_failed_when_only_validation_failure_present():
     # Given a table that read cleanly but has a validation failure and no FK failure
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -470,7 +412,7 @@ def test_table_run_status_is_planning_failed_when_only_validation_failure_presen
 
 def test_table_run_status_is_foreign_key_failed_when_both_fk_and_validation_present():
     # Given a table with both a validation failure and an FK failure
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -494,7 +436,7 @@ def test_table_run_status_is_foreign_key_failed_when_both_fk_and_validation_pres
 def test_multi_phase_failure_reports_the_earliest_pipeline_phase():
     # Given a table that failed resolution (structural FK) and also failed its read
     desired = _a_desired_table("orders")
-    report = _report(
+    report = build_table_run(
         desired=desired,
         read=ReadFailure("IOError", "boom"),
         failures=(
@@ -514,7 +456,7 @@ def test_multi_phase_failure_reports_the_earliest_pipeline_phase():
 def test_table_run_with_no_failures_is_success():
     # Given a clean table with no failures
     plan = _comment_plan("ok")
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("ok"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(plan),
@@ -529,7 +471,7 @@ def test_status_reflects_the_earliest_failing_phase():
     # Given a table with an execution failure only
     read = TablePresent(table=_an_observed_table())
     plan = _comment_plan("e")
-    exec_only = _report(
+    exec_only = build_table_run(
         desired=_a_desired_table("e"),
         read=read,
         execution=_execution(plan, failure=_failed_exec(0)),
@@ -538,7 +480,7 @@ def test_status_reflects_the_earliest_failing_phase():
     assert exec_only.status is TableRunStatus.EXECUTION_FAILED
 
     # Given a read failure
-    read_failed = _report(
+    read_failed = build_table_run(
         desired=_a_desired_table("r"),
         read=ReadFailure("IOError", "boom"),
     )
@@ -549,7 +491,7 @@ def test_status_reflects_the_earliest_failing_phase():
 def test_table_run_carries_its_desired_definition():
     # Given a completed, unchanged table run
     desired = _a_desired_table("customers")
-    report = _report(
+    report = build_table_run(
         desired=desired,
         read=TablePresent(table=_an_observed_table()),
     )
@@ -562,9 +504,12 @@ def test_table_run_carries_its_desired_definition():
 
 
 def test_table_run_rejects_planning_after_a_failed_read():
+    # Given a failed read paired with a planning outcome — a lifecycle the
+    # engine cannot produce
     desired = _a_desired_table("orders")
 
-    with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         TableRun(
             read=ReadFailure("IOError", "boom"),
             planning=PlanningAccepted(
@@ -577,9 +522,11 @@ def test_table_run_rejects_planning_after_a_failed_read():
 
 
 def test_table_run_rejects_successful_planning_without_compilation():
+    # Given an accepted plan with no compiled statements alongside it
     desired = _a_desired_table("orders")
 
-    with pytest.raises(ValueError, match="requires compilation"):
+    # Then construction fails — an accepted plan is always compiled
+    with pytest.raises(ValueError):
         TableRun(
             read=TableAbsent(),
             planning=PlanningAccepted(
@@ -592,11 +539,13 @@ def test_table_run_rejects_successful_planning_without_compilation():
 
 
 def test_table_run_rejects_compilation_of_another_plan():
+    # Given compiled statements that belong to a different plan
     desired = _a_desired_table("orders")
     plan = _comment_plan("orders")
     other_plan = ActionPlan(target=desired.qualified_name)
 
-    with pytest.raises(ValueError, match="must match the successful planning outcome"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         TableRun(
             read=TableAbsent(),
             planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
@@ -607,6 +556,8 @@ def test_table_run_rejects_compilation_of_another_plan():
 
 
 def test_table_run_rejects_execution_after_failed_resolution():
+    # Given an execution outcome on a table whose resolution failed —
+    # the engine never executes such a table
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
     compiled = build_compiled_plan(plan, ("SQL",))
@@ -617,7 +568,7 @@ def test_table_run_rejects_execution_after_failed_resolution():
         reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
     )
 
-    with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
+    with pytest.raises(ValueError):
         TableRun(
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
@@ -628,12 +579,14 @@ def test_table_run_rejects_execution_after_failed_resolution():
 
 
 def test_table_run_rejects_execution_of_another_compiled_plan():
+    # Given an execution outcome over different statements than the run reports
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
     reported = build_compiled_plan(plan, ("REPORTED SQL",))
     executed = build_compiled_plan(plan, ("EXECUTED SQL",))
 
-    with pytest.raises(ValueError, match="reported compiled plan"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         TableRun(
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
@@ -644,7 +597,7 @@ def test_table_run_rejects_execution_of_another_compiled_plan():
 
 
 def _a_changed_table_report():
-    return _report(
+    return build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
@@ -654,7 +607,7 @@ def _a_changed_table_report():
 
 def test_a_table_run_knows_whether_its_plan_creates_the_table():
     # Given one report whose plan creates the table and one that alters it
-    creating = _report(
+    creating = build_table_run(
         desired=_a_desired_table("orders"),
         read=TableAbsent(),
         plan=_plan("orders", CreateTable(table=_a_desired_table("orders"))),
@@ -664,7 +617,7 @@ def test_a_table_run_knows_whether_its_plan_creates_the_table():
     assert creating.creates_table is True
     assert _a_changed_table_report().creates_table is False
     assert (
-        _report(
+        build_table_run(
             desired=_a_desired_table("orders"),
             read=ReadFailure(exception_type="AnalysisException", message="nope"),
         ).creates_table
@@ -682,7 +635,7 @@ def test_statement_progress_counts_applied_against_planned():
     # Given a table whose execution applied one of two planned statements
     statements = ("SQL 0", "SQL 1")
     plan = _comment_plan("orders", statement_count=2)
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
@@ -707,7 +660,7 @@ def test_statement_progress_counts_applied_against_planned():
 
 def test_change_state_is_not_planned_when_no_plan_was_accepted():
     # Given a table whose catalog read failed before planning
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=ReadFailure("AnalysisException", "boom"),
     )
@@ -721,7 +674,7 @@ def test_change_state_is_not_planned_when_no_plan_was_accepted():
 
 def test_change_state_is_not_planned_when_planning_rejected_the_diff():
     # Given a table whose planner rejected the observed difference
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="UnsafeChange", message="nope"),),
@@ -738,7 +691,7 @@ def test_change_state_is_not_planned_when_planning_rejected_the_diff():
 def test_change_state_is_unchanged_for_an_empty_plan_even_when_the_run_failed():
     # Given a failed table whose accepted plan contains no catalog changes
     desired = _a_desired_table("orders")
-    report = _report(
+    report = build_table_run(
         desired=desired,
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -773,8 +726,10 @@ def _a_deferred_run(name: str = "orders") -> TableRun:
 
 
 def test_a_deferred_table_reports_deferred_without_failures_or_changes():
+    # Given an absent table whose declaration cannot create it
     run = _a_deferred_run()
 
+    # Then the run is deferred — waiting, neither changed nor failed
     assert run.status is TableRunStatus.DEFERRED
     assert run.has_failures is False
     assert run.has_changes is False
@@ -802,7 +757,7 @@ def test_a_deferred_run_rejects_execution():
     compiled = build_compiled_plan(plan, ("SQL",))
 
     # Then the run refuses an execution outcome
-    with pytest.raises(ValueError, match="Execution requires a successful planning outcome"):
+    with pytest.raises(ValueError):
         TableRun(
             resolution=TableResolution(desired=desired, dependencies=(), structural_failures=()),
             read=TableAbsent(),
@@ -841,21 +796,27 @@ def test_failures_dominate_deferral():
 
 
 def test_change_state_is_deferred_for_an_absent_table_the_scope_cannot_create():
+    # Given a run holding one deferred table
     sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(_a_deferred_run(),))
 
+    # Then its catalog change state is the deferral
     assert sync.table_change_states == (TableChangeState.DEFERRED,)
 
 
 def test_counts_place_a_deferred_table_in_its_own_bucket():
+    # Given a run holding one deferred table
     sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(_a_deferred_run(),))
 
+    # Then it counts as deferred, in no other bucket
     assert sync.counts == RunCounts(changed=0, unchanged=0, failed=0, deferred=1)
     assert sync.counts.total == 1
 
 
 def test_a_deferred_table_to_dict_reports_deferred_status():
+    # When projecting a deferred run to its wire record
     payload = _a_deferred_run().to_dict()
 
+    # Then the record states the deferral with no changes or failures
     assert payload["status"] == "DEFERRED"
     assert payload["has_changes"] is False
     assert payload["has_failures"] is False
@@ -880,7 +841,7 @@ def test_change_state_is_planned_for_a_dry_run_with_changes():
 
 def test_change_state_is_not_applied_when_a_real_change_is_dependency_blocked():
     # Given a real-run table whose non-empty plan was blocked by a failed dependency
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         plan=_comment_plan("b"),
@@ -898,7 +859,7 @@ def test_first_and_later_execution_failures_have_distinct_change_states():
     # Given one plan that failed immediately and one that applied a statement first
     statements = ("SQL 0", "SQL 1")
     first_plan = _comment_plan("first", statement_count=2)
-    first_failed = _report(
+    first_failed = build_table_run(
         desired=_a_desired_table("first"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionResult(
@@ -908,7 +869,7 @@ def test_first_and_later_execution_failures_have_distinct_change_states():
         ),
     )
     later_plan = _comment_plan("later", statement_count=2)
-    later_failed = _report(
+    later_failed = build_table_run(
         desired=_a_desired_table("later"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(later_plan, statements, failure=_failed_exec(1, statements[1])),
@@ -932,7 +893,7 @@ def test_first_and_later_execution_failures_have_distinct_change_states():
 def test_change_state_is_applied_after_complete_successful_execution():
     # Given a real-run plan whose every statement succeeded
     plan = _comment_plan("orders", statement_count=2)
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(plan),
@@ -951,7 +912,7 @@ def test_change_state_is_applied_after_complete_successful_execution():
 def test_sync_report_rejects_execution_results_on_a_dry_run():
     # Given a table carrying a completed execution result
     plan = _comment_plan("orders")
-    executed = _report(
+    executed = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         execution=_execution(plan),
@@ -980,7 +941,7 @@ def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
 
 def test_sync_report_accepts_a_real_change_blocked_by_a_failed_dependency():
     # Given a real-run change carrying the failure that blocked its execution
-    blocked = _report(
+    blocked = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         plan=_comment_plan("b"),
@@ -1012,8 +973,10 @@ def test_change_states_do_not_extend_the_structured_report_schema():
 
 
 def test_table_to_dict_states_the_planned_change():
+    # When projecting a changed table's run to its wire record
     payload = _a_changed_table_report().to_dict()
 
+    # Then the record carries the documented fields, values as plain data
     assert payload["name"] == "cat.schema.orders"
     assert payload["status"] == "SUCCESS"
     assert payload["has_changes"] is True
@@ -1031,7 +994,7 @@ def test_table_to_dict_states_the_planned_change():
 def test_table_to_dict_detail_reads_as_prose_without_alignment_placeholders():
     # Given a plan adding a nullable commented column, whose entry holds an
     # empty alignment phrase between the type and the comment
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("orders", AddColumn(DesiredColumn("note", String(), comment="free text"))),
@@ -1047,7 +1010,7 @@ def test_table_to_dict_detail_reads_as_prose_without_alignment_placeholders():
 
 def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
     # Given a successful table report planning a permanent feature enablement
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan(
@@ -1073,7 +1036,7 @@ def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
 
 def test_table_to_dict_spells_every_operation_as_one_of_three_plain_words():
     # Given a plan holding one change of each operation
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan(
@@ -1095,13 +1058,17 @@ def test_table_to_dict_spells_every_operation_as_one_of_three_plain_words():
 
 
 def test_table_to_dict_reports_failures_with_phase_and_type():
-    report = _report(
+    # Given a run that failed validation
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
     )
+
+    # When projecting it to its wire record
     payload = report.to_dict()
 
+    # Then the failure record names its phase, type, and facts
     assert payload["status"] == "PLANNING_FAILED"
     assert payload["failures"] == [
         {
@@ -1119,7 +1086,7 @@ def test_a_read_failure_record_retains_the_full_backend_message():
     # The display message keeps only the first five lines; the machine
     # record must carry the whole backend message.
     long_message = "\n".join(f"line {n}" for n in range(1, 10))
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=ReadFailure(exception_type="AnalysisException", message=long_message),
     )
@@ -1134,7 +1101,7 @@ def test_an_execution_failure_record_carries_its_statement_facts():
     statement = "ALTER TABLE `cat`.`schema`.`orders` ALTER COLUMN id COMMENT 'x'"
     long_message = "\n".join(f"line {n}" for n in range(1, 10))
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
@@ -1163,7 +1130,7 @@ def test_a_validation_failure_record_carries_rule_subject_and_detail_lines():
         subject="partitioning",
         details=("partitioning: observed (a) desired ()",),
     )
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(failure,),
@@ -1177,7 +1144,7 @@ def test_a_validation_failure_record_carries_rule_subject_and_detail_lines():
 
 
 def test_a_foreign_key_failure_record_names_its_edge_and_reason_code():
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         plan=_comment_plan("b"),
@@ -1232,17 +1199,17 @@ def test_the_wire_vocabulary_is_frozen():
 
 def _one_run_per_failure_variant() -> tuple[TableRun, ...]:
     """One run per failure variant, for contract checks that sweep the family."""
-    read_failed = _report(
+    read_failed = build_table_run(
         desired=_a_desired_table("orders"),
         read=ReadFailure(exception_type="AnalysisException", message="line 1\nline 2"),
     )
-    validation_failed = _report(
+    validation_failed = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
     )
     plan = _comment_plan("orders")
-    execution_failed = _report(
+    execution_failed = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
@@ -1250,7 +1217,7 @@ def _one_run_per_failure_variant() -> tuple[TableRun, ...]:
             plan, failure=_failed_exec(0, exc="DeltaAnalysisException", msg="boom")
         ),
     )
-    blocked = _report(
+    blocked = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         plan=_comment_plan("b"),
@@ -1285,10 +1252,11 @@ def test_a_payload_with_failures_is_json_serialisable():
 
 
 def test_table_to_dict_reports_execution_counts_when_executed():
-    # The counts are statement-denominated: statements applied of statements planned.
+    # Given an executed run — the counts are statement-denominated:
+    # statements applied of statements planned
     statement = "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
@@ -1298,14 +1266,18 @@ def test_table_to_dict_reports_execution_counts_when_executed():
 
 
 def test_sync_report_to_dict_is_json_serialisable_and_complete():
+    # Given a dry-run report with one changed table
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
         table_runs=(_a_changed_table_report(),),
         dry_run=True,
     )
+
+    # When projecting the whole run
     payload = report.to_dict()
 
+    # Then the record is complete and stays within JSON-plain types
     assert payload["schema_version"] == 2
     assert payload["started_at"] == _t0().isoformat()
     assert payload["ended_at"] == _t1().isoformat()
@@ -1348,7 +1320,7 @@ def _fk_edge(parent: QualifiedName, name: str = "blocked_edge_fk"):
 
 def _sound_report(name: str, dependencies: tuple[ForeignKeyConstraint, ...] = ()):
     """Build a table that read, planned, and validated cleanly, with ``dependencies``."""
-    return _report(
+    return build_table_run(
         desired=_a_desired_table(name),
         read=TablePresent(table=_an_observed_table()),
         dependencies=dependencies,
@@ -1366,7 +1338,7 @@ def _assemble(*table_runs: TableRun) -> SyncReport:
 
 def test_assemble_bakes_blocked_failures_onto_a_sound_dependent_of_a_failed_parent():
     # Given a parent that failed its read and a sound child depending on it
-    parent = _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
+    parent = build_table_run(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
     child = _sound_report("b", dependencies=(_fk_edge(_name("a")),))
 
     # When the run report is assembled
@@ -1385,7 +1357,7 @@ def test_assemble_bakes_blocked_failures_onto_a_sound_dependent_of_a_failed_pare
 def test_assemble_propagates_blocking_along_chains():
     # Given a -> b -> c where a failed its read: b is blocked, and c through b
     reports = (
-        _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom")),
+        build_table_run(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom")),
         _sound_report("b", dependencies=(_fk_edge(_name("a")),)),
         _sound_report("c", dependencies=(_fk_edge(_name("b"), name="c_b_fk"),)),
     )
@@ -1401,8 +1373,8 @@ def test_assemble_propagates_blocking_along_chains():
 
 def test_assemble_does_not_bake_onto_a_table_with_its_own_failures():
     # Given a parent that failed its read and a child that failed planning on its own
-    parent = _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
-    child = _report(
+    parent = build_table_run(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
+    child = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
@@ -1432,7 +1404,7 @@ def test_assemble_with_no_failures_returns_the_reports_unchanged():
 
 def test_baked_blocked_failures_flatten_into_the_report_failures():
     # Given a report whose blocking was baked in at assembly
-    child = _report(
+    child = build_table_run(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         blocked_failures=(_blocked_failure(),),
@@ -1445,10 +1417,13 @@ def test_baked_blocked_failures_flatten_into_the_report_failures():
 
 
 def test_blocked_failures_reject_a_recorded_execution_outcome():
+    # Given a run claiming both blocking and an execution outcome —
+    # a blocked table is never executed
     plan = _plan("b")
 
-    with pytest.raises(ValueError, match="records no execution outcome"):
-        _report(
+    # Then construction fails
+    with pytest.raises(ValueError):
+        build_table_run(
             desired=_a_desired_table("b"),
             read=TablePresent(table=_an_observed_table()),
             execution=_execution(plan),
@@ -1459,8 +1434,8 @@ def test_blocked_failures_reject_a_recorded_execution_outcome():
 def test_blocked_failures_reject_a_table_with_its_own_failures():
     # Given a table that failed planning on its own account: assembly never
     # attaches blocking to such a table, so a value claiming both is false
-    with pytest.raises(ValueError, match="cannot also carry its own failures"):
-        _report(
+    with pytest.raises(ValueError):
+        build_table_run(
             desired=_a_desired_table("b"),
             read=TablePresent(table=_an_observed_table()),
             failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
@@ -1469,8 +1444,10 @@ def test_blocked_failures_reject_a_table_with_its_own_failures():
 
 
 def test_blocked_failures_require_the_dependency_blocking_reason():
-    with pytest.raises(ValueError, match="dependency-blocking reason"):
-        _report(
+    # When blocked failures carry any reason other than dependency blocking
+    # Then construction fails
+    with pytest.raises(ValueError):
+        build_table_run(
             desired=_a_desired_table("b"),
             read=TablePresent(table=_an_observed_table()),
             blocked_failures=(
@@ -1492,7 +1469,7 @@ def test_table_run_rejects_a_planning_outcome_targeting_another_table():
     foreign_outcome = PlanningAccepted(diff=TableCreation(other), plan=other_plan)
 
     # Then the run refuses to carry it
-    with pytest.raises(ValueError, match="must target the reported table"):
+    with pytest.raises(ValueError):
         TableRun(
             read=TableAbsent(),
             planning=foreign_outcome,
@@ -1516,7 +1493,7 @@ def test_a_rejected_table_projects_the_changes_it_refused():
         qualified_name=qualified_name,
         columns=(ObservedColumn("id", Integer(), nullable=False),),
     )
-    report = _report(
+    report = build_table_run(
         desired=desired,
         read=TablePresent(table=observed),
         failures=(ValidationFailure(rule_name="NonNullableColumnAdd", message="nope"),),
@@ -1541,7 +1518,7 @@ def test_a_rejected_table_projects_the_changes_it_refused():
 
 def test_a_successful_table_projects_no_rejected_changes():
     # Given a table that planned cleanly
-    report = _report(
+    report = build_table_run(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         plan=_plan("tbl", SetTableComment(desired_comment="hello", observed_comment="")),

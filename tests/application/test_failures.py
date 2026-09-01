@@ -46,24 +46,30 @@ def test_execution_failure_formats_itself_as_two_lines_including_the_sql():
 
 
 def test_a_validation_headline_names_its_subject_when_it_has_one():
+    # Given a validation failure about one column
     failure = ValidationFailure(
         rule_name="NonNullableColumnAdd",
         message="Operation not allowed: cannot add non-nullable column 'email'.",
         subject="email",
     )
 
+    # Then the compact headline names the subject beside the rule
     assert failure.headline() == "Validation failed: NonNullableColumnAdd (email)"
 
 
 def test_a_validation_headline_omits_an_absent_subject():
+    # Given a failure judging the table as a whole
     failure = ValidationFailure(rule_name="ColumnMappingRequiredForDrop", message="nope")
 
+    # Then the headline carries no empty subject parentheses
     assert failure.headline() == "Validation failed: ColumnMappingRequiredForDrop"
 
 
 def test_adding_a_subject_preserves_positional_details_compatibility():
+    # Given the pre-subject positional call shape (rule, message, details)
     failure = ValidationFailure("UnmanagedAspectDrift", "nope", ("+ email String",))
 
+    # Then details still lands positionally and subject stays keyword-only
     assert failure.subject == ""
     assert failure.details == ("+ email String",)
 

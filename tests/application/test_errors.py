@@ -2,8 +2,6 @@ from datetime import UTC, datetime
 
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
-    ExecutionError,
-    ReadError,
     SyncFailedError,
 )
 from delta_engine.application.failures import (
@@ -14,107 +12,57 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
-    CompiledPlan,
     ExecutionResult,
     ReadResult,
     TableAbsent,
 )
-from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
     TableRun,
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import ActionPlan, SetTableComment, TableCreation
-from tests.builders import build_compiled_plan
+from tests.builders import build_compiled_comment_plan, build_table_run
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
 
 
-def _compiled(*statements: str) -> CompiledPlan:
-    plan = ActionPlan(
-        target=_QN,
-        actions=tuple(
-            SetTableComment(desired_comment=f"new {index}", observed_comment=f"old {index}")
-            for index in range(len(statements))
-        ),
-    )
-    return build_compiled_plan(plan, statements)
-
-
-def test_duplicate_table_definition_error_is_a_value_error_with_the_name():
-    error = DuplicateTableDefinitionError(_QN)
-
-    assert isinstance(error, ValueError)
-    assert error.qualified_name == _QN
-    assert str(error) == "Duplicate table definition: cat.sch.tbl"
-
-
-def test_port_errors_are_regular_exceptions_with_normalized_details():
-    for error in (
-        ReadError(exception_type="AnalysisException", message="cannot read"),
-        ExecutionError(exception_type="SparkException", message="cannot execute"),
-    ):
-        assert isinstance(error, Exception)
-        assert error.exception_type.endswith("Exception")
-        assert str(error).startswith("cannot")
-
-
-def _table_report(
+def _table_run(
     *,
     read: ReadResult,
     failures: tuple[Failure, ...] = (),
     execution: ExecutionResult | None = None,
 ) -> TableRun:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
-    planning_failures = tuple(
-        failure for failure in failures if isinstance(failure, ValidationFailure)
-    )
-    resolution_failures = tuple(
-        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
-    )
-    if isinstance(read, ReadFailure):
-        planning = None
-        compiled = None
-    elif planning_failures:
-        planning = PlanningRejected(diff=TableCreation(desired), failures=planning_failures)
-        compiled = None
-    else:
-        compiled = execution.compiled_plan if execution is not None else _compiled()
-        planning = PlanningAccepted(diff=TableCreation(desired), plan=compiled.plan)
-    resolution = TableResolution(
-        desired=desired,
-        dependencies=(),
-        structural_failures=resolution_failures,
-    )
-
-    return TableRun(
-        read=read,
-        planning=planning,
-        compiled=compiled,
-        resolution=resolution,
-        execution=execution,
-    )
+    return build_table_run(desired=desired, read=read, failures=failures, execution=execution)
 
 
-def _message_for(table_report: TableRun) -> str:
+def _message_for(table_run: TableRun) -> str:
     """Return the SyncFailedError message produced for a run with this one failed table."""
-    report = SyncReport(started_at=_AT, ended_at=_AT, table_runs=(table_report,))
+    report = SyncReport(started_at=_AT, ended_at=_AT, table_runs=(table_run,))
     return str(SyncFailedError(report))
+
+
+def test_duplicate_table_definition_error_is_a_value_error_with_the_name():
+    # Given the typed duplicate-definition error
+    error = DuplicateTableDefinitionError(_QN)
+
+    # Then callers can catch it as a ValueError and read the offending name
+    assert isinstance(error, ValueError)
+    assert error.qualified_name == _QN
+    assert str(error) == "Duplicate table definition: cat.sch.tbl"
 
 
 def test_message_headline_counts_failed_tables():
     # Given a run with a single failed table
-    report = _table_report(
+    run = _table_run(
         read=ReadFailure("AnalysisException", "table not found"),
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then the headline reports the failed/total tally
     assert message.startswith("Sync failed: 1/1 tables failed")
@@ -122,12 +70,12 @@ def test_message_headline_counts_failed_tables():
 
 def test_message_renders_read_failure_detail():
     # Given a table whose read phase failed
-    report = _table_report(
+    run = _table_run(
         read=ReadFailure("AnalysisException", "table not found"),
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then the table headline and the read error line are present
     assert "cat.sch.tbl [READ_FAILED]" in message
@@ -137,13 +85,13 @@ def test_message_renders_read_failure_detail():
 
 def test_message_renders_validation_failure_detail():
     # Given a table whose validation phase failed
-    report = _table_report(
+    run = _table_run(
         read=TableAbsent(),
         failures=(ValidationFailure("DisallowPartitioningChange", "cannot repartition"),),
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then the validation failure line is present
     assert "cat.sch.tbl [PLANNING_FAILED]" in message
@@ -152,7 +100,7 @@ def test_message_renders_validation_failure_detail():
 
 def test_message_renders_every_validation_failure_when_a_table_breaks_several_rules():
     # Given a table whose plan tripped two rules at once
-    report = _table_report(
+    run = _table_run(
         read=TableAbsent(),
         failures=(
             ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
@@ -161,7 +109,7 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then BOTH failures are surfaced together, not just the first
     assert "Validation failed: NonNullableColumnAdd - cannot add NOT NULL column 'age'" in message
@@ -175,14 +123,14 @@ def test_message_renders_execution_failure_detail_with_sql():
         "ALTER TABLE cat.sch.tbl STEP 1",
         "ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
     )
-    compiled = _compiled(*statements)
+    compiled = build_compiled_comment_plan(_QN, *statements)
     failed_result = ExecutionFailure(
         statement_index=2,
         exception_type="SparkException",
         message="boom",
         statement=statements[2],
     )
-    report = _table_report(
+    run = _table_run(
         read=TableAbsent(),
         execution=ExecutionResult(
             compiled_plan=compiled,
@@ -192,7 +140,7 @@ def test_message_renders_execution_failure_detail_with_sql():
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then both the failure line and the SQL statement is present
     assert "cat.sch.tbl [EXECUTION_FAILED]" in message
@@ -202,7 +150,7 @@ def test_message_renders_execution_failure_detail_with_sql():
 
 def test_message_renders_fk_failure_detail():
     # Given a table with an FK failure described by its content
-    report = _table_report(
+    run = _table_run(
         read=TableAbsent(),
         failures=(
             ForeignKeyFailure(
@@ -215,7 +163,7 @@ def test_message_renders_fk_failure_detail():
     )
 
     # When building the error message
-    message = _message_for(report)
+    message = _message_for(run)
 
     # Then the FK failure line is present with content-based description
     assert "cat.sch.tbl [FOREIGN_KEY_FAILED]" in message

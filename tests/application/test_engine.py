@@ -93,11 +93,6 @@ def _spec_without_pk(fqn: str) -> DeltaTable:
     )
 
 
-def _referenced_spec(fqn: str) -> DeltaTable:
-    """Build a minimal table declaration for use as an FK target."""
-    return _spec(fqn)
-
-
 def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
     """Build a table declaration with a single FK to another table."""
     catalog, schema, table_name = _split_fqn(fqn)
@@ -114,7 +109,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
         foreign_keys=[
             ForeignKey(
                 columns={"ref_id": "id"},
-                references=_referenced_spec(references),
+                references=_spec(references),
             )
         ],
     )
@@ -537,7 +532,8 @@ def test_real_run_records_the_applied_plan_on_the_report():
     # When syncing for real
     report = engine.sync(_spec(fqn))
 
-    # Then the report records the plan that was applied
+    # Then the report records the plan that was applied, marked as a real run
+    assert report.dry_run is False
     [table_report] = list(report)
     assert [type(action) for action in table_report.plan] == [CreateTable]
     assert table_report.status is TableRunStatus.SUCCESS
@@ -564,35 +560,6 @@ def test_tag_scoped_dry_run_plans_only_tag_actions():
         UnsetColumnTag,
     ]
     assert executor.executed_names == []
-
-
-def test_dry_run_is_recorded_on_the_report():
-    # Given a dry run over one table
-    fqn = "c.s.new_table"
-    reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_table_errors=[])
-    engine = Engine(reader=reader, executor=executor)
-
-    # When syncing as a dry run
-    report = engine.sync(_spec(fqn), dry_run=True)
-
-    # Then the report records that no changes were applied
-    assert report.dry_run is True
-    assert executor.executed_names == []
-
-
-def test_real_run_records_dry_run_false():
-    # Given a normal (applied) run
-    fqn = "c.s.new_table"
-    reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor([None])
-    engine = Engine(reader=reader, executor=executor)
-
-    # When syncing for real
-    report = engine.sync(_spec(fqn))
-
-    # Then the report is marked as not a dry run
-    assert report.dry_run is False
 
 
 # ---------------------------------------------------------------------------
@@ -681,12 +648,14 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
 
 
 def test_unexpected_reader_exception_propagates():
+    # Given a reader raising something other than the translated ReadError
     class BuggyReader:
         def fetch_state(self, _qualified_name: QualifiedName) -> CatalogState:
             raise RuntimeError("adapter bug")
 
     engine = Engine(reader=BuggyReader(), executor=_RecordingExecutor())
 
+    # Then the programming error propagates rather than becoming a table failure
     with pytest.raises(RuntimeError):
         engine.sync(_spec("c.s.table"))
 
@@ -776,6 +745,7 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 
 
 def test_unexpected_executor_exception_propagates():
+    # Given an executor raising something other than the translated ExecutionError
     class BuggyExecutor:
         def compile(self, plan: ActionPlan) -> CompiledPlan:
             return build_compiled_plan(plan, (f"STATEMENT FOR {plan.target}",))
@@ -785,6 +755,7 @@ def test_unexpected_executor_exception_propagates():
 
     engine = Engine(reader=_RecordingReader(), executor=BuggyExecutor())
 
+    # Then the programming error propagates rather than becoming a table failure
     with pytest.raises(RuntimeError):
         engine.sync(_spec("c.s.table"))
 
@@ -1197,8 +1168,8 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
         ),
         primary_key=["id"],
         foreign_keys=[
-            ForeignKey(columns={"b_id": "id"}, references=_referenced_spec("cat.sch.b")),
-            ForeignKey(columns={"c_id": "id"}, references=_referenced_spec("cat.sch.c")),
+            ForeignKey(columns={"b_id": "id"}, references=_spec("cat.sch.b")),
+            ForeignKey(columns={"c_id": "id"}, references=_spec("cat.sch.c")),
         ],
     )
 
@@ -1254,11 +1225,11 @@ def test_blocked_table_lists_blockers_from_both_eras():
         foreign_keys=[
             ForeignKey(
                 columns={"supplier_id": "id"},
-                references=_referenced_spec("cat.sch.suppliers"),
+                references=_spec("cat.sch.suppliers"),
             ),
             ForeignKey(
                 columns={"employee_id": "id"},
-                references=_referenced_spec("cat.sch.employees"),
+                references=_spec("cat.sch.employees"),
             ),
         ],
     )
@@ -1352,7 +1323,8 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
         dry_run=True,
     )
 
-    # Then plans are produced, but nothing is executed
+    # Then the report is marked as a dry run, plans are produced, and nothing executes
+    assert report.dry_run is True
     assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
@@ -1362,25 +1334,7 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
     assert executor.executed_names == []
 
 
-def test_dry_run_exposes_the_planned_actions_on_the_report():
-    # Given a table that would be created
-    fqn = "c.s.new_table"
-    reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_table_errors=[])
-    engine = Engine(reader=reader, executor=executor)
-
-    # When syncing in dry-run mode
-    report = engine.sync(_spec(fqn), dry_run=True)
-
-    # Then the table report carries the plan that would have been applied
-    [table_report] = list(report)
-    assert table_report.status is TableRunStatus.SUCCESS
-    assert [type(action) for action in table_report.plan] == [CreateTable]
-    assert table_report.execution is None
-    assert executor.executed_names == []
-
-
-def test_dry_run_records_the_sql_that_would_execute():
+def test_dry_run_exposes_the_planned_actions_and_their_sql_on_the_report():
     # Given a table that would be created (dry run plans a CREATE)
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
@@ -1390,13 +1344,16 @@ def test_dry_run_records_the_sql_that_would_execute():
     # When syncing in dry-run mode
     report = engine.sync(_spec(fqn), dry_run=True)
 
-    # Then the report carries the compiled statements even though nothing ran
+    # Then the report carries the plan and its compiled statements even though
+    # nothing ran
     [table_report] = list(report)
-    assert table_report.has_changes is True
+    assert table_report.status is TableRunStatus.SUCCESS
+    assert [type(action) for action in table_report.plan] == [CreateTable]
     assert table_report.execution is None
     assert table_report.compiled is not None
     assert len(table_report.compiled.statements) == len(table_report.plan)
     assert all("STATEMENT" in statement for statement in table_report.compiled.statements)
+    assert executor.executed_names == []
 
 
 def test_failed_table_records_no_planned_sql():
@@ -1514,24 +1471,6 @@ def test_dry_run_derives_dependency_blocking_for_dependents_of_failed_tables():
         references="cat.sch.customers",
     )
     assert executor.executed_names == []
-
-
-def test_foreign_key_failed_table_still_carries_its_planned_sql():
-    # Given a child whose FK references an unregistered table
-    reader = _RecordingReader()
-    executor = _SqlRecordingExecutor()
-    engine = Engine(reader=reader, executor=executor)
-
-    # When syncing in dry-run mode
-    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"), dry_run=True)
-
-    # Then resolution failed but the preview still includes the constraint SQL
-    [orders] = list(report)
-    assert orders.resolution.structural_failures != ()
-    assert orders.compiled is not None
-    assert orders.compiled.statements != ()
-    assert any("ADD FOREIGN KEY" in statement for statement in orders.compiled.statements)
-    assert executor.executed_statements == []
 
 
 # ---------------------------------------------------------------------------

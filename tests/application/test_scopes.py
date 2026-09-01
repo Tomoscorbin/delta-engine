@@ -13,10 +13,12 @@ from delta_engine.domain.model import TableScope
         ("tags", TableScope.TAGS),
     ],
 )
-def test_each_public_name_resolves_to_its_domain_scope(name, expected):
+def test_each_public_name_resolves_to_its_domain_scope(name: str, expected: TableScope) -> None:
+    # Then every public scope name resolves to its domain policy
     assert table_scope_for(name) is expected
 
 
-def test_unknown_scope_is_rejected():
+def test_unknown_scope_is_rejected() -> None:
+    # When an untyped caller supplies an unknown scope name, then resolution fails
     with pytest.raises(ValueError):
-        table_scope_for("everything")
+        table_scope_for("everything")  # type: ignore[arg-type]
