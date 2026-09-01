@@ -11,7 +11,6 @@ from delta_engine.domain.model import DesiredTable
 class LintRule(Protocol):
     """One governance policy evaluated per table."""
 
-    # Whether the rule runs when the config does not mention it.
     enabled_by_default: ClassVar[bool]
 
     @property
