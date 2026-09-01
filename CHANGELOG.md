@@ -1,3 +1,14 @@
+## v0.13.2 (2026-09-01)
+
+### Refactor
+
+- **tests**: clean up the root test files (#396)
+- **tests**: clean up the live test suite (#395)
+- **tests**: clean up the api and e2e test suites (#394)
+- **tests**: clean up the cli, lint, and generate test suites (#393)
+- **tests**: clean up the adapters test suite (#392)
+- **tests**: clean up the application test suite (#391)
+
 ## v0.13.1 (2026-09-01)
 
 ### Refactor
