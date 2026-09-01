@@ -144,8 +144,10 @@ def _type_drift(column_name: str = "id") -> AlterColumnType:
 
 
 def test_eligibility_checks_cover_all_laws_in_evaluation_order():
+    # Given the ELIGIBILITY_CHECKS constant
     check_names = tuple(type(check).__name__ for check in ELIGIBILITY_CHECKS)
 
+    # Then the laws are exactly these, in report order (root defect first)
     assert check_names == (
         "ColumnSpellingMustMatchCatalog",
         "StreamingTableAnnotationsOnly",
