@@ -768,6 +768,39 @@ def test_foreign_key_rejects_invalid_column_input(
         )
 
 
+@pytest.mark.parametrize(
+    ("columns", "references"),
+    [
+        pytest.param("customer_id", Self, id="single-column"),
+        pytest.param(["customer_id", "region_id"], Self, id="column-sequence"),
+        pytest.param({"customer_id": "id"}, "cat.sch.customers", id="column-mapping"),
+    ],
+)
+def test_equal_foreign_keys_hash_equal(columns: object, references: object) -> None:
+    # Given two declarations built from the same input
+    first = ForeignKey(columns=columns, references=references)  # type: ignore[arg-type]
+    second = ForeignKey(columns=columns, references=references)  # type: ignore[arg-type]
+
+    # Then they are equal and hash equal
+    assert first == second
+    assert hash(first) == hash(second)
+
+
+def test_reordered_mapping_foreign_keys_collapse_in_sets() -> None:
+    # Given the same composite mapping declared in two insertion orders
+    first = ForeignKey(
+        columns={"tenant_id": "tenant_id", "customer_id": "id"},
+        references="cat.sch.accounts",
+    )
+    second = ForeignKey(
+        columns={"customer_id": "id", "tenant_id": "tenant_id"},
+        references="cat.sch.accounts",
+    )
+
+    # Then the declarations are interchangeable in hashed collections
+    assert len({first, second}) == 1
+
+
 def test_delta_table_defaults_to_no_foreign_keys():
     # Given a table with no foreign_keys argument
     table = DeltaTable(
