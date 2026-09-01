@@ -17,7 +17,7 @@ from tests.domain.model.strategies import NON_DATA_TYPES
 def test_columns_reject_non_data_types(
     column_type: type[DesiredColumn] | type[ObservedColumn], invalid: Any
 ) -> None:
-    with pytest.raises(ValueError, match="Column data type"):
+    with pytest.raises(TypeError, match="Column data type"):
         column_type("value", invalid)
 
 

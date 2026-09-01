@@ -11,7 +11,7 @@ from delta_engine.domain.model.identifier import Identifier
 def _validate_column_fields(name: str, data_type: DataType, tags: Mapping[str, str]) -> None:
     """Invariants shared by declared and observed columns."""
     if not isinstance(data_type, DataType):
-        raise ValueError(f"Column data type must be a DataType instance; got {data_type!r}")
+        raise TypeError(f"Column data type must be a DataType instance; got {data_type!r}")
     if not name.strip():
         raise ValueError(f"Column name must not be blank: {name!r}")
     for tag_key in tags:
