@@ -73,6 +73,35 @@ def test_mixed_case_columns_and_name_are_preserved():
     assert str(pk.name) == "Orders_PK"
 
 
+def test_construction_canonicalizes_column_order():
+    # Given columns declared in non-canonical order
+    key = PrimaryKeyConstraint(columns=("b", "a"), name="t_pk")
+
+    # Then storage is sorted by identifier key
+    assert key.columns == ("a", "b")
+
+
+def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
+    # Given mixed-case columns whose identity order differs from declaration order
+    key = PrimaryKeyConstraint(columns=("Zebra", "Apple"), name="t_pk")
+
+    # Then each spelling is preserved and storage is sorted by identifier key
+    assert tuple(str(column) for column in key.columns) == ("Apple", "Zebra")
+
+
+def test_canonical_order_is_identity_keyed_not_raw_string_sorted():
+    # Given two declarations whose raw ASCII order disagrees with identity order:
+    # "Zeta" precedes "alpha" by raw byte value (Z < a), but "zeta" follows
+    # "alpha" by identifier key. Sorting on the bare spelling would canonicalize
+    # the two declarations into different orders and break their equality.
+    declared = PrimaryKeyConstraint(columns=("Zeta", "alpha"), name="t_pk")
+    observed = PrimaryKeyConstraint(columns=("ZETA", "ALPHA"), name="T_PK")
+
+    # Then both canonicalize to the same identity-keyed order
+    assert declared == observed
+    assert hash(declared) == hash(observed)
+
+
 def test_equality_uses_structural_column_set_identity():
     # Given equivalent constraints with different names, casing, and column order
     desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), name="Orders_PK")

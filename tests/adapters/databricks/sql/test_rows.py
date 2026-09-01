@@ -63,7 +63,8 @@ def test_schema_does_not_exist_when_the_probe_returns_no_rows() -> None:
 # ---------- primary key ----------
 
 
-def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
+def test_primary_key_rows_preserve_catalog_spelling() -> None:
+    # Given catalog rows carrying mixed-case column spellings
     rows = [
         SimpleNamespace(constraint_name="Orders_PK", column_name="Order_Id"),
         SimpleNamespace(constraint_name="Orders_PK", column_name="Line_No"),
@@ -71,9 +72,10 @@ def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
 
     result = read_primary_key(_runner(primary_key_query(QN), rows), QN)
 
+    # Then each spelling is preserved and columns hold their canonical order
     assert result is not None
     assert isinstance(result, ObservedPrimaryKeyConstraint)
-    assert tuple(str(column) for column in result.columns) == ("Order_Id", "Line_No")
+    assert tuple(str(column) for column in result.columns) == ("Line_No", "Order_Id")
     assert str(result.name) == "Orders_PK"
 
 

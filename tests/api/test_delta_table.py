@@ -507,7 +507,7 @@ def test_primary_key_parameter_lowers_into_table_level_constraint():
 
     # Then omission remains explicit so Databricks can choose the physical name
     assert desired.primary_key is not None
-    assert desired.primary_key.columns == ("tenant_id", "id")
+    assert desired.primary_key.columns == ("id", "tenant_id")
     assert desired.primary_key.name is None
     assert table.primary_key_name is None
 
@@ -637,8 +637,8 @@ def test_column_no_longer_accepts_a_primary_key_flag():
         Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
 
 
-def test_delta_table_pk_column_order_matches_declaration_order():
-    # Given two PK columns declared in a specific order
+def test_delta_table_pk_columns_are_canonically_ordered():
+    # Given two PK columns declared in non-canonical order
     table = DeltaTable(
         catalog="c",
         schema="s",
@@ -651,8 +651,8 @@ def test_delta_table_pk_column_order_matches_declaration_order():
         primary_key=["tenant_id", "order_id"],
     )
 
-    # Then the order in primary_key matches declaration order
-    assert table.primary_key == ("tenant_id", "order_id")
+    # Then primary_key reports the canonical (sorted) order, not declaration order
+    assert table.primary_key == ("order_id", "tenant_id")
 
 
 def test_delta_table_accepts_foreign_keys_parameter():
