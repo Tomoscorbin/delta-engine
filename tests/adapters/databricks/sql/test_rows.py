@@ -53,10 +53,12 @@ def _runner(query, rows):
 
 
 def test_schema_exists_when_the_probe_returns_a_row() -> None:
+    # Then a row from the probe means the schema exists
     assert schema_exists(_runner(schema_exists_query(QN), [("silver",)]), QN) is True
 
 
 def test_schema_does_not_exist_when_the_probe_returns_no_rows() -> None:
+    # Then no rows from the probe means the schema does not exist
     assert schema_exists(_runner(schema_exists_query(QN), []), QN) is False
 
 
@@ -80,6 +82,7 @@ def test_primary_key_rows_preserve_catalog_spelling() -> None:
 
 
 def test_primary_key_empty_rows_map_to_none() -> None:
+    # Then no rows means no primary key
     assert read_primary_key(_runner(primary_key_query(QN), []), QN) is None
 
 
@@ -110,8 +113,7 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
 
 
 def test_composite_foreign_key_keeps_each_local_referenced_pair_together() -> None:
-    # Rows arrive in the foreign key's column order; the read preserves each
-    # (local, referenced) pair so the domain's canonical sort keeps them aligned.
+    # Given rows arriving in the foreign key's column order
     rows = [
         SimpleNamespace(
             constraint_name="fk_ab",
@@ -133,12 +135,15 @@ def test_composite_foreign_key_keeps_each_local_referenced_pair_together() -> No
 
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
+    # Then each (local, referenced) pair stays together through the domain's
+    # canonical sort: a->x and b->y
     assert fk.local_columns == ("a", "b")
-    assert fk.referenced_columns == ("x", "y")  # a->x and b->y preserved through the sort
+    assert fk.referenced_columns == ("x", "y")
     assert fk.referenced_table == QualifiedName("c", "s", "parent")
 
 
 def test_multiple_foreign_keys_group_by_constraint_name() -> None:
+    # Given rows belonging to two different constraints
     rows = [
         SimpleNamespace(
             constraint_name="fk_one",
@@ -160,11 +165,13 @@ def test_multiple_foreign_keys_group_by_constraint_name() -> None:
 
     result = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
+    # Then each constraint becomes its own foreign key
     assert len(result) == 2
     assert {fk.name for fk in result} == {"fk_one", "fk_two"}
 
 
 def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
+    # Then no rows means no foreign keys
     assert read_foreign_keys(_runner(foreign_keys_query(QN), []), QN) == ()
 
 
@@ -172,6 +179,7 @@ def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 
 
 def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
+    # Given an inbound-key row carrying mixed-case spellings
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -185,11 +193,13 @@ def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
         _runner(referencing_foreign_keys_query(QN), rows), QN
     )
 
+    # Then the constraint name carries verbatim
     assert str(reference.name) == "Orders_Customer_FK"
     assert reference.referencing_table == QualifiedName("dev", "silver", "orders")
 
 
 def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
+    # Then no rows means no inbound foreign keys
     assert read_referencing_foreign_keys(_runner(referencing_foreign_keys_query(QN), []), QN) == ()
 
 
@@ -198,18 +208,23 @@ def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 
 def test_table_tags_read_returns_empty_read_only_mapping_for_no_rows():
     tags = read_table_tags(_runner(table_tags_query(QN), []), QN)
+
+    # Then the mapping is empty and refuses writes
     assert dict(tags) == {}
-    # read-only: the mapping must refuse writes
     with pytest.raises(TypeError):
         tags["x"] = "y"  # type: ignore[index]
 
 
 def test_table_tags_read_preserves_tag_key_and_value_case():
+    # Given tag rows with mixed-case names and values
     rows = [
         SimpleNamespace(tag_name="Owner", tag_value="Data-Platform"),
         SimpleNamespace(tag_name="tier", tag_value="Gold"),
     ]
+
     tags = read_table_tags(_runner(table_tags_query(QN), rows), QN)
+
+    # Then both spellings carry verbatim
     assert dict(tags) == {"Owner": "Data-Platform", "tier": "Gold"}
 
 
@@ -217,16 +232,22 @@ def test_table_tags_read_preserves_tag_key_and_value_case():
 
 
 def test_column_tags_read_returns_empty_mapping_for_no_rows():
+    # Then no rows means no column has tags
     assert dict(read_column_tags(_runner(column_tags_query(QN), []), QN)) == {}
 
 
 def test_column_tags_read_keys_by_identifier_identity_and_preserves_tag_case():
+    # Given tag rows spelling the same column two ways
     rows = [
         SimpleNamespace(column_name="EMAIL", tag_name="PII", tag_value="Email"),
         SimpleNamespace(column_name="email", tag_name="mask", tag_value="hash"),
         SimpleNamespace(column_name="id", tag_name="key", tag_value="primary"),
     ]
+
     tags = read_column_tags(_runner(column_tags_query(QN), rows), QN)
+
+    # Then both rows group under one case-insensitive column identity while
+    # tag spellings carry verbatim
     assert dict(tags["email"]) == {"PII": "Email", "mask": "hash"}
     assert dict(tags["id"]) == {"key": "primary"}
 
@@ -251,8 +272,10 @@ def _column_tag_row_permutations(draw: st.DrawFn):
 
 @given(_column_tag_row_permutations())
 def test_column_tag_grouping_is_row_order_independent_and_preserves_tag_case(case) -> None:
+    # Given generated tag rows in an arbitrary order
     rows, expected = case
 
     actual = read_column_tags(_runner(column_tags_query(QN), rows), QN)
 
+    # Then grouping recovers the expected mapping regardless of row order
     assert {column: dict(tags) for column, tags in actual.items()} == expected

@@ -10,17 +10,9 @@ What is pinned here is only that the kind the reader observed is the kind they
 are handed.
 """
 
-import json
 from types import SimpleNamespace
 
-from delta_engine.adapters.databricks.sql import (
-    column_tags_query,
-    describe_json_query,
-    foreign_keys_query,
-    primary_key_query,
-    referencing_foreign_keys_query,
-    table_tags_query,
-)
+from delta_engine.adapters.databricks.sql import table_tags_query
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
@@ -29,59 +21,31 @@ from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.report import TableRunStatus
 from delta_engine.domain.model import QualifiedName
 from delta_engine.schema import Column, DeltaTable, Integer
+from tests.adapters.databricks.fakes import (
+    RoutedConnection,
+    build_catalog_responses,
+    build_describe_document,
+)
 
 QN = QualifiedName("cat", "sch", "clicks")
 
 # The comments are stale on purpose: a declaration that differs from them plans
 # the statement under test, and one that mirrors them plans nothing at all.
-_STREAMING_DOC = json.dumps(
-    {
-        "table_name": "clicks",
-        "catalog_name": "cat",
-        "schema_name": "sch",
-        "type": "STREAMING_TABLE",
-        "provider": "delta",
-        "columns": [
-            {"name": "id", "type": {"name": "int"}, "nullable": True, "comment": "stale id"}
-        ],
-        "comment": "stale table comment",
-        "table_properties": {},
-    }
+_STREAMING_DOC = build_describe_document(
+    QN,
+    type="STREAMING_TABLE",
+    columns=[{"name": "id", "type": {"name": "int"}, "nullable": True, "comment": "stale id"}],
+    comment="stale table comment",
 )
-
-
-class RoutedCursor:
-    def __init__(self, responses):
-        self._responses = responses
-
-    def execute(self, query):
-        self._current = self._responses.get(query, [])
-
-    def fetchall(self):
-        return list(self._current)
-
-    def close(self):
-        pass
-
-
-class RoutedConnection:
-    def __init__(self, responses):
-        self._responses = responses
-
-    def cursor(self):
-        return RoutedCursor(self._responses)
 
 
 def _streaming_table_connection() -> RoutedConnection:
     return RoutedConnection(
-        {
-            describe_json_query(QN): [(_STREAMING_DOC,)],
-            table_tags_query(QN): [SimpleNamespace(tag_name="stale", tag_value="remove-me")],
-            column_tags_query(QN): [],
-            primary_key_query(QN): [],
-            foreign_keys_query(QN): [],
-            referencing_foreign_keys_query(QN): [],
-        }
+        build_catalog_responses(
+            QN,
+            describe=_STREAMING_DOC,
+            **{table_tags_query(QN): [SimpleNamespace(tag_name="stale", tag_value="remove-me")]},
+        )
     )
 
 

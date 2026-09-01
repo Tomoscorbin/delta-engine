@@ -15,16 +15,19 @@ QN = QualifiedName("cat", "sch", "tbl")
 
 
 def test_describe_json_query_is_extended_and_backticked():
+    # Then the describe is EXTENDED ... AS JSON with a backticked table name
     assert describe_json_query(QN) == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"
 
 
 def test_schema_exists_query_golden():
+    # Then the schema probe reads information_schema.schemata by literal name
     assert schema_exists_query(QN) == (
         "SELECT schema_name FROM `cat`.information_schema.schemata WHERE schema_name = 'sch'"
     )
 
 
 def test_primary_key_query_golden():
+    # Then key columns join through the constraint and keep ordinal order
     assert primary_key_query(QN) == (
         "SELECT tc.constraint_name, kcu.column_name"
         " FROM `cat`.information_schema.table_constraints AS tc"
@@ -40,6 +43,12 @@ def test_primary_key_query_golden():
 
 
 def test_foreign_keys_query_golden():
+    # A composite foreign key's local and referenced columns are aligned by
+    # the local column's position in the parent key
+    # (fk.position_in_unique_constraint = parent_key.ordinal_position), so a
+    # key that references its parent's columns in a different order than they
+    # are declared still pairs correctly instead of relying on both sides
+    # sharing an order.
     assert foreign_keys_query(QN) == (
         "SELECT fk.constraint_name,"
         " fk.column_name AS local_column,"
@@ -67,17 +76,11 @@ def test_foreign_keys_query_golden():
     )
 
 
-def test_foreign_keys_query_pairs_columns_by_position_in_unique_constraint():
-    # A composite foreign key's local and referenced columns are aligned by the
-    # local column's position in the parent key, so a key that references its
-    # parent's columns in a different order than they are declared still pairs
-    # correctly instead of relying on both sides sharing an order.
-    assert "fk.position_in_unique_constraint = parent_key.ordinal_position" in foreign_keys_query(
-        QN
-    )
-
-
 def test_referencing_foreign_keys_query_golden():
+    # A foreign key may reference a UNIQUE constraint (DBR 18.2+); such a key
+    # does not block a primary-key drop, so the inbound query filters the
+    # parent constraint to the primary key
+    # (pk_tables.constraint_type = 'PRIMARY KEY').
     assert referencing_foreign_keys_query(QN) == (
         "SELECT rc.constraint_name,"
         " fk_tables.table_catalog AS referencing_catalog,"
@@ -100,14 +103,8 @@ def test_referencing_foreign_keys_query_golden():
     )
 
 
-def test_referencing_foreign_keys_query_matches_primary_key_parents_only():
-    # A foreign key may reference a UNIQUE constraint (DBR 18.2+); such a key
-    # does not block a primary-key drop, so the inbound query must filter the
-    # parent constraint to the primary key.
-    assert "pk_tables.constraint_type = 'PRIMARY KEY'" in referencing_foreign_keys_query(QN)
-
-
 def test_table_tags_query_golden():
+    # Then table tags read from information_schema.table_tags for this table
     assert table_tags_query(QN) == (
         "SELECT tag_name, tag_value"
         " FROM `cat`.information_schema.table_tags"
@@ -117,6 +114,7 @@ def test_table_tags_query_golden():
 
 
 def test_column_tags_query_golden():
+    # Then column tags read from information_schema.column_tags for this table
     assert column_tags_query(QN) == (
         "SELECT column_name, tag_name, tag_value"
         " FROM `cat`.information_schema.column_tags"
@@ -126,8 +124,10 @@ def test_column_tags_query_golden():
 
 
 def test_queries_escape_identifiers_and_literals():
-    # Backticked identifier parts double embedded backticks; string literals
-    # double embedded single quotes.
+    # Given name parts carrying the characters that would break each context
     qn = QualifiedName("ca`t", "sc'h", "tbl")
+
+    # Then backticked identifier parts double embedded backticks, and string
+    # literals double embedded single quotes
     assert "`ca``t`" in referencing_foreign_keys_query(qn)
     assert "'sc''h'" in table_tags_query(qn)
