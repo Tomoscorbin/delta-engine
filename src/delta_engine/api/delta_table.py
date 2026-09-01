@@ -120,6 +120,7 @@ def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "T
 
 
 def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
+    """Reject tag counts, keys, or values Unity Catalog cannot store."""
     if len(tags) > _MAX_TAGS_PER_SECURABLE:
         raise ValueError(
             f"{subject} declares {len(tags)} tags; Unity Catalog allows at"
@@ -129,12 +130,12 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
         if len(key) > _MAX_TAG_KEY_LENGTH:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(key)}-character"
-                f" key; delta-engine accepts at most {_MAX_TAG_KEY_LENGTH}"
+                f" key; Unity Catalog allows at most {_MAX_TAG_KEY_LENGTH}"
             )
         if len(value) > _MAX_TAG_VALUE_LENGTH:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(value)}-character"
-                f" value; delta-engine accepts at most {_MAX_TAG_VALUE_LENGTH}"
+                f" value; Unity Catalog allows at most {_MAX_TAG_VALUE_LENGTH}"
             )
 
 
@@ -146,7 +147,7 @@ def _declared_spelling(columns_by_name: Mapping[Identifier, Column], name: str) 
     Return ``name`` in its declared spelling.
 
     A name that resolves to no declared column is returned as written, for
-    the domain to reject (see ``_NormalizedDeclaration``).
+    the domain to reject.
     """
     column = columns_by_name.get(Identifier(name))
     return Identifier(column.name) if column is not None else Identifier(name)
@@ -527,7 +528,7 @@ def _validate_reference_coherence(
     The referenced columns must be exactly the parent's primary key, and
     each local column's data type must equal its referenced column's.
     Columns that resolve to no declaration — local or referenced — are the
-    domain's to reject (see ``_NormalizedDeclaration``).
+    domain's to reject.
     """
     referenced_columns = tuple(referenced for _, referenced in pairs)
     if not declared.primary_key.matches_columns(referenced_columns):
@@ -640,6 +641,14 @@ class ForeignKey:
     its primary-key and column-type checks happen when the sync judges the
     registered parent instead of at declaration time. Either way the
     referenced table must be part of the same sync.
+
+    Raises:
+        TypeError: ``columns`` or ``references`` is not one of the accepted
+            forms.
+        ValueError: ``columns`` is empty or repeats a local column, ``name``
+            is not a valid identifier, or a name reference is not a valid
+            ``catalog.schema.table`` name or lacks its explicit mapping.
+
     """
 
     columns: str | ListOrTuple[str] | Mapping[str, str]
@@ -896,6 +905,14 @@ class DeltaTable:
                 applied, and mirroring it is what keeps it from reading as
                 drift. Properties are the exception: a declaration that does
                 not manage properties never compares them at all.
+
+        Raises:
+            TypeError: ``partitioned_by``, ``clustered_by``, or
+                ``primary_key`` is a bare string rather than a list or tuple
+                of column names, or ``primary_key_name`` is not a string.
+            ValueError: The declaration cannot deploy as declared: an
+                invalid name, column, layout, property, tag, primary key,
+                foreign key, or scope.
 
         """
         declaration = _normalize_declaration(

@@ -759,7 +759,8 @@ def test_foreign_key_rejects_invalid_column_input(
     columns: object,
     expected_error: type[Exception],
 ) -> None:
-    # When column syntax is invalid, then ForeignKey rejects it without needing an owner
+    # When the column input is invalid
+    # Then ForeignKey rejects it without needing an owner
     with pytest.raises(expected_error):
         ForeignKey(
             columns=columns,  # type: ignore[arg-type]
