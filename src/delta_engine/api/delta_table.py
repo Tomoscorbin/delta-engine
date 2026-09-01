@@ -1,12 +1,27 @@
 """
 Schema declaration implementation for Delta tables and foreign keys.
 
-Validation here is declaration-time deployability: rules Delta or Unity
-Catalog enforce when an author creates a table (layout key types, quotas,
-property-dependent naming rules). Structural coherence — columns exist,
-names are unique, at least one column — is the domain ``DesiredTable``'s
-job, enforced the moment a declaration is lowered; this module skips names
-it cannot resolve rather than re-checking existence.
+Each rule here is judged against the smallest context that can decide it,
+and the file is laid out in those sections:
+
+- Value rules judge one value in isolation: can it exist on the platform
+  at all? (Object-name length and characters, tag quotas.)
+- Declaration rules judge one whole declaration: can it deploy as
+  declared? (Layout, property-dependent naming, nested NOT NULL.)
+  ``_validate_declaration`` owns which of them bind for a scope.
+- Reference rules judge a declaration against the tables it references:
+  a foreign key against its parent's declaration, at lowering time.
+
+Normalization runs before any judgment: input is frozen and every column
+reference is resolved to its declared spelling (``_NormalizedDeclaration``).
+Structural coherence — columns exist, names are unique, at least one column
+— is the domain ``DesiredTable``'s job, enforced the moment a declaration
+is lowered; a name that resolves to no column passes through for the domain
+to reject.
+
+Most rules restate what Delta or Unity Catalog would enforce at creation.
+A few are this engine's own policy (the cross-catalog foreign key rule, the
+scope gate on naming rules) rather than platform limits.
 """
 
 from __future__ import annotations
@@ -84,27 +99,7 @@ _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
 )
 
 
-class _SelfReference:
-    """Sentinel marking a foreign key that references its own table."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "Self"
-
-
-Self: Final = _SelfReference()
-
-
-def _parse_name_reference(raw: str) -> QualifiedName:
-    """
-    Parse a ``catalog.schema.table`` string into the referenced table's name.
-
-    Every part must be a name Unity Catalog can store.
-    """
-    name = QualifiedName.parse(raw)
-    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
-    return name
+# ---------- Value rules ----------
 
 
 def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "Table") -> None:
@@ -125,6 +120,7 @@ def _validate_object_name_parts(qualified_name: QualifiedName, subject: str = "T
 
 
 def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
+    """Reject tag counts, keys, or values Unity Catalog cannot store."""
     if len(tags) > _MAX_TAGS_PER_SECURABLE:
         raise ValueError(
             f"{subject} declares {len(tags)} tags; Unity Catalog allows at"
@@ -134,13 +130,127 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
         if len(key) > _MAX_TAG_KEY_LENGTH:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(key)}-character"
-                f" key; delta-engine accepts at most {_MAX_TAG_KEY_LENGTH}"
+                f" key; Unity Catalog allows at most {_MAX_TAG_KEY_LENGTH}"
             )
         if len(value) > _MAX_TAG_VALUE_LENGTH:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(value)}-character"
-                f" value; delta-engine accepts at most {_MAX_TAG_VALUE_LENGTH}"
+                f" value; Unity Catalog allows at most {_MAX_TAG_VALUE_LENGTH}"
             )
+
+
+# ---------- Normalization ----------
+
+
+def _declared_spelling(columns_by_name: Mapping[Identifier, Column], name: str) -> Identifier:
+    """
+    Return ``name`` in its declared spelling.
+
+    A name that resolves to no declared column is returned as written, for
+    the domain to reject.
+    """
+    column = columns_by_name.get(Identifier(name))
+    return Identifier(column.name) if column is not None else Identifier(name)
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedDeclaration:
+    """
+    One frozen representation of public ``DeltaTable`` input.
+
+    Every column reference is already canonicalized to its declared spelling
+    through ``columns_by_name``. A name that matches no declared column
+    passes through as written: existence is the domain ``DesiredTable``'s
+    invariant, and its error shows the user's spelling. Rules and lowering
+    look columns up here and never re-derive the mapping.
+
+    ``columns`` is the declaration itself: it carries even duplicate names
+    through for the domain to reject. ``columns_by_name`` is the derived
+    lookup index, which collapses them, so it can never replace the tuple.
+    """
+
+    qualified_name: QualifiedName
+    columns: tuple[Column, ...]
+    columns_by_name: Mapping[Identifier, Column]
+    comment: str
+    properties: Mapping[str, str | None]
+    tags: Mapping[str, str]
+    partitioned_by: tuple[Identifier, ...]
+    clustered_by: tuple[Identifier, ...]
+    primary_key: tuple[Identifier, ...] | None
+    primary_key_name: Identifier | None
+    foreign_key_declarations: tuple[ForeignKey, ...]
+    scope: TableScope
+
+
+def _normalize_declaration(
+    *,
+    catalog: str,
+    schema: str,
+    name: str,
+    columns: Iterable[Column],
+    comment: str,
+    properties: Mapping[str, str | None] | None,
+    tags: Mapping[str, str] | None,
+    partitioned_by: ListOrTuple[str],
+    clustered_by: ListOrTuple[str],
+    primary_key: ListOrTuple[str] | None,
+    primary_key_name: str | None,
+    foreign_keys: Iterable[ForeignKey] | None,
+    scope: ScopeName,
+) -> _NormalizedDeclaration:
+    """Freeze public inputs before judging them."""
+    # Annotations are not enforced at runtime, so fail clearly rather than
+    # treating a bare string as an iterable of one-character column names.
+    string_collections: tuple[tuple[str, object], ...] = (
+        ("partitioned_by", partitioned_by),
+        ("clustered_by", clustered_by),
+        ("primary_key", primary_key),
+    )
+    for field_name, value in string_collections:
+        if isinstance(value, str):
+            raise TypeError(
+                f"{field_name} must be a list or tuple of column names, not a string;"
+                f" write {field_name}=[{value!r}] for one column"
+            )
+
+    if primary_key_name is not None:
+        if not isinstance(primary_key_name, str):
+            raise TypeError("primary_key_name must be a string or None")
+        if primary_key is None:
+            raise ValueError("primary_key_name requires primary_key")
+        if not primary_key_name.strip():
+            raise ValueError("primary_key_name must not be blank")
+
+    declared_columns = tuple(columns)
+    columns_by_name: dict[Identifier, Column] = {
+        Identifier(column.name): column for column in declared_columns
+    }
+    return _NormalizedDeclaration(
+        qualified_name=QualifiedName(catalog, schema, name),
+        columns=declared_columns,
+        columns_by_name=MappingProxyType(columns_by_name),
+        comment=comment,
+        properties=MappingProxyType(dict(properties or {})),
+        tags=MappingProxyType(dict(tags or {})),
+        partitioned_by=tuple(
+            _declared_spelling(columns_by_name, column_name) for column_name in partitioned_by
+        ),
+        clustered_by=tuple(
+            _declared_spelling(columns_by_name, column_name) for column_name in clustered_by
+        ),
+        primary_key=(
+            tuple(_declared_spelling(columns_by_name, column_name) for column_name in primary_key)
+            if primary_key is not None
+            else None
+        ),
+        primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
+        foreign_key_declarations=tuple(foreign_keys or ()),
+        scope=table_scope_for(scope),
+    )
+
+
+# ---------- Declaration rules ----------
 
 
 class _NestedStructFieldContext(NamedTuple):
@@ -217,19 +327,17 @@ def _validate_nested_not_null(
             )
 
 
-def _validate_layout(
-    columns: tuple[Column, ...],
-    partitioned_by: tuple[str, ...],
-    clustered_by: tuple[str, ...],
-) -> None:
+def _validate_layout(declaration: _NormalizedDeclaration) -> None:
     """
     Reject physical layouts Delta cannot deploy.
 
     Checks declaration-level deployability only: the partition/cluster
-    relationship, the clustering-key budget, and key data types. Whether the
-    named columns exist and are unique is a ``DesiredTable`` invariant, so
-    names that do not resolve are skipped here and the domain's error fires.
+    relationship, the clustering-key budget, and key data types. Names that
+    resolve to no column are the domain's to reject (see
+    ``_NormalizedDeclaration``).
     """
+    partitioned_by = declaration.partitioned_by
+    clustered_by = declaration.clustered_by
     if partitioned_by and clustered_by:
         raise ValueError(
             "A table cannot both partition and cluster: declare partitioned_by"
@@ -240,16 +348,15 @@ def _validate_layout(
             f"A table may declare at most four clustering keys; got {len(clustered_by)}."
         )
 
-    columns_by_name = {column.name: column for column in columns}
     for name in partitioned_by:
-        column = columns_by_name.get(name)
+        column = declaration.columns_by_name.get(name)
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_PARTITION_KEYS):
             raise ValueError(
                 f"Partition column {name!r} has type"
                 f" {type(column.data_type).__name__}, which Delta cannot partition by"
             )
     for name in clustered_by:
-        column = columns_by_name.get(name)
+        column = declaration.columns_by_name.get(name)
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_CLUSTERING_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
@@ -259,8 +366,8 @@ def _validate_layout(
     partition_names = set(partitioned_by)
     if (
         partitioned_by
-        and partition_names <= columns_by_name.keys()
-        and len(partition_names) == len(columns)
+        and partition_names <= declaration.columns_by_name.keys()
+        and len(partition_names) == len(declaration.columns)
     ):
         raise ValueError(
             "Cannot partition by every column: at least one non-partition column is required"
@@ -287,21 +394,14 @@ def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str 
 def _validate_column_names(
     columns: tuple[Column, ...],
     properties: Mapping[str, str | None],
-    scope: TableScope,
 ) -> None:
     """
     Reject column names the declared properties make invalid on Delta.
 
     Two naming rules depend on properties: characters such as spaces are only
     permitted under column mapping, and change data feed reserves its output
-    column names. Both bind only when the declaration manages column
-    structure — a restricted scope mirrors columns the live table already
-    accepted, so it must be able to declare names this engine would reject
-    to create.
+    column names.
     """
-    if not scope.manages(TableAspect.COLUMN_STRUCTURE):
-        return
-
     if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
         offending = [
             declared_name
@@ -327,6 +427,58 @@ def _validate_column_names(
             )
 
 
+def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
+    """
+    Reject invalid frozen declarations before lowering.
+
+    Rules judge; this orchestrator decides which of them bind for the
+    declaration's scope.
+    """
+    DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
+    _validate_layout(declaration)
+    # The column rules bind only when the declaration manages column
+    # structure: a restricted scope mirrors columns the live table already
+    # accepted, so it must be able to declare names this engine would
+    # refuse to create, and its rename hints are the domain's scope rule
+    # to reject with the accurate error.
+    if declaration.scope.manages(TableAspect.COLUMN_STRUCTURE):
+        _validate_column_names(declaration.columns, declaration.properties)
+        _validate_renames(declaration.columns, declaration.properties)
+
+    _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
+    for column in declaration.columns:
+        _validate_tags(f"column '{column.name}'", column.tags)
+        _validate_nested_not_null(column)
+
+    _validate_object_name_parts(declaration.qualified_name)
+
+
+# ---------- Reference rules ----------
+
+
+class _SelfReference:
+    """Sentinel marking a foreign key that references its own table."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "Self"
+
+
+Self: Final = _SelfReference()
+
+
+def _parse_name_reference(raw: str) -> QualifiedName:
+    """
+    Parse a ``catalog.schema.table`` string into the referenced table's name.
+
+    Every part must be a name Unity Catalog can store.
+    """
+    name = QualifiedName.parse(raw)
+    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
+    return name
+
+
 def _validate_same_catalog(owner_name: QualifiedName, referenced_table: QualifiedName) -> None:
     """Reject a foreign key whose referenced table lives in another catalog."""
     if referenced_table.catalog != owner_name.catalog:
@@ -338,15 +490,16 @@ def _validate_same_catalog(owner_name: QualifiedName, referenced_table: Qualifie
 
 class _ParentDeclaration(NamedTuple):
     """
-    A referenced table's declared primary key and column types.
+    A referenced table's declaration, resolved to what judgment needs.
 
     Present only when the parent's declaration is in scope (a ``DeltaTable``
-    reference or ``Self``); a name reference supplies no declaration.
-    ``primary_key`` is ``None`` when the declared parent has no primary key.
+    reference or ``Self``); a name reference supplies no declaration. One is
+    only constructed once the parent is known to declare a primary key, so
+    holding one means there is a key to judge against.
     """
 
-    primary_key: PrimaryKeyConstraint | None
-    column_types: dict[str, DataType]
+    primary_key: PrimaryKeyConstraint
+    columns_by_name: Mapping[Identifier, Column]
 
 
 class _NameReference(NamedTuple):
@@ -361,6 +514,106 @@ class _NameReference(NamedTuple):
 
     table: QualifiedName
     columns: Mapping[Identifier, Identifier]
+
+
+def _validate_reference_coherence(
+    owner: _NormalizedDeclaration,
+    referenced_table: QualifiedName,
+    declared: _ParentDeclaration,
+    pairs: tuple[tuple[Identifier, Identifier], ...],
+) -> None:
+    """
+    Judge column pairs, already in declared spelling, against the parent.
+
+    The referenced columns must be exactly the parent's primary key, and
+    each local column's data type must equal its referenced column's.
+    Columns that resolve to no declaration — local or referenced — are the
+    domain's to reject.
+    """
+    referenced_columns = tuple(referenced for _, referenced in pairs)
+    if not declared.primary_key.matches_columns(referenced_columns):
+        mapped = set(referenced_columns)
+        key = set(declared.primary_key.columns)
+        missing = sorted(key - mapped)
+        extra = sorted(mapped - key)
+        details = []
+        if missing:
+            details.append(f"missing from the mapping: {', '.join(missing)}")
+        if extra:
+            details.append(f"not in the key: {', '.join(extra)}")
+        raise ValueError(
+            f"foreign key columns must reference {referenced_table}'s"
+            f" primary key ({', '.join(declared.primary_key.columns)}) exactly;"
+            f" {'; '.join(details)}"
+        )
+
+    for local_name, referenced_name in pairs:
+        local_column = owner.columns_by_name.get(local_name)
+        if local_column is None:
+            continue  # local column existence is enforced when the DesiredTable is built
+        referenced_column = declared.columns_by_name.get(referenced_name)
+        if referenced_column is None:
+            # Only a Self parent can name a missing key column; the
+            # DesiredTable built right after rejects its primary key.
+            continue
+        if local_column.data_type != referenced_column.data_type:
+            raise ValueError(
+                f"foreign key column type mismatch: {owner.qualified_name}.{local_name}"
+                f" is {local_column.data_type} but {referenced_table}.{referenced_name}"
+                f" is {referenced_column.data_type}"
+            )
+
+
+def _lower_column_mapping(columns: Mapping[str, str]) -> Mapping[Identifier, Identifier]:
+    """Lower an explicit ``{local: referenced}`` mapping, rejecting duplicate locals."""
+    if not columns:
+        raise ValueError("foreign key columns must not be empty")
+    if not all(
+        isinstance(local, str) and isinstance(referenced, str)
+        for local, referenced in columns.items()
+    ):
+        raise TypeError("foreign key mapping keys and values must be strings")
+    lowered: dict[Identifier, Identifier] = {}
+    for local, referenced in columns.items():
+        local_identifier = Identifier(local)
+        if local_identifier in lowered:
+            raise ValueError(f"Duplicate foreign key local column: {local}")
+        lowered[local_identifier] = Identifier(referenced)
+    return MappingProxyType(lowered)
+
+
+def _lower_column_sequence(columns: ListOrTuple[str]) -> tuple[Identifier, ...]:
+    """Lower a same-name column list, rejecting duplicates by identifier."""
+    if not columns:
+        raise ValueError("foreign key columns must not be empty")
+    if not all(isinstance(column, str) for column in columns):
+        raise TypeError("foreign key columns must be strings")
+    lowered = tuple(Identifier(column) for column in columns)
+    seen: set[Identifier] = set()
+    for column in lowered:
+        if column in seen:
+            raise ValueError(f"Duplicate foreign key local column: {column}")
+        seen.add(column)
+    return lowered
+
+
+def _resolve_reference(
+    references: DeltaTable | _SelfReference | str,
+    lowered_columns: tuple[Identifier, ...] | Mapping[Identifier, Identifier],
+) -> _NameReference | DeltaTable | _SelfReference:
+    """Resolve the ``references`` argument into its internal form at construction."""
+    match references:
+        case str() as raw:
+            if not isinstance(lowered_columns, Mapping):
+                raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
+            return _NameReference(_parse_name_reference(raw), lowered_columns)
+        case DeltaTable() | _SelfReference():
+            return references
+        case _:
+            raise TypeError(
+                "foreign key references must be a DeltaTable, Self, or a"
+                f" 'catalog.schema.table' name; got {references!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,6 +641,14 @@ class ForeignKey:
     its primary-key and column-type checks happen when the sync judges the
     registered parent instead of at declaration time. Either way the
     referenced table must be part of the same sync.
+
+    Raises:
+        TypeError: ``columns`` or ``references`` is not one of the accepted
+            forms.
+        ValueError: ``columns`` is empty or repeats a local column, ``name``
+            is not a valid identifier, or a name reference is not a valid
+            ``catalog.schema.table`` name or lacks its explicit mapping.
+
     """
 
     columns: str | ListOrTuple[str] | Mapping[str, str]
@@ -404,34 +665,12 @@ class ForeignKey:
         frozen: tuple[str, ...] | Mapping[str, str]
         lowered: tuple[Identifier, ...] | Mapping[Identifier, Identifier]
         match self.columns:
-            case str():
-                frozen = (self.columns,)
-                lowered = (Identifier(self.columns),)
-            case Mapping():
-                mapping = dict(self.columns)
-                if not mapping:
-                    raise ValueError("foreign key columns must not be empty")
-                if not all(
-                    isinstance(local, str) and isinstance(referenced, str)
-                    for local, referenced in mapping.items()
-                ):
-                    raise TypeError("foreign key mapping keys and values must be strings")
-                lowered_mapping: dict[Identifier, Identifier] = {}
-                for local, referenced in mapping.items():
-                    local_identifier = Identifier(local)
-                    if local_identifier in lowered_mapping:
-                        raise ValueError(f"Duplicate foreign key local column: {local}")
-                    lowered_mapping[local_identifier] = Identifier(referenced)
-                frozen = MappingProxyType(mapping)
-                lowered = MappingProxyType(lowered_mapping)
-            case list() | tuple():
-                sequence = tuple(self.columns)
-                if not sequence:
-                    raise ValueError("foreign key columns must not be empty")
-                if not all(isinstance(column, str) for column in sequence):
-                    raise TypeError("foreign key columns must be strings")
-                frozen = sequence
-                lowered = tuple(Identifier(column) for column in sequence)
+            case str() as column_name:
+                frozen, lowered = (column_name,), (Identifier(column_name),)
+            case Mapping() as mapping:
+                frozen, lowered = MappingProxyType(dict(mapping)), _lower_column_mapping(mapping)
+            case list() | tuple() as sequence:
+                frozen, lowered = tuple(sequence), _lower_column_sequence(sequence)
             case _:
                 raise TypeError(
                     "foreign key columns must be a column name,"
@@ -440,121 +679,78 @@ class ForeignKey:
                 )
 
         if self.name is not None:
-            Identifier(self.name)
-
-        reference: _NameReference | DeltaTable | _SelfReference
-        match self.references:
-            case str() as raw:
-                if not isinstance(lowered, Mapping):
-                    raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-                reference = _NameReference(_parse_name_reference(raw), lowered)
-            case DeltaTable() | _SelfReference():
-                reference = self.references
-            case _:
-                raise TypeError(
-                    "foreign key references must be a DeltaTable, Self, or a"
-                    f" 'catalog.schema.table' name; got {self.references!r}"
-                )
+            Identifier(self.name)  # rejects an invalid physical name
 
         object.__setattr__(self, "columns", frozen)
         object.__setattr__(self, "_lowered_columns", lowered)
-        object.__setattr__(self, "_reference", reference)
+        object.__setattr__(self, "_reference", _resolve_reference(self.references, lowered))
 
     def _to_constraint(
         self,
-        owner_name: QualifiedName,
-        owner_columns: tuple[Column, ...],
+        owner: _NormalizedDeclaration,
         owner_primary_key: PrimaryKeyConstraint | None,
     ) -> ForeignKeyConstraint:
         """
         Lower this declaration into a domain constraint.
 
-        Runs every lowering rule whose inputs exist at lowering time. The
-        reference form decides what is available: a ``DeltaTable`` or
-        :data:`Self` supplies the parent's declaration (``Self`` reads it
-        from the owner), so the resolved parent columns must equal its
-        primary key exactly and each local column's data type must match its
-        referenced column's. A name reference supplies no declaration, so
-        those checks are the sync's. Every form's referenced table must live
-        in the owner's catalog. Local column existence is never checked here
-        — the ``DesiredTable`` built right after enforces it.
+        The match arms resolve the reference into the parent to judge
+        against; column pairs are then resolved to their declared spellings,
+        and the judgment itself is :func:`_validate_reference_coherence`.
+        A name reference supplies no declaration to judge, so its checks are
+        the sync's when the registered parent is read. Every form's
+        referenced table must live in the owner's catalog. Local column
+        existence is never checked here — the ``DesiredTable`` built right
+        after enforces it.
         """
-        # Identity maps canonicalize any spelling of a column name to its
-        # declared spelling: keys are Identifiers, so lookups are case-insensitive.
-        local_names: dict[str, str] = {column.name: column.name for column in owner_columns}
+        owner_name = owner.qualified_name
 
-        declared: _ParentDeclaration
+        declared_primary_key: PrimaryKeyConstraint | None
+        parent_columns: Mapping[Identifier, Column]
         match self._reference:
             case _NameReference(referenced_table, mapping):
                 _validate_same_catalog(owner_name, referenced_table)
                 return ForeignKeyConstraint(
-                    local_columns=tuple(local_names.get(local, local) for local in mapping),
+                    local_columns=tuple(
+                        _declared_spelling(owner.columns_by_name, local) for local in mapping
+                    ),
                     referenced_table=referenced_table,
                     referenced_columns=tuple(mapping.values()),
                     name=self.name,
                 )
             case _SelfReference():
                 referenced_table = owner_name
-                declared = _ParentDeclaration(
-                    owner_primary_key,
-                    {column.name: column.data_type for column in owner_columns},
-                )
+                declared_primary_key = owner_primary_key
+                parent_columns = owner.columns_by_name
             case DeltaTable() as parent:
                 desired = parent.to_desired_table()
                 referenced_table = desired.qualified_name
-                declared = _ParentDeclaration(
-                    desired.primary_key,
-                    {column.name: column.data_type for column in desired.columns},
+                declared_primary_key = desired.primary_key
+                parent_columns = MappingProxyType(
+                    {Identifier(column.name): column for column in desired.columns}
                 )
 
         _validate_same_catalog(owner_name, referenced_table)
-
-        primary_key = declared.primary_key
-        if primary_key is None:
+        if declared_primary_key is None:
             raise ValueError(
                 f"foreign key references {referenced_table}, which declares no primary key"
             )
+        declared = _ParentDeclaration(declared_primary_key, parent_columns)
 
-        pairs = self._resolve_column_pairs(referenced_table, primary_key)
-        referenced_names: dict[str, str] = {name: name for name in declared.column_types}
-        local_columns = tuple(local_names.get(local, local) for local, _ in pairs)
-        referenced_columns = tuple(referenced_names.get(parent, parent) for _, parent in pairs)
-
-        if not primary_key.matches_columns(referenced_columns):
-            mapped = set(referenced_columns)
-            key = set(primary_key.columns)
-            missing = sorted(key - mapped)
-            extra = sorted(mapped - key)
-            details = []
-            if missing:
-                details.append(f"missing from the mapping: {', '.join(missing)}")
-            if extra:
-                details.append(f"not in the key: {', '.join(extra)}")
-            raise ValueError(
-                f"foreign key columns must reference {referenced_table}'s"
-                f" primary key ({', '.join(primary_key.columns)}) exactly;"
-                f" {'; '.join(details)}"
+        pairs = tuple(
+            (
+                _declared_spelling(owner.columns_by_name, local),
+                _declared_spelling(declared.columns_by_name, referenced),
             )
-
-        local_types: dict[str, DataType] = {
-            column.name: column.data_type for column in owner_columns
-        }
-        for local_name, referenced_name in pairs:
-            local_type = local_types.get(local_name)
-            if local_type is None:
-                continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = declared.column_types[referenced_name]
-            if local_type != referenced_type:
-                raise ValueError(
-                    f"foreign key column type mismatch: {owner_name}.{local_name}"
-                    f" is {local_type} but {referenced_table}.{referenced_name}"
-                    f" is {referenced_type}"
-                )
+            for local, referenced in self._resolve_column_pairs(
+                referenced_table, declared.primary_key
+            )
+        )
+        _validate_reference_coherence(owner, referenced_table, declared, pairs)
 
         return ForeignKeyConstraint(
-            local_columns=local_columns,
+            local_columns=tuple(local for local, _ in pairs),
             referenced_table=referenced_table,
-            referenced_columns=referenced_columns,
+            referenced_columns=tuple(referenced for _, referenced in pairs),
             name=self.name,
         )
 
@@ -562,13 +758,13 @@ class ForeignKey:
         self,
         referenced_table: QualifiedName,
         primary_key: PrimaryKeyConstraint,
-    ) -> tuple[tuple[str, str], ...]:
+    ) -> tuple[tuple[Identifier, Identifier], ...]:
         """Resolve the declaration into explicit local-to-parent column pairs."""
         if isinstance(self._lowered_columns, Mapping):
             return tuple(self._lowered_columns.items())
 
         local_columns = self._lowered_columns
-        parent_columns = tuple(primary_key.columns)
+        parent_columns = tuple(Identifier(column) for column in primary_key.columns)
 
         # a single-column parent has only one possible pairing
         if len(local_columns) == 1 and len(parent_columns) == 1:
@@ -585,124 +781,21 @@ class ForeignKey:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _NormalizedDeclaration:
-    """One frozen representation of public ``DeltaTable`` input."""
-
-    qualified_name: QualifiedName
-    columns: tuple[Column, ...]
-    comment: str
-    properties: Mapping[str, str | None]
-    tags: Mapping[str, str]
-    partitioned_by: tuple[Identifier, ...]
-    clustered_by: tuple[Identifier, ...]
-    primary_key: tuple[Identifier, ...] | None
-    primary_key_name: Identifier | None
-    foreign_key_declarations: tuple[ForeignKey, ...]
-    scope: TableScope
-
-
-def _normalize_declaration(
-    *,
-    catalog: str,
-    schema: str,
-    name: str,
-    columns: Iterable[Column],
-    comment: str,
-    properties: Mapping[str, str | None] | None,
-    tags: Mapping[str, str] | None,
-    partitioned_by: ListOrTuple[str],
-    clustered_by: ListOrTuple[str],
-    primary_key: ListOrTuple[str] | None,
-    primary_key_name: str | None,
-    foreign_keys: Iterable[ForeignKey] | None,
-    scope: ScopeName,
-) -> _NormalizedDeclaration:
-    """Freeze public inputs before judging them."""
-    # Annotations are not enforced at runtime, so fail clearly rather than
-    # treating a bare string as an iterable of one-character column names.
-    string_collections: tuple[tuple[str, object], ...] = (
-        ("partitioned_by", partitioned_by),
-        ("clustered_by", clustered_by),
-        ("primary_key", primary_key),
-    )
-    for field_name, value in string_collections:
-        if isinstance(value, str):
-            raise TypeError(
-                f"{field_name} must be a list or tuple of column names, not a string;"
-                f" write {field_name}=[{value!r}] for one column"
-            )
-
-    if primary_key_name is not None:
-        if not isinstance(primary_key_name, str):
-            raise TypeError("primary_key_name must be a string or None")
-        if primary_key is None:
-            raise ValueError("primary_key_name requires primary_key")
-        if not primary_key_name.strip():
-            raise ValueError("primary_key_name must not be blank")
-
-    return _NormalizedDeclaration(
-        qualified_name=QualifiedName(catalog, schema, name),
-        columns=tuple(columns),
-        comment=comment,
-        properties=MappingProxyType(dict(properties or {})),
-        tags=MappingProxyType(dict(tags or {})),
-        partitioned_by=tuple(Identifier(name) for name in partitioned_by),
-        clustered_by=tuple(Identifier(name) for name in clustered_by),
-        primary_key=(
-            tuple(Identifier(name) for name in primary_key) if primary_key is not None else None
-        ),
-        primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
-        foreign_key_declarations=tuple(foreign_keys or ()),
-        scope=table_scope_for(scope),
-    )
-
-
-def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """Reject invalid frozen declarations before lowering."""
-    DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
-    _validate_layout(
-        declaration.columns,
-        declaration.partitioned_by,
-        declaration.clustered_by,
-    )
-    _validate_column_names(
-        declaration.columns,
-        declaration.properties,
-        declaration.scope,
-    )
-    _validate_renames(declaration.columns, declaration.properties)
-
-    _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
-    for column in declaration.columns:
-        _validate_tags(f"column '{column.name}'", column.tags)
-        _validate_nested_not_null(column)
-
-    _validate_object_name_parts(declaration.qualified_name)
+# ---------- Lowering ----------
 
 
 def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     """Lower a valid public declaration into the domain model."""
-    column_names = {column.name: column.name for column in declaration.columns}
-    primary_key_columns = (
-        [column_names.get(name, name) for name in declaration.primary_key]
+    primary_key_constraint = (
+        PrimaryKeyConstraint(
+            columns=declaration.primary_key,
+            name=declaration.primary_key_name,
+        )
         if declaration.primary_key is not None
         else None
     )
-    primary_key_constraint = (
-        PrimaryKeyConstraint(
-            columns=primary_key_columns,
-            name=declaration.primary_key_name,
-        )
-        if primary_key_columns is not None
-        else None
-    )
     foreign_keys = [
-        foreign_key._to_constraint(
-            declaration.qualified_name,
-            declaration.columns,
-            primary_key_constraint,
-        )
+        foreign_key._to_constraint(declaration, primary_key_constraint)
         for foreign_key in declaration.foreign_key_declarations
     ]
 
@@ -714,8 +807,8 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         comment=declaration.comment,
         properties=declaration.properties,
         tags=declaration.tags,
-        partitioned_by=[column_names.get(name, name) for name in declaration.partitioned_by],
-        clustered_by=[column_names.get(name, name) for name in declaration.clustered_by],
+        partitioned_by=declaration.partitioned_by,
+        clustered_by=declaration.clustered_by,
         primary_key=primary_key_constraint,
         foreign_keys=foreign_keys,
         scope=declaration.scope,
@@ -812,6 +905,14 @@ class DeltaTable:
                 applied, and mirroring it is what keeps it from reading as
                 drift. Properties are the exception: a declaration that does
                 not manage properties never compares them at all.
+
+        Raises:
+            TypeError: ``partitioned_by``, ``clustered_by``, or
+                ``primary_key`` is a bare string rather than a list or tuple
+                of column names, or ``primary_key_name`` is not a string.
+            ValueError: The declaration cannot deploy as declared: an
+                invalid name, column, layout, property, tag, primary key,
+                foreign key, or scope.
 
         """
         declaration = _normalize_declaration(

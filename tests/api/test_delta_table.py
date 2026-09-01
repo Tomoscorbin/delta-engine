@@ -743,13 +743,24 @@ def test_foreign_key_name_rejects_invalid_values(
             ValueError,
             id="case-duplicate-mapping-keys",
         ),
+        pytest.param(
+            ["customer_id", "customer_id"],
+            ValueError,
+            id="duplicate-sequence-entries",
+        ),
+        pytest.param(
+            ["customer_id", "CUSTOMER_ID"],
+            ValueError,
+            id="case-duplicate-sequence-entries",
+        ),
     ],
 )
 def test_foreign_key_rejects_invalid_column_input(
     columns: object,
     expected_error: type[Exception],
 ) -> None:
-    # When column syntax is invalid, then ForeignKey rejects it without needing an owner
+    # When the column input is invalid
+    # Then ForeignKey rejects it without needing an owner
     with pytest.raises(expected_error):
         ForeignKey(
             columns=columns,  # type: ignore[arg-type]
@@ -1852,6 +1863,26 @@ def test_self_referential_foreign_key_rejects_type_mismatch():
             ],
             primary_key=["id"],
             foreign_keys=[ForeignKey(columns={"manager_id": "id"}, references=Self)],
+        )
+
+
+def test_self_referential_foreign_key_with_nonexistent_primary_key_column_is_rejected() -> None:
+    # Given a primary key naming a column the table does not declare
+    columns = [
+        Column("id", Integer(), nullable=False),
+        Column("manager_id", Integer()),
+    ]
+
+    # When the table also declares a self-referential foreign key against that key
+    # Then the declaration is rejected with a ValueError, not an internal error
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="employees",
+            columns=columns,
+            primary_key=["ghost"],
+            foreign_keys=[ForeignKey(columns="manager_id", references=Self)],
         )
 
 
