@@ -1,3 +1,23 @@
+## v0.13.0 (2026-09-01)
+
+### Feat
+
+- **lint**: add per-table policy overrides (#387)
+- **lint**: add naming-convention rule (#379)
+
+### Fix
+
+- hash every ForeignKey column form (#380)
+
+### Refactor
+
+- drop redundant ceremony from the plan package (#388)
+- raise TypeError for wrong-kind arguments in the domain model (#386)
+- check "column must exist" one way in table validation (#385)
+- store primary key columns in canonical order (#384)
+- store ForeignKey columns once, as identifiers (#382)
+- reorganise delta_table validation around a context taxonomy (#377)
+
 ## v0.12.0 (2026-08-29)
 
 ### Feat
