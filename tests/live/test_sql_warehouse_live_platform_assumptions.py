@@ -6,6 +6,8 @@ locally: if a runtime upgrade changes one, the corresponding gate is either
 over-blocking or under-blocking and needs revisiting.
 """
 
+import re
+
 import pytest
 
 pytest.importorskip("databricks.sql")
@@ -28,18 +30,22 @@ def test_cdf_enablement_fails_on_a_table_carrying_reserved_cdf_columns(
     # The API refuses declarations that combine change data feed with
     # _change_type/_commit_version/_commit_timestamp columns because the
     # platform enforces the same rule at enablement time.
+
+    # Given a live table already carrying a reserved CDF column
     table_name = live_tables("cdf_reserved")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (id INT, _change_type STRING) USING DELTA",
     )
 
-    with pytest.raises(ServerOperationError, match="DELTA_TABLE_ALREADY_CONTAINS_CDC_COLUMNS"):
+    # Then enabling change data feed on it is rejected for that reason
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} "
             "SET TBLPROPERTIES ('delta.enableChangeDataFeed'='true')",
         )
+    assert "DELTA_TABLE_ALREADY_CONTAINS_CDC_COLUMNS" in str(error.value)
 
 
 def test_special_characters_in_nested_struct_field_names_require_column_mapping(
@@ -52,14 +58,18 @@ def test_special_characters_in_nested_struct_field_names_require_column_mapping(
     # not round-trip such tables yet: the reader cannot parse the unquoted
     # DDL rendering `struct<bad name:int>`; see the todo on special-character
     # field names.)
+    # Then creating a special-character nested field without column mapping
+    # is rejected for that reason
     rejected_name = live_tables("nested_plain")
-    with pytest.raises(ServerOperationError, match="DELTA_INVALID_CHARACTERS_IN_COLUMN_NAMES"):
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"CREATE TABLE {qualified_table(rejected_name)} "
             "(s STRUCT<`bad name`: INT>) USING DELTA",
         )
+    assert "DELTA_INVALID_CHARACTERS_IN_COLUMN_NAMES" in str(error.value)
 
+    # Then the same field with column mapping on is accepted and observable
     accepted_name = live_tables("nested_mapped")
     execute_sql(
         live_connection,
@@ -80,6 +90,8 @@ def test_platform_rename_silently_drops_keys_including_other_tables_foreign_keys
     # This is the hazard behind PrimaryKeyReferencedByForeignKeys and the
     # reason plans state key drops explicitly instead of relying on the
     # rename: if this ever stops cascading, those become merely redundant.
+
+    # Given a parent primary key referenced by another table's foreign key
     parent_name = live_tables("cascade_parent")
     child_name = live_tables("cascade_child")
     execute_sql(
@@ -95,11 +107,13 @@ def test_platform_rename_silently_drops_keys_including_other_tables_foreign_keys
         f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
     )
 
+    # When renaming the key column directly
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(parent_name)} RENAME COLUMN id TO account_id",
     )
 
+    # Then both the primary key and the other table's foreign key silently vanished
     assert read_live_table(live_connection, parent_name)["primary_key"] == ()
     assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
 
@@ -112,6 +126,8 @@ def test_platform_restricts_a_primary_key_drop_while_a_foreign_key_references_it
     # it. This is the engine's fail-closed net: an inbound FK the reader
     # could not observe (e.g. cross-catalog) fails the compiled drop, and
     # execution stops before the rename can cascade.
+
+    # Given a parent primary key referenced by another table's foreign key
     parent_name = live_tables("restrict_parent")
     child_name = live_tables("restrict_child")
     execute_sql(
@@ -126,12 +142,14 @@ def test_platform_restricts_a_primary_key_drop_while_a_foreign_key_references_it
         f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
     )
 
-    with pytest.raises(ServerOperationError, match="child constraints"):
+    # Then DROP PRIMARY KEY is restricted by the child constraint and the
+    # key survives
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(parent_name)} DROP PRIMARY KEY IF EXISTS",
         )
-
+    assert "child constraints" in str(error.value)
     assert read_live_table(live_connection, parent_name)["primary_key"] == ("id",)
 
 
@@ -141,6 +159,8 @@ def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
     """Databricks blocks renaming a column a CHECK constraint references."""
     # The engine does not model CHECK constraints; renames of referenced
     # columns are documented to fail at execution rather than validation.
+
+    # Given a column referenced by a CHECK constraint
     table_name = live_tables("check_dependent")
     execute_sql(
         live_connection,
@@ -153,11 +173,13 @@ def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
         f"ADD CONSTRAINT {table_name}_positive CHECK (amount > 0)",
     )
 
-    with pytest.raises(ServerOperationError, match="DELTA_CONSTRAINT_DEPENDENT_COLUMN_CHANGE"):
+    # Then renaming the column is rejected for the constraint dependency
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} RENAME COLUMN amount TO amt",
         )
+    assert "DELTA_CONSTRAINT_DEPENDENT_COLUMN_CHANGE" in str(error.value)
 
 
 def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_tables):
@@ -165,6 +187,8 @@ def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_t
     # PartitioningChangeNotSupported blocks partitioned->clustered
     # conversions; the platform refuses the direct conversion too, so the
     # engine is not withholding a supported operation.
+
+    # Given a partitioned live table
     table_name = live_tables("part_to_cluster")
     execute_sql(
         live_connection,
@@ -172,14 +196,13 @@ def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_t
         "(id INT, region STRING) USING DELTA PARTITIONED BY (region)",
     )
 
-    with pytest.raises(
-        ServerOperationError,
-        match="CLUSTER_BY_ON_PARTITIONED_TABLE",
-    ):
+    # Then clustering it is rejected for that reason
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} CLUSTER BY (`id`)",
         )
+    assert "CLUSTER_BY_ON_PARTITIONED_TABLE" in str(error.value)
 
 
 def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, live_tables):
@@ -189,28 +212,33 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
     # api/delta_table.py (_validate_tags), which reject both at declaration
     # time; before it was confirmed the value gate allowed 1000 characters and
     # there was no key gate at all.
+
+    # Given a live table and a 300-character string
     table_name = live_tables("tag_length")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (id INT) USING DELTA",
     )
     over_long = "x" * 300
+    length_complaint = re.compile(r"(?i)length|character|exceed")
 
-    # A 300-character tag value (short key).
-    with pytest.raises(ServerOperationError, match=r"(?i)length|character|exceed"):
+    # Then an over-long tag value (short key) is rejected for its length
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} ALTER COLUMN id "
             f"SET TAGS ('team'='{over_long}')",
         )
+    assert length_complaint.search(str(error.value))
 
-    # A 300-character tag key (short value).
-    with pytest.raises(ServerOperationError, match=r"(?i)length|character|exceed"):
+    # Then an over-long tag key (short value) is rejected for its length
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} ALTER COLUMN id "
             f"SET TAGS ('{over_long}'='prod')",
         )
+    assert length_complaint.search(str(error.value))
 
 
 def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, live_tables):
@@ -225,13 +253,16 @@ def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, 
     # complex-type category. Clustering is a distinct backend rule with a
     # narrower type list (_TYPES_UNUSABLE_AS_CLUSTERING_KEYS also excludes
     # Boolean and Binary), not pinned here.
+    # Then creating a table partitioned by an array column is rejected for
+    # that reason
     array_name = live_tables("partition_array")
-    with pytest.raises(ServerOperationError, match="INVALID_PARTITION_COLUMN_DATA_TYPE"):
+    with pytest.raises(ServerOperationError) as error:
         execute_sql(
             live_connection,
             f"CREATE TABLE {qualified_table(array_name)} "
             "(id INT, labels ARRAY<INT>) USING DELTA PARTITIONED BY (labels)",
         )
+    assert "INVALID_PARTITION_COLUMN_DATA_TYPE" in str(error.value)
 
 
 def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection, live_tables):
@@ -242,12 +273,17 @@ def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection
     # lowers to itself but casefolds to 'ss' — a different identifier). If
     # either assertion fails, the engine's canonical form has diverged from
     # what the platform stores.
+
+    # Given an uppercase non-ASCII declared table name
     declared = live_tables("GRÖßE")
+
+    # When creating the table
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(declared)} (id INT) USING DELTA",
     )
 
+    # Then the stored name is the Python str.lower, not the casefold
     assert table_exists(live_connection, declared.lower())
     assert not table_exists(live_connection, declared.casefold())
 
@@ -260,12 +296,15 @@ def test_platform_preserves_column_display_case(live_connection, live_tables):
     # lowercase), so an engine-created column displays in its declared casing;
     # the Identifier's case-insensitive identity is what lets the diff treat
     # case-variant spellings as the same column.
+
+    # Given a table created with a camelCase column
     table_name = live_tables("column_case")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (`MyCol` INT) USING DELTA",
     )
 
+    # Then DESCRIBE echoes the creator's casing back
     rows = fetch_rows(live_connection, f"DESCRIBE TABLE {qualified_table(table_name)}")
     assert rows[0]["col_name"] == "MyCol"
 
@@ -277,18 +316,22 @@ def test_platform_resolves_column_references_case_insensitively(live_connection,
     # them interchangeably. (The managed-constraint path is the exception: it
     # needs the exact catalog spelling — pinned directly below; the engine's
     # use of observed spelling is pinned in test_sql_warehouse_live_constraints.)
+
+    # Given a live camelCase column
     table_name = live_tables("column_case_raw_alter")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING) USING DELTA",
     )
 
+    # When altering it through an all-lowercase reference
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(table_name)} "
         "ALTER COLUMN `requestid` COMMENT 'resolved through lowercase'",
     )
 
+    # Then the reference resolved and the stored spelling is untouched
     [column] = read_live_table(live_connection, table_name)["columns"]
     assert column["column_name"] == "requestId"
     assert column["comment"] == "resolved through lowercase"
@@ -303,13 +346,15 @@ def test_platform_requires_exact_case_for_primary_key_constraint_columns(
     # spell an existing constraint column exactly as the catalog does. If this
     # pin ever fails — the platform accepting `requestid` against a physical
     # `requestId` — constraint actions no longer need observed spelling.
+
+    # Given a live camelCase column
     table_name = live_tables("pk_case_sensitivity")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
     )
 
-    # A mis-cased key column is rejected...
+    # Then a mis-cased key column is rejected...
     with pytest.raises(ServerOperationError):
         execute_sql(
             live_connection,
@@ -317,7 +362,7 @@ def test_platform_requires_exact_case_for_primary_key_constraint_columns(
             f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestid`)",
         )
 
-    # ...while the exact catalog spelling is accepted.
+    # Then the exact catalog spelling is accepted
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(table_name)} "
@@ -336,6 +381,8 @@ def test_platform_requires_exact_case_for_foreign_key_constraint_columns(
     # platform accepted `orderid` against the parent's physical `orderId`,
     # declared spelling would suffice on the referenced side and the
     # cross-table adoption pass would be unnecessary.
+
+    # Given live camelCase parent and child columns
     parent_name = live_tables("fk_case_parent")
     child_name = live_tables("fk_case_child")
     execute_sql(
@@ -349,7 +396,7 @@ def test_platform_requires_exact_case_for_foreign_key_constraint_columns(
         f"CREATE TABLE {qualified_table(child_name)} (`orderRef` STRING) USING DELTA",
     )
 
-    # A mis-cased referenced column is rejected...
+    # Then a mis-cased referenced column is rejected...
     with pytest.raises(ServerOperationError):
         execute_sql(
             live_connection,
@@ -367,8 +414,8 @@ def test_platform_requires_exact_case_for_foreign_key_constraint_columns(
             f"REFERENCES {qualified_table(parent_name)} (`orderId`)",
         )
 
-    # ...while the exact catalog spelling on both sides is accepted. This
-    # control certifies the rejections above were about case, not setup.
+    # Then the exact catalog spelling on both sides is accepted — this
+    # control certifies the rejections above were about case, not setup
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(child_name)} "

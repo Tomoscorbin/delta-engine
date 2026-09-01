@@ -32,6 +32,7 @@ from tests.live.sql_warehouse_live_helpers import (
 
 def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
     """Adds, widens to composite, and drops a primary key across successive syncs."""
+    # Given a synced table with no primary key
     table_name = live_tables("pk_lifecycle")
     columns = (
         Column("tenant_id", Integer(), nullable=False),
@@ -42,15 +43,19 @@ def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
     engine.sync(DeltaTable(live_catalog(), live_schema(), table_name, columns=columns))
     assert read_live_table(live_connection, table_name)["primary_key"] == ()
 
+    # When syncing a single-column key
     single_key = DeltaTable(
         live_catalog(), live_schema(), table_name, columns=columns, primary_key=("id",)
     )
     engine.sync(single_key)
+
+    # Then the key is observed with a physical name and the sync converged
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("id",)
     assert isinstance(state["primary_key_name"], str) and state["primary_key_name"]
     assert engine.sync(single_key).has_changes is False
 
+    # When widening the key to a composite
     engine.sync(
         DeltaTable(
             live_catalog(),
@@ -60,12 +65,17 @@ def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
             primary_key=("tenant_id", "id"),
         )
     )
+
+    # Then both members are observed
     assert read_live_table(live_connection, table_name)["primary_key"] == (
         "id",
         "tenant_id",
     )
 
+    # When syncing with no key declared
     engine.sync(DeltaTable(live_catalog(), live_schema(), table_name, columns=columns))
+
+    # Then the key is dropped
     assert read_live_table(live_connection, table_name)["primary_key"] == ()
 
 
@@ -73,6 +83,7 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
     live_connection, live_tables
 ):
     """Creates a composite foreign key parent-first from reversed input, then drops it."""
+    # Given a child declaring a composite foreign key to its parent
     parent_name = live_tables("accounts")
     child_name = live_tables("orders")
     parent_columns = (
@@ -107,9 +118,11 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
     )
     engine = build_sql_engine(live_connection)
 
-    # Reverse input is deliberate: dependency resolution must still create the parent first.
+    # When syncing with the child listed first — dependency resolution must
+    # still create the parent first
     engine.sync(child, parent)
 
+    # Then both keys exist, the composite pairs are intact, and the sync converged
     assert read_live_table(live_connection, parent_name)["primary_key"] == (
         "account_id",
         "tenant_id",
@@ -124,6 +137,7 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
     )
     assert engine.sync(child, parent).has_changes is False
 
+    # When the declarations drop first the foreign key, then the primary key
     child_without_fk = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -132,17 +146,19 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
         primary_key=("id",),
     )
     engine.sync(child_without_fk)
-    assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
-
     parent_without_pk = DeltaTable(
         live_catalog(), live_schema(), parent_name, columns=parent_columns
     )
     engine.sync(parent_without_pk)
+
+    # Then both constraints are gone
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
     assert read_live_table(live_connection, parent_name)["primary_key"] == ()
 
 
 def test_sync_creates_self_referential_foreign_key(live_connection, live_tables):
     """Creates a self-referential foreign key on a single table."""
+    # Given a declaration whose foreign key references Self
     table_name = live_tables("employees")
     table = DeltaTable(
         live_catalog(),
@@ -156,8 +172,10 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
         foreign_keys=(ForeignKey(columns={"manager_id": "id"}, references=Self),),
     )
 
+    # When syncing the single table
     build_sql_engine(live_connection).sync(table)
 
+    # Then the catalog holds a named foreign key back onto the table itself
     [(constraint_name, local_column, referenced_table, referenced_column)] = read_live_table(
         live_connection, table_name
     )["foreign_keys"]
@@ -214,6 +232,9 @@ def test_unnamed_declarations_adopt_existing_constraint_names(live_connection, l
 def test_explicit_primary_key_name_is_only_used_when_creating_the_constraint(
     live_connection, live_tables
 ):
+    """An explicit key name does not rename an existing matching constraint."""
+    # Given a live primary key under an old name and a matching declaration
+    # requesting a different name
     table_name = live_tables("creation_only_pk_name")
     old_name = f"{table_name}_old_pk"
     new_name = f"{table_name}_business_key"
@@ -231,8 +252,10 @@ def test_explicit_primary_key_name_is_only_used_when_creating_the_constraint(
         primary_key_name=new_name,
     )
 
+    # When syncing the declaration
     report = build_sql_engine(live_connection).sync(declaration)
 
+    # Then nothing changes: the existing constraint keeps the old name
     assert report.has_failures is False
     assert report.has_changes is False
     assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name.lower()
@@ -246,6 +269,8 @@ def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_
     # information_schema does not retain display spelling and DROP CONSTRAINT
     # is case-sensitive. This asymmetry makes observed physical identity
     # distinct from the user's naming intent.
+
+    # Given live keys created under camelCase custom names
     parent_name = live_tables("custom_name_parent")
     child_name = live_tables("custom_name_child")
     primary_key_name = f"{parent_name}_CustomPk"
@@ -262,12 +287,14 @@ def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_
         f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
     )
 
+    # Then the catalog stores both names lowercased
     parent = read_live_table(live_connection, parent_name)
     child = read_live_table(live_connection, child_name)
     assert parent["primary_key_name"] == primary_key_name.lower()
     assert child["foreign_keys"] == ((foreign_key_name.lower(), "parent_id", parent_name, "id"),)
 
-    # IF EXISTS hides the case mismatch as an absent constraint: the FK stays.
+    # Then a wrong-case named drop is a no-op: IF EXISTS hides the case
+    # mismatch as an absent constraint and the FK stays
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(child_name)} "
@@ -277,8 +304,8 @@ def test_platform_lowercases_custom_constraint_names_and_requires_that_case_for_
         (foreign_key_name.lower(), "parent_id", parent_name, "id"),
     )
 
-    # The observed catalog spelling succeeds, as does the engine's
-    # name-independent DROP PRIMARY KEY form for the custom-named PK.
+    # Then the observed catalog spelling succeeds, as does the engine's
+    # name-independent DROP PRIMARY KEY form for the custom-named PK
     execute_sql(
         live_connection,
         f"ALTER TABLE {qualified_table(child_name)} "
@@ -298,6 +325,8 @@ def test_platform_generates_names_for_unnamed_primary_and_foreign_keys(
     """Databricks accepts unnamed keys and exposes the generated names in the catalog."""
     # Generated-name shape and stability are deliberately not part of the
     # engine's contract.
+
+    # Given keys created without constraint names
     parent_name = live_tables("unnamed_parent")
     child_name = live_tables("unnamed_child")
     execute_sql(
@@ -312,6 +341,7 @@ def test_platform_generates_names_for_unnamed_primary_and_foreign_keys(
         f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
     )
 
+    # Then the catalog exposes distinct generated names for both constraints
     primary_key_name = read_live_table(live_connection, parent_name)["primary_key_name"]
     [(foreign_key_name, local_column, referenced_table, referenced_column)] = read_live_table(
         live_connection, child_name
@@ -328,6 +358,7 @@ def test_platform_uses_one_case_insensitive_constraint_name_namespace_per_schema
     live_connection, live_tables
 ):
     """PK and FK names on different tables still collide case-insensitively within a schema."""
+    # Given a primary key holding a custom name in the schema
     parent_name = live_tables("constraint_namespace_parent")
     child_name = live_tables("constraint_namespace_child")
     shared_name = f"{parent_name}_SharedConstraint"
@@ -341,8 +372,9 @@ def test_platform_uses_one_case_insensitive_constraint_name_namespace_per_schema
         f"CREATE TABLE {qualified_table(child_name)} (parent_id INT) USING DELTA",
     )
 
-    # The conflicting name belongs to a different constraint kind and table;
-    # swapped case proves the namespace compares identifiers, not raw strings.
+    # Then reusing the name for a different constraint kind on a different
+    # table fails; swapped case proves the namespace compares identifiers,
+    # not raw strings
     with pytest.raises(ServerOperationError):
         execute_sql(
             live_connection,
@@ -356,6 +388,7 @@ def test_platform_uses_one_case_insensitive_constraint_name_namespace_per_schema
 
 def test_platform_does_not_offer_a_direct_constraint_rename_clause(live_connection, live_tables):
     """Constraint names change only by dropping and recreating the constraint."""
+    # Given a live primary key under a custom name
     table_name = live_tables("constraint_rename")
     old_name = f"{table_name}_OldPk"
     new_name = f"{table_name}_NewPk"
@@ -365,13 +398,13 @@ def test_platform_does_not_offer_a_direct_constraint_rename_clause(live_connecti
         f"(id INT NOT NULL, CONSTRAINT `{old_name}` PRIMARY KEY (id)) USING DELTA",
     )
 
+    # Then RENAME CONSTRAINT is rejected and the old name survives
     with pytest.raises(ServerOperationError):
         execute_sql(
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} "
             f"RENAME CONSTRAINT `{old_name}` TO `{new_name}`",
         )
-
     assert read_live_table(live_connection, table_name)["primary_key_name"] == old_name.lower()
 
 
@@ -379,7 +412,7 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     live_connection, live_tables
 ):
     """Drops a primary key even while a UNIQUE constraint outside the model backs an FK."""
-    # given a parent whose primary key has no referencing foreign keys, but
+    # Given a parent whose primary key has no referencing foreign keys, but
     # whose UNIQUE constraint backs one (UNIQUE constraints are DBR 18.2+
     # Public Preview and outside the engine's model)
     parent_name = live_tables("uq_parent")
@@ -419,10 +452,10 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     }
     assert constraint_types == {"PRIMARY KEY", "UNIQUE"}
 
-    # when the declaration drops the primary key
+    # When the declaration drops the primary key
     engine.sync(DeltaTable(live_catalog(), live_schema(), parent_name, columns=parent_columns))
 
-    # then the unique-backed foreign key neither blocked the drop nor was harmed
+    # Then the unique-backed foreign key neither blocked the drop nor was harmed
     assert read_live_table(live_connection, parent_name)["primary_key"] == ()
     assert read_live_table(live_connection, child_name)["foreign_keys"] == (
         (f"{child_name}_fk", "parent_email", parent_name, "email"),

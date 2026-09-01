@@ -1,5 +1,9 @@
 """Live round trip for declaration generation: create, generate, diff clean."""
 
+import pytest
+
+pytest.importorskip("databricks.sql")
+
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.application.ports import TablePresent
 from delta_engine.databricks import build_reader

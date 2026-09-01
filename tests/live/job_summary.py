@@ -35,6 +35,10 @@ LIVE_AREAS: dict[str, tuple[str, str]] = {
         "Scoped ownership",
         "metadata-only and tags-only declarations change nothing outside their scope",
     ),
+    "test_sql_warehouse_live_streaming_tables.py": (
+        "Streaming tables",
+        "annotations are managed through the engine; wider scopes are refused",
+    ),
     "test_sql_warehouse_live_types_and_layout.py": (
         "Types & layout",
         "every column type round-trips; widening, partitioning, and clustering",
@@ -42,6 +46,18 @@ LIVE_AREAS: dict[str, tuple[str, str]] = {
     "test_sql_warehouse_live_renames.py": (
         "Column renames",
         "data, tags, comments, and layout travel; keys are replaced; ambiguity is rejected",
+    ),
+    "test_sql_warehouse_live_supported_relations.py": (
+        "Relation acceptance",
+        "views and non-Delta relations fail the read instead of being managed",
+    ),
+    "test_sql_warehouse_live_generate.py": (
+        "Declaration generation",
+        "a generated module plans no changes against its source table",
+    ),
+    "test_sql_warehouse_live_variable_substitution.py": (
+        "Variable expressions",
+        "${...} stays literal through the connector and a convergent sync",
     ),
     "test_sql_warehouse_live_platform_assumptions.py": (
         "Platform assumptions",

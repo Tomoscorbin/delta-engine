@@ -106,26 +106,30 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     # Every pin below shares one provisioned table: the reported key, the read,
     # the round-trip, the convergence resync, the wider-scope refusal, and the
     # clear (see the module docstring on the pipeline quota).
+
+    # Given a pipeline-owned streaming table carrying a key and a seeded tag
     table_name = _create_streaming_table(live_connection, live_tables)
     execute_sql(
         live_connection,
         f"ALTER STREAMING TABLE {qualified_table(table_name)} SET TAGS ('old'='remove-me')",
     )
 
-    # The key the defining SQL declared is reported, not merely accepted. This
+    # Then the key the defining SQL declared is reported, not merely accepted. This
     # corrects the 2026-07-16 assumption that streaming tables return no
     # constraints, and it is what makes mirroring the right advice: were the key
     # unreported, a declaration that mirrored it would emit SetPrimaryKey and
     # fail as unmanaged drift instead of matching.
     assert read_live_table(live_connection, table_name)["primary_key"] == ("id",)
 
-    # The kind is discovered, never declared: the engine reads a streaming table
-    # as state to diff against rather than failing the read.
+    # Then the kind is discovered, never declared: the engine reads a streaming
+    # table as state to diff against rather than failing the read.
     reader = WarehouseReader(WarehouseSqlRunner(live_connection))
     state = reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
     assert isinstance(state, TablePresent), state
     assert state.table.kind is TableKind.STREAMING_TABLE
 
+    # When syncing an annotations-scoped declaration that mirrors the key
+    # and annotates the table and column
     engine = build_sql_engine(live_connection)
     annotated_column = Column(
         "id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}
@@ -144,8 +148,8 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     )
     engine.sync(declaration)
 
-    # Every statement form the engine compiles against a streaming table takes
-    # effect: SET TAGS at both levels, UNSET TAGS for the seeded tag this
+    # Then every statement form the engine compiles against a streaming table
+    # takes effect: SET TAGS at both levels, UNSET TAGS for the seeded tag this
     # declaration drops, the ALTER STREAMING TABLE column-comment clause, and
     # kind-independent COMMENT ON.
     annotated = read_live_table(live_connection, table_name)
@@ -154,16 +158,16 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     assert annotated["table_tags"] == table_tags
     assert annotated["column_tags"] == {("id", "pii"): "low"}
 
-    # The reader must round-trip everything the executor just wrote: a resync
+    # Then the reader round-trips everything the executor just wrote: a resync
     # finds nothing left to do. This is also what verifies the mirroring
     # contract — had the platform not reported the pipeline's key, mirroring it
     # would have emitted SetPrimaryKey and failed UnmanagedAspectDrift instead
     # of converging.
     assert engine.sync(declaration).has_changes is False
 
-    # Anything wider than annotations is refused before planning — even when
-    # the declaration mirrors the observed state exactly, so the refusal is
-    # about the table's kind, not about drift.
+    # Then anything wider than annotations is refused before planning — even
+    # when the declaration mirrors the observed state exactly, so the refusal
+    # is about the table's kind, not about drift.
     wider_scopes: tuple[ScopeName, ...] = ("metadata", "full")
     for scope in wider_scopes:
         wider_declaration = DeltaTable(
@@ -194,10 +198,10 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
         assert refused["column_tags"] == {("id", "pii"): "low"}
         assert refused["primary_key"] == ("id",)
 
-    # Clearing is the other half of managing an aspect, and the half with a
-    # platform quirk: an empty desired comment compiles to COMMENT '' rather
-    # than UNSET COMMENT, which SQL warehouses reject. The resync converging is
-    # what proves '' comes back as the empty comment the reader observes.
+    # When syncing a declaration that clears every annotation — the other
+    # half of managing an aspect, and the half with a platform quirk: an
+    # empty desired comment compiles to COMMENT '' rather than UNSET
+    # COMMENT, which SQL warehouses reject
     cleared = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -208,6 +212,8 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     )
     engine.sync(cleared)
 
+    # Then every annotation is emptied and the resync converges, proving ''
+    # comes back as the empty comment the reader observes
     emptied = read_live_table(live_connection, table_name)
     assert emptied["comment"] == ""
     assert [column["comment"] for column in emptied["columns"]] == [""]

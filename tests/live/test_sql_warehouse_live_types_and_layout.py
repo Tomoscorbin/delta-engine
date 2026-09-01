@@ -50,6 +50,7 @@ def _types(state) -> dict[str, str]:
 
 def test_sync_creates_and_round_trips_every_supported_column_type(live_connection, live_tables):
     """Every supported column type, including nested and parameterised ones, round-trips."""
+    # Given a declaration with one column per supported type
     table_name = live_tables("types")
     table = DeltaTable(
         live_catalog(),
@@ -92,9 +93,11 @@ def test_sync_creates_and_round_trips_every_supported_column_type(live_connectio
         ),
     )
 
+    # When syncing it into the live catalog
     engine = build_sql_engine(live_connection)
     engine.sync(table)
 
+    # Then every type is stored under its expected catalog rendering
     assert _types(read_live_table(live_connection, table_name)) == {
         "tiny": "tinyint",
         "small": "smallint",
@@ -114,16 +117,17 @@ def test_sync_creates_and_round_trips_every_supported_column_type(live_connectio
         "map_value": "map<string,bigint>",
         "struct_value": "struct<name:string,location:struct<latitude:double,longitude:double>>",
     }
-    # Creation is only half the round trip: the reader must parse every nested
-    # and parameterised type — array<int>, map<string,bigint>, the nested
-    # struct, decimal(18,4), variant — back into a domain type equal to the
-    # declaration, or the table would re-diff forever. A converged resync
-    # proves the whole type surface round-trips through the engine's reader.
+    # Then a resync converges — creation is only half the round trip: the
+    # reader must parse every nested and parameterised type — array<int>,
+    # map<string,bigint>, the nested struct, decimal(18,4), variant — back
+    # into a domain type equal to the declaration, or the table would
+    # re-diff forever
     assert engine.sync(table).has_changes is False
 
 
 def test_reader_rejects_non_default_string_collation(live_connection, live_tables):
     """A real non-default STRING collation fails closed at the catalog read boundary."""
+    # Given a live table whose STRING column carries a non-default collation
     table_name = live_tables("collation")
     execute_sql(
         live_connection,
@@ -131,6 +135,7 @@ def test_reader_rejects_non_default_string_collation(live_connection, live_table
     )
     reader = WarehouseReader(WarehouseSqlRunner(live_connection))
 
+    # Then reading it fails closed, naming the collation
     with pytest.raises(ReadError) as exc_info:
         reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
 
@@ -140,6 +145,7 @@ def test_reader_rejects_non_default_string_collation(live_connection, live_table
 
 def test_sync_creates_every_managed_table_property(live_connection, live_tables):
     """Every managed table property is written and read back on creation."""
+    # Given a declaration setting every managed property
     table_name = live_tables("properties")
     declared = {
         Property.COLUMN_MAPPING_MODE: "name",
@@ -150,6 +156,7 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
         Property.TYPE_WIDENING: "false",
     }
 
+    # When syncing it into the live catalog
     build_sql_engine(live_connection).sync(
         DeltaTable(
             live_catalog(),
@@ -160,6 +167,7 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
         )
     )
 
+    # Then every declared property reads back with its declared value
     properties = read_live_table(live_connection, table_name)["properties"]
     assert {property_name: properties[property_name] for property_name in declared} == declared
 
@@ -169,6 +177,8 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
     # Property-policy admission: a key belongs in the managed set only
     # if Databricks does not auto-write it, otherwise every undeclared table
     # would fail validation on resync.
+
+    # Given a table created with no properties declared
     table_name = live_tables("fresh_properties")
     build_sql_engine(live_connection).sync(
         DeltaTable(
@@ -179,6 +189,7 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
         )
     )
 
+    # Then the platform wrote none of the managed keys
     properties = read_live_table(live_connection, table_name)["properties"]
     assert not set(properties) & {str(key) for key in Property}
 
@@ -187,6 +198,8 @@ def test_unmanaged_properties_are_invisible_to_a_full_sync(live_connection, live
     """Unmanaged properties are neither drift nor unset on a full sync."""
     # The reader filters unmanaged keys out of observed state, so keys
     # owned by other tooling or the platform are neither drift nor unset.
+
+    # Given a synced table with an unmanaged property set behind the engine's back
     table_name = live_tables("custom_properties")
     declaration = DeltaTable(
         live_catalog(),
@@ -201,8 +214,10 @@ def test_unmanaged_properties_are_invisible_to_a_full_sync(live_connection, live
         f"ALTER TABLE {qualified_table(table_name)} SET TBLPROPERTIES ('team.owner'='governance')",
     )
 
+    # When resyncing the original declaration
     report = engine.sync(declaration)
 
+    # Then the sync sees no drift and the unmanaged property survives
     assert report.has_failures is False
     assert report.has_changes is False
     assert read_live_table(live_connection, table_name)["properties"]["team.owner"] == "governance"
@@ -213,6 +228,8 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
     # The engine does not model platform restrictions on which column roles
     # may widen; Unity Catalog imposes none for these roles, so the plain
     # widening path must succeed on partition, clustering, and key columns.
+
+    # Given synced Short columns serving as partition, clustering, and key columns
     partitioned_name = live_tables("widen_partition_role")
     clustered_name = live_tables("widen_cluster_role")
     engine = build_sql_engine(live_connection)
@@ -236,6 +253,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
         ),
     )
 
+    # When syncing wider Integer declarations for every role
     engine.sync(
         DeltaTable(
             live_catalog(),
@@ -256,6 +274,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
         ),
     )
 
+    # Then every role widened in place
     assert _types(read_live_table(live_connection, partitioned_name)) == {
         "id": "int",
         "bucket": "int",
@@ -270,7 +289,10 @@ def test_sync_creates_partitioned_table_with_ordered_partition_columns(
     live_connection, live_tables
 ):
     """A partitioned table is created with its partition columns in declared order."""
+    # Given a declaration partitioned by two columns in a fixed order
     table_name = live_tables("partitioned")
+
+    # When syncing it into the live catalog
     build_sql_engine(live_connection).sync(
         DeltaTable(
             live_catalog(),
@@ -285,6 +307,7 @@ def test_sync_creates_partitioned_table_with_ordered_partition_columns(
         )
     )
 
+    # Then the partition columns are observed in declared order
     state = read_live_table(live_connection, table_name)
     assert state["partitioning"] == ("event_date", "region")
     assert {column["column_name"]: column["partition_index"] for column in state["columns"]} == {
@@ -296,6 +319,7 @@ def test_sync_creates_partitioned_table_with_ordered_partition_columns(
 
 def test_sync_changes_and_removes_liquid_clustering(live_connection, live_tables):
     """Liquid clustering keys can be changed and then removed entirely."""
+    # Given a synced table clustered on one column
     table_name = live_tables("clustering")
     columns = (Column("id", Integer()), Column("region", String()))
     engine = build_sql_engine(live_connection)
@@ -310,6 +334,7 @@ def test_sync_changes_and_removes_liquid_clustering(live_connection, live_tables
     )
     assert read_live_table(live_connection, table_name)["clustering"] == ("region",)
 
+    # When syncing a declaration widening the clustering to two keys
     engine.sync(
         DeltaTable(
             live_catalog(),
@@ -319,11 +344,16 @@ def test_sync_changes_and_removes_liquid_clustering(live_connection, live_tables
             clustered_by=("id", "region"),
         )
     )
+
+    # Then both keys are observed
     assert set(read_live_table(live_connection, table_name)["clustering"]) == {"id", "region"}
 
+    # When syncing with no clustering declared
     engine.sync(
         DeltaTable(live_catalog(), live_schema(), table_name, columns=columns, clustered_by=())
     )
+
+    # Then the clustering is removed
     assert read_live_table(live_connection, table_name)["clustering"] == ()
 
 

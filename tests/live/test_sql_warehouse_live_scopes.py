@@ -25,6 +25,8 @@ from tests.live.sql_warehouse_live_helpers import (
 
 def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connection, live_tables):
     """A metadata-scoped sync updates governed metadata but preserves external structure."""
+    # Given an externally created table with its own comments, properties,
+    # and clustering
     table_name = live_tables("metadata_scope")
     execute_sql(
         live_connection,
@@ -35,6 +37,8 @@ def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connect
         "CLUSTER BY (id)",
     )
 
+    # When syncing a metadata-scoped declaration with governed comments,
+    # tags, and a key
     build_sql_engine(live_connection).sync(
         DeltaTable(
             live_catalog(),
@@ -52,6 +56,8 @@ def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connect
         )
     )
 
+    # Then the governed metadata changed while the external structure and
+    # properties survived
     state = read_live_table(live_connection, table_name)
     assert [(column["column_name"], column["full_data_type"]) for column in state["columns"]] == [
         ("id", "int"),
@@ -70,6 +76,7 @@ def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connect
 
 def test_tag_scope_changes_only_table_and_column_tags(live_connection, live_tables):
     """A tags-scoped sync changes only table and column tags, leaving all else intact."""
+    # Given an externally created table carrying a tag to remove
     table_name = live_tables("tag_scope")
     execute_sql(
         live_connection,
@@ -84,6 +91,8 @@ def test_tag_scope_changes_only_table_and_column_tags(live_connection, live_tabl
     )
 
     before = read_live_table(live_connection, table_name)
+
+    # When syncing a tags-scoped declaration with new table and column tags
     build_sql_engine(live_connection).sync(
         DeltaTable(
             live_catalog(),
@@ -107,6 +116,7 @@ def test_tag_scope_changes_only_table_and_column_tags(live_connection, live_tabl
         )
     )
 
+    # Then only the tags changed
     state = read_live_table(live_connection, table_name)
     assert state["table_tags"] == {"owner": "governance"}
     assert state["column_tags"] == {

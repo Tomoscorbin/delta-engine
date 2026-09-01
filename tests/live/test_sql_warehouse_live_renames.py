@@ -37,6 +37,7 @@ _COLUMN_MAPPING = {Property.COLUMN_MAPPING_MODE: "name"}
 
 def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection, live_tables):
     """Renaming a column carries its data, tags, and comment, converging in one sync."""
+    # Given a synced, populated table with a tagged, commented column
     table_name = live_tables("rename_travel")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -56,6 +57,7 @@ def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection,
         f"INSERT INTO {qualified_table(table_name)} VALUES (1, 'ada'), (2, 'grace')",
     )
 
+    # When syncing a declaration that renames the column
     renamed = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -74,6 +76,7 @@ def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection,
     )
     engine.sync(renamed)
 
+    # Then the data, tags, and comment all travelled with the rename
     state = read_live_table(live_connection, table_name)
     assert [column["column_name"] for column in state["columns"]] == ["id", "customer_name"]
     [name_column] = [c for c in state["columns"] if c["column_name"] == "customer_name"]
@@ -85,13 +88,14 @@ def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection,
     )
     assert [(row["id"], row["customer_name"]) for row in rows] == [(1, "ada"), (2, "grace")]
 
-    # Everything travelled with the rename, so one sync converged: the same
-    # declaration finds no drift and the applied hint is inert.
+    # Then one sync converged: the same declaration finds no drift and the
+    # applied hint is inert
     assert engine.sync(renamed).has_changes is False
 
 
 def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection, live_tables):
     """Renaming a primary-key column replaces the key explicitly in one plan."""
+    # Given a synced table whose primary key sits on the column to rename
     table_name = live_tables("rename_pk")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -109,6 +113,7 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
     )
     assert read_live_table(live_connection, table_name)["primary_key"] == ("customer_nm",)
 
+    # When syncing a declaration that renames the key column
     renamed = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -122,9 +127,9 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
     )
     report = engine.sync(renamed)
 
-    # The plan is a complete transcript: the key is dropped and re-added
+    # Then the plan is a complete transcript: the key is dropped and re-added
     # explicitly around the rename rather than relying on the implicit drop
-    # Databricks performs during RENAME COLUMN.
+    # Databricks performs during RENAME COLUMN
     [table_report] = report.table_runs
     assert table_report.compiled is not None
     statements = table_report.compiled.statements
@@ -142,6 +147,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
     live_connection, live_tables
 ):
     """Renaming one member of a composite primary key replaces the whole key."""
+    # Given a synced table with a composite primary key
     table_name = live_tables("rename_composite_pk")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -163,6 +169,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
         "tenant_id",
     )
 
+    # When syncing a declaration that renames one key member
     renamed = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -177,8 +184,8 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
     )
     report = engine.sync(renamed)
 
-    # Renaming one member still replaces the whole key: the drop and re-add
-    # bracket the rename, and the untouched member keeps its position.
+    # Then the whole key is replaced: the drop and re-add bracket the rename,
+    # and the untouched member keeps its position
     [table_report] = report.table_runs
     assert table_report.compiled is not None
     statements = table_report.compiled.statements
@@ -194,6 +201,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
 
 def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connection, live_tables):
     """Renaming a local foreign-key column replaces the foreign key in one plan."""
+    # Given a synced child whose foreign-key column will be renamed
     parent_name = live_tables("rename_fk_parent")
     child_name = live_tables("rename_fk_child")
     parent = DeltaTable(
@@ -216,6 +224,9 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
         parent,
     )
 
+    # When syncing a declaration that renames the local column (the parent
+    # rides along: dependency resolution blocks a foreign-key add whose
+    # referenced table is not registered in the same run)
     renamed_child = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -224,10 +235,9 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
         foreign_keys=(ForeignKey(columns={"parent_id": "id"}, references=parent),),
         properties=_COLUMN_MAPPING,
     )
-    # The parent rides along: dependency resolution blocks a foreign-key add
-    # whose referenced table is not registered in the same run.
     engine.sync(renamed_child, parent)
 
+    # Then the foreign key exists on the renamed column and the sync converged
     [(constraint_name, local_column, referenced_table, referenced_column)] = read_live_table(
         live_connection, child_name
     )["foreign_keys"]
@@ -244,6 +254,7 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
     live_connection, live_tables
 ):
     """Renaming one local column of a composite foreign key replaces the whole key."""
+    # Given a synced child with a composite foreign key to its parent
     parent_name = live_tables("rename_composite_fk_parent")
     child_name = live_tables("rename_composite_fk_child")
     parent = DeltaTable(
@@ -282,6 +293,9 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
         (before_name, "tenant_id", parent_name, "tenant_id"),
     )
 
+    # When syncing a declaration that renames one local column (the parent
+    # rides along: dependency resolution blocks a foreign-key add whose
+    # referenced table is not registered in the same run)
     renamed_child = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -298,12 +312,10 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
         ),
         properties=_COLUMN_MAPPING,
     )
-    # The parent rides along: dependency resolution blocks a foreign-key add
-    # whose referenced table is not registered in the same run.
     engine.sync(renamed_child, parent)
 
-    # Renaming one local column replaces the whole composite key: the new
-    # local column set receives a new physical constraint and both pairs survive intact.
+    # Then the whole composite key is replaced: the new local column set
+    # receives a new physical constraint and both pairs survive intact
     after_foreign_keys = read_live_table(live_connection, child_name)["foreign_keys"]
     assert len(after_foreign_keys) == 2
     after_name = after_foreign_keys[0][0]
@@ -319,6 +331,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
     live_connection, live_tables
 ):
     """Renaming a primary key an FK references is rejected, touching neither table."""
+    # Given a synced parent whose primary key a child's foreign key references
     parent_name = live_tables("rename_blocked_parent")
     child_name = live_tables("rename_blocked_child")
     parent = DeltaTable(
@@ -341,6 +354,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
     parent_before = read_live_table(live_connection, parent_name)
     child_before = read_live_table(live_connection, child_name)
 
+    # When syncing a parent declaration that renames the key column
     with pytest.raises(SyncFailedError) as error:
         engine.sync(
             DeltaTable(
@@ -353,9 +367,9 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
             )
         )
 
-    # Renaming the key column would let RENAME COLUMN silently drop the
-    # child's foreign key, so the engine refuses client-side: nothing was
-    # planned and neither table changed.
+    # Then the engine refuses client-side — the rename would let RENAME
+    # COLUMN silently drop the child's foreign key — so nothing was planned
+    # and neither table changed
     [parent_report] = error.value.report.table_runs
     assert parent_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = parent_report.failures
@@ -368,6 +382,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
 
 def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection, live_tables):
     """An ambiguous column rename is rejected, and the catalog is left unchanged."""
+    # Given a synced table with two rename-candidate columns
     table_name = live_tables("rename_ambiguous")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -381,6 +396,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
     )
     before = read_live_table(live_connection, table_name)
 
+    # When syncing a declaration whose rename hint matches both
     with pytest.raises(SyncFailedError) as error:
         engine.sync(
             DeltaTable(
@@ -392,6 +408,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
             )
         )
 
+    # Then the rename is rejected as ambiguous and the catalog is unchanged
     [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert "AmbiguousColumnRename" in {
@@ -404,6 +421,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
 
 def test_sync_renames_a_partition_column_without_layout_drift(live_connection, live_tables):
     """Renaming a partition column carries the layout with no partitioning drift."""
+    # Given a synced, populated table partitioned on the column to rename
     table_name = live_tables("rename_partition")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -421,6 +439,7 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
         f"INSERT INTO {qualified_table(table_name)} VALUES (1, 'mon'), (2, 'tue')",
     )
 
+    # When syncing a declaration that renames the partition column
     renamed = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -431,8 +450,8 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
     )
     report = engine.sync(renamed)
 
-    # Partition metadata follows the mapped column's identity, so the whole
-    # plan is the rename itself — no layout action, no partitioning drift.
+    # Then the whole plan is the rename itself — partition metadata follows
+    # the mapped column's identity, so no layout action, no partitioning drift
     [table_report] = report.table_runs
     assert table_report.compiled is not None
     [statement] = table_report.compiled.statements
@@ -449,6 +468,7 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
 
 def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, live_tables):
     """Renaming a clustering key carries the layout with no clustering drift."""
+    # Given a synced, populated table clustered on the column to rename
     table_name = live_tables("rename_cluster")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -466,6 +486,7 @@ def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, liv
         f"INSERT INTO {qualified_table(table_name)} VALUES (1, 'emea'), (2, 'apac')",
     )
 
+    # When syncing a declaration that renames the clustering key
     renamed = DeltaTable(
         live_catalog(),
         live_schema(),
@@ -476,8 +497,8 @@ def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, liv
     )
     report = engine.sync(renamed)
 
-    # Clustering keys follow the mapped column's identity, so the whole plan
-    # is the rename itself — no re-clustering action, no layout drift.
+    # Then the whole plan is the rename itself — clustering keys follow the
+    # mapped column's identity, so no re-clustering action, no layout drift
     [table_report] = report.table_runs
     assert table_report.compiled is not None
     [statement] = table_report.compiled.statements
@@ -496,6 +517,7 @@ def test_declaration_with_a_rename_hint_creates_a_fresh_table_under_the_new_name
     live_connection, live_tables
 ):
     """A rename hint on a fresh catalog is inert; the table is created under the new name."""
+    # Given a declaration carrying a rename hint for a table that does not exist
     table_name = live_tables("rename_fresh")
     declaration = DeltaTable(
         live_catalog(),
@@ -508,9 +530,10 @@ def test_declaration_with_a_rename_hint_creates_a_fresh_table_under_the_new_name
         properties=_COLUMN_MAPPING,
     )
 
+    # When syncing it
     build_sql_engine(live_connection).sync(declaration)
 
-    # Neither name is observed on a fresh catalog, so the hint is inert and
-    # the table is simply created under the declared name.
+    # Then the hint is inert — neither name is observed on a fresh catalog —
+    # and the table is simply created under the declared name
     state = read_live_table(live_connection, table_name)
     assert [column["column_name"] for column in state["columns"]] == ["id", "customer_name"]

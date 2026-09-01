@@ -39,6 +39,7 @@ def _read(live_connection, table_name: str) -> CatalogState:
 
 def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
     """A view fails the read instead of being observed as a table."""
+    # Given a live view over an ordinary Delta table
     table_name = live_tables("relation_base")
     view_name = live_tables("relation_view")
     execute_sql(
@@ -51,6 +52,7 @@ def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
     )
 
     try:
+        # Then reading the view fails as an unsupported relation
         with pytest.raises(ReadError) as exc_info:
             _read(live_connection, view_name)
 
@@ -72,8 +74,8 @@ def test_a_non_delta_table_is_not_read_as_engine_state(live_connection, live_tab
         unavailable_conditions=_ICEBERG_UNAVAILABLE_CONDITIONS,
     )
 
-    # When the engine reads the non-Delta relation
-    # Then it rejects the relation instead of treating it as manageable state
+    # Then reading the non-Delta relation rejects it instead of treating it
+    # as manageable state
     with pytest.raises(ReadError) as exc_info:
         _read(live_connection, table_name)
 
