@@ -8,18 +8,20 @@ from delta_engine.schema import Column, DeltaTable, String
 def build_declared_table(
     name: str = "orders",
     *,
+    schema: str = "silver",
     comment: str = "Orders placed by customers",
     tags: dict[str, str] | None = None,
+    primary_key: tuple[str, ...] | None = ("id",),
 ) -> DeltaTable:
     """Build a declaration that satisfies every default rule unless overridden."""
     return DeltaTable(
         "dev",
-        "silver",
+        schema,
         name,
         columns=(Column("id", String(), nullable=False, comment="Row identifier"),),
         comment=comment,
         tags=tags or {},
-        primary_key=("id",),
+        primary_key=primary_key,
     )
 
 
@@ -62,6 +64,25 @@ class TestSeverityAttachment:
         # Then
         assert report.has_errors
         assert "table-comment" in [finding.rule for finding in report.findings]
+
+
+class TestPerTableOverrides:
+    def test_an_override_changes_the_policy_only_for_matching_tables(self) -> None:
+        # Given a bronze and a silver table, neither declaring a primary key,
+        # and a policy that turns primary-key off for bronze tables
+        bronze = build_declared_table("raw_events", schema="bronze", primary_key=None)
+        silver = build_declared_table("orders", schema="silver", primary_key=None)
+        policy = parse_lint_config(
+            {"overrides": [{"tables": ["dev.bronze.*"], "primary-key": "off"}]}
+        )
+
+        # When
+        report = lint_tables(bronze, silver, policy=policy)
+
+        # Then only the silver table is reported
+        assert [(str(finding.table), finding.rule) for finding in report.findings] == [
+            ("dev.silver.orders", "primary-key")
+        ]
 
 
 class TestOrdering:

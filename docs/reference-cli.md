@@ -235,6 +235,37 @@ table is optional and defaults to `"error"`. An unknown rule name or an
 invalid severity is a configuration error, so a typo cannot silently disable
 a rule.
 
+### Per-table overrides
+
+Override blocks change the policy for the tables they match, leaving every
+other table on the top-level settings:
+
+```toml
+[[tool.delta-engine.lint.overrides]]
+tables = ["dev.bronze.*"]
+primary-key = "off"
+column-comment = "warning"
+
+[[tool.delta-engine.lint.overrides]]
+tables = ["prod.gold.*"]
+naming-convention = "error"
+```
+
+`tables` is a list of `catalog.schema.table` globs. A pattern always has three
+dot-separated segments and a `*` matches within its segment only, so
+`dev.bronze.*` covers one schema and every table in a catalog is spelled
+`dev.*.*`. Matching is case-insensitive, like the names themselves.
+
+Rule settings inside a block take the same form as the top level — a severity
+string or an inline table with parameters — so an override can disable a rule,
+change its severity, reconfigure its parameters, or enable a rule that is off
+globally. When several blocks match one table they apply in file order, each
+changing only the rules it names; the last block to name a rule wins.
+
+A block with an empty `tables` list, no rule settings, an unknown rule name,
+or a malformed pattern is a configuration error. A pattern that matches none
+of the declared tables is not.
+
 The argument is optional when the config declares a `declarations` target; an
 explicit argument wins. The config is read from `./pyproject.toml` in the
 working directory, or from the file named with `--config`.

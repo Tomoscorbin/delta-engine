@@ -9,14 +9,10 @@ from delta_engine.domain.model import DesiredTable
 
 
 class LintRule(Protocol):
-    """One governance policy evaluated per table."""
+    """One governance policy evaluated per table, named by its config rule id."""
 
+    name: ClassVar[str]
     enabled_by_default: ClassVar[bool]
-
-    @property
-    def name(self) -> str:
-        """The rule id used in config keys and finding output."""
-        ...
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Return one message per way ``table`` breaks this rule."""
