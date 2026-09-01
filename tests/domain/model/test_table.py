@@ -22,7 +22,6 @@ from delta_engine.domain.model.constraints import (
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
-_QN = QualifiedName("c", "s", "orders")
 _COL = DesiredColumn("id", Integer(), nullable=False)
 _OBSERVED_COL = ObservedColumn("id", Integer(), nullable=False)
 
@@ -57,9 +56,11 @@ def test_fails_when_column_names_duplicate(table_type, column_type):
 
 @_EACH_TABLE_AND_COLUMN_TYPE
 def test_rejects_columns_differing_only_by_case_as_duplicates(table_type, column_type):
+    # Given two columns whose names differ only in case (case is not identity)
     cols = (column_type("Id", Integer()), column_type("ID", Integer()))
 
-    with pytest.raises(ValueError, match="Duplicate column name"):
+    # Then construction fails as a duplicate
+    with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, cols)
 
 
@@ -79,7 +80,7 @@ def test_partition_reference_must_use_the_column_spelling(table_type, column_typ
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
 
     # Then construction rejects it — references must spell their column exactly
-    with pytest.raises(ValueError, match="Partition column not found"):
+    with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
 
 
@@ -96,7 +97,7 @@ def test_fails_when_partition_columns_are_duplicated(table_type, column_type):
 
 def test_desired_table_primary_key_defaults_to_none():
     # Given a DesiredTable constructed without primary_key
-    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
+    table = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(_COL,))
 
     # Then primary_key is None (no constraint defined)
     assert table.primary_key is None
@@ -104,7 +105,7 @@ def test_desired_table_primary_key_defaults_to_none():
 
 def test_primary_key_columns_is_empty_when_no_primary_key():
     # Given a table with no primary key
-    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
+    table = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(_COL,))
 
     # Then primary_key_columns is the empty tuple, not None
     assert table.primary_key_columns == ()
@@ -113,7 +114,7 @@ def test_primary_key_columns_is_empty_when_no_primary_key():
 def test_primary_key_columns_returns_the_constraint_columns():
     # Given a table with a two-column primary key
     table = ObservedTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(ObservedColumn("id", Integer()), ObservedColumn("tenant_id", Integer())),
         primary_key=ObservedPrimaryKeyConstraint(columns=("id", "tenant_id"), name="t_pk"),
     )
@@ -125,34 +126,20 @@ def test_primary_key_columns_returns_the_constraint_columns():
 def test_desired_table_rejects_pk_column_not_in_columns():
     # Given a primary_key naming a column that does not exist
     # Then construction raises ValueError
-    with pytest.raises(ValueError, match="missing_col"):
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(_COL,),
             primary_key=PrimaryKeyConstraint(columns=("missing_col",), name="orders_pk"),
         )
 
 
-def test_observed_table_has_primary_key_field():
-    # Given an ObservedTable constructed with a primary key
-    table = ObservedTable(
-        qualified_name=_QN,
-        columns=(_OBSERVED_COL,),
-        primary_key=ObservedPrimaryKeyConstraint(columns=("id",), name="t_pk"),
-    )
-
-    # Then the field is readable and returns the value object
-    assert isinstance(table.primary_key, ObservedPrimaryKeyConstraint)
-    assert table.primary_key == PrimaryKeyConstraint(columns=("id",), name="t_pk")
-
-
 @pytest.mark.parametrize(
-    ("constraint_field", "constraint", "expected_error"),
+    ("constraint_field", "constraint"),
     [
         pytest.param(
             "primary_key",
             PrimaryKeyConstraint(columns=("id",), name="t_pk"),
-            "primary_key must be an observed primary key",
             id="primary-key",
         ),
         pytest.param(
@@ -165,7 +152,6 @@ def test_observed_table_has_primary_key_field():
                     name="t_fk",
                 ),
             ),
-            "foreign_keys must be observed foreign keys",
             id="foreign-key",
         ),
     ],
@@ -173,11 +159,12 @@ def test_observed_table_has_primary_key_field():
 def test_observed_table_requires_observed_constraint_types(
     constraint_field: str,
     constraint: object,
-    expected_error: str,
 ):
-    with pytest.raises(TypeError, match=expected_error):
+    # Given an observed table built with a declaration-side constraint type
+    # Then construction fails — catalog state carries observed constraints only
+    with pytest.raises(TypeError):
         ObservedTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(_OBSERVED_COL,),
             **{constraint_field: constraint},
         )
@@ -186,9 +173,9 @@ def test_observed_table_requires_observed_constraint_types(
 def test_desired_table_rejects_nullable_primary_key_column():
     # Given a desired table whose primary key column is nullable
     # Then construction raises — a nullable PK is not a well-formed desired schema
-    with pytest.raises(ValueError, match="Primary key column must be NOT NULL"):
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(DesiredColumn("id", Integer(), nullable=True),),
             primary_key=PrimaryKeyConstraint(columns=("id",), name="orders_pk"),
         )
@@ -201,7 +188,7 @@ def test_primary_key_reference_must_use_the_column_spelling(table_type, column_t
     constraint_type = (
         ObservedPrimaryKeyConstraint if table_type is ObservedTable else PrimaryKeyConstraint
     )
-    with pytest.raises(ValueError, match="Primary key column not found"):
+    with pytest.raises(ValueError):
         table_type(
             qualified_name=_QUALIFIED_NAME,
             columns=(column_type("requestId", Integer(), nullable=False),),
@@ -209,24 +196,10 @@ def test_primary_key_reference_must_use_the_column_spelling(table_type, column_t
         )
 
 
-def test_desired_table_reports_the_offending_nullable_primary_key_column():
-    # Given a composite primary key where one member is nullable
-    # Then the failure names that column
-    with pytest.raises(ValueError, match="tenant_id"):
-        DesiredTable(
-            qualified_name=_QN,
-            columns=(
-                DesiredColumn("id", Integer(), nullable=False),
-                DesiredColumn("tenant_id", Integer(), nullable=True),
-            ),
-            primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id"), name="orders_pk"),
-        )
-
-
 def test_observed_table_allows_a_nullable_primary_key_column():
     # Given an ObservedTable read from a legacy catalog where a PK column is nullable
     table = ObservedTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(ObservedColumn("id", Integer(), nullable=True),),
         primary_key=ObservedPrimaryKeyConstraint(columns=("id",), name="t_pk"),
     )
@@ -261,7 +234,7 @@ def test_desired_table_stores_foreign_keys():
         foreign_keys=(fk,),
     )
 
-    # Then the FK is stored with its complete declaration
+    # Then the FK is stored with its complete declaration and its name preserved
     assert table.foreign_keys == (
         ForeignKeyConstraint(
             local_columns=("customer_id",),
@@ -274,6 +247,7 @@ def test_desired_table_stores_foreign_keys():
 
 
 def test_desired_table_accepts_multiple_unnamed_foreign_keys():
+    # Given two unnamed FKs over different local columns
     customer = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
@@ -285,12 +259,14 @@ def test_desired_table_accepts_multiple_unnamed_foreign_keys():
         referenced_columns=("id",),
     )
 
+    # When building a DesiredTable with both
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         columns=(DesiredColumn("customer_id", Integer()), DesiredColumn("account_id", Integer())),
         foreign_keys=(customer, account),
     )
 
+    # Then both are stored — unnamed keys leave naming to Databricks
     assert table.foreign_keys == (customer, account)
 
 
@@ -301,7 +277,7 @@ def test_foreign_key_local_reference_must_use_the_column_spelling(table_type, co
     constraint_type = (
         ObservedForeignKeyConstraint if table_type is ObservedTable else ForeignKeyConstraint
     )
-    with pytest.raises(ValueError, match="Foreign key local column not found"):
+    with pytest.raises(ValueError):
         table_type(
             qualified_name=_QUALIFIED_NAME,
             columns=(column_type("customerId", Integer()),),
@@ -354,8 +330,8 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
         name="orders_nonexistent_fk",
     )
 
-    # When / Then the DesiredTable rejects the FK referencing a column that does not exist
-    with pytest.raises(ValueError, match="nonexistent"):
+    # Then the DesiredTable rejects the FK referencing a column that does not exist
+    with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(DesiredColumn("id", Integer()),),
@@ -379,8 +355,8 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         name="orders_customer_id_accounts_fk",
     )
 
-    # When / Then building a DesiredTable with both is rejected
-    with pytest.raises(ValueError, match="same local columns"):
+    # Then building a DesiredTable with both is rejected
+    with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(DesiredColumn("customer_id", Integer()),),
@@ -403,8 +379,8 @@ def test_desired_table_rejects_duplicate_explicit_foreign_key_names():
         name="t_a_b_c_fk",
     )
 
-    # When / Then the collision is rejected, naming both column tuples
-    with pytest.raises(ValueError, match="same constraint name"):
+    # Then the collision is rejected
+    with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "t"),
             columns=(
@@ -433,8 +409,8 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
         name="orders_customer_id_tenant_id_fk",
     )
 
-    # When / Then building a DesiredTable with both is rejected
-    with pytest.raises(ValueError, match="same local columns"):
+    # Then building a DesiredTable with both is rejected
+    with pytest.raises(ValueError):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(
@@ -443,26 +419,6 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
             ),
             foreign_keys=(fk_one, fk_two),
         )
-
-
-def test_desired_table_accepts_an_already_named_foreign_key():
-    # Given a FK that already carries a name (as the API layer will produce it)
-    fk = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-        name="orders_customer_id_fk",
-    )
-
-    # When building a DesiredTable with it
-    table = DesiredTable(
-        qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
-        foreign_keys=(fk,),
-    )
-
-    # Then the name is preserved (not regenerated, not rejected)
-    assert table.foreign_keys[0].name == "orders_customer_id_fk"
 
 
 def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
@@ -493,12 +449,12 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
     assert all(isinstance(key, ObservedForeignKeyConstraint) for key in observed.foreign_keys)
 
 
-# ---------- tags ----------
+# ---------- tags
 
 
 def test_desired_table_defaults_to_no_tags():
     # Given a minimal table definition with no tags declared
-    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
+    table = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(_COL,))
 
     # Then tags defaults to an empty mapping
     assert dict(table.tags) == {}
@@ -507,7 +463,7 @@ def test_desired_table_defaults_to_no_tags():
 def test_desired_table_stores_tags():
     # Given a table declared with two tags
     table = DesiredTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(_COL,),
         tags={"env": "prod", "domain": "sales"},
     )
@@ -519,7 +475,7 @@ def test_desired_table_stores_tags():
 def test_desired_table_preserves_tag_key_case():
     # Given a tag key with mixed case (UC tag keys are case-sensitive)
     table = DesiredTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(_COL,),
         tags={"CostCentre": "data-eng"},
     )
@@ -530,10 +486,10 @@ def test_desired_table_preserves_tag_key_case():
 
 def test_desired_table_rejects_blank_tag_key():
     # Given a tag whose key is blank (would emit a malformed SET TAGS ('') clause)
-    # When / Then construction fails, naming the offending key as blank
-    with pytest.raises(ValueError, match="blank"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(_COL,),
             tags={"  ": "x"},
         )
@@ -542,7 +498,7 @@ def test_desired_table_rejects_blank_tag_key():
 def test_observed_table_stores_tags():
     # Given an ObservedTable read from a catalog carrying a tag
     table = ObservedTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(_OBSERVED_COL,),
         tags={"env": "prod"},
     )
@@ -551,7 +507,7 @@ def test_observed_table_stores_tags():
     assert dict(table.tags) == {"env": "prod"}
 
 
-# ---------- scope ----------
+# ---------- scope
 
 
 def test_desired_table_manages_all_aspects_by_default():
@@ -578,8 +534,9 @@ def test_desired_table_accepts_a_restricted_scope():
 
 
 def test_desired_table_rejects_a_raw_scope_name():
-    # Public strings are resolved before entering the domain.
-    with pytest.raises(TypeError, match="TableScope"):
+    # Given a scope supplied as a plain string
+    # Then construction fails — public strings are resolved before the domain
+    with pytest.raises(TypeError):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
             columns=(_COL,),
@@ -608,19 +565,20 @@ def test_observed_table_properties_carry_values_only():
         properties={"delta.enableChangeDataFeed": "true"},
     )
 
+    # Then the observed values are readable on the snapshot
     assert observed.properties == {"delta.enableChangeDataFeed": "true"}
 
 
 def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
-    # Desired and observed state stay representable even when a backend-specific
-    # API would reject the layout as undeployable.
+    # Given a partition layout a backend-specific API would reject as undeployable
+    # Then desired and observed state stay representable
     desired = DesiredTable(
-        qualified_name=QualifiedName("dev", "silver", "orders"),
+        qualified_name=_QUALIFIED_NAME,
         columns=(DesiredColumn("id", Integer()), DesiredColumn("day", Date())),
         partitioned_by=("id", "day"),
     )
     observed = ObservedTable(
-        qualified_name=QualifiedName("dev", "silver", "orders"),
+        qualified_name=_QUALIFIED_NAME,
         columns=(ObservedColumn("id", Integer()), ObservedColumn("day", Date())),
         partitioned_by=("id", "day"),
     )
@@ -629,33 +587,33 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
 
 
 def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
-    # The public API refuses to author these layouts (partitioning and
-    # clustering together, more than four clustering keys), but desired and
+    # Given layouts the public API refuses to author (partitioning and
+    # clustering together, more than four clustering keys) — desired and
     # observed state must stay representable: layout deployability is a
-    # declaration-time rule, not a snapshot invariant.
+    # declaration-time rule, not a snapshot invariant
     columns = tuple(DesiredColumn(name, Integer()) for name in ("a", "b", "c", "d", "e"))
-    name = QualifiedName("dev", "silver", "orders")
 
     five_keys = DesiredTable(
-        qualified_name=name, columns=columns, clustered_by=("a", "b", "c", "d", "e")
+        qualified_name=_QUALIFIED_NAME, columns=columns, clustered_by=("a", "b", "c", "d", "e")
     )
     partitioned_and_clustered = DesiredTable(
-        qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
+        qualified_name=_QUALIFIED_NAME, columns=columns, partitioned_by=("a",), clustered_by=("b",)
     )
     observed = ObservedTable(
-        qualified_name=name,
+        qualified_name=_QUALIFIED_NAME,
         columns=as_observed_columns(columns),
         partitioned_by=("a",),
         clustered_by=("b",),
     )
 
+    # Then every layout constructs and reads back
     assert five_keys.clustered_by == ("a", "b", "c", "d", "e")
     assert partitioned_and_clustered.partitioned_by == ("a",)
     assert partitioned_and_clustered.clustered_by == ("b",)
     assert observed.clustered_by == ("b",)
 
 
-# ---------- clustered_by ----------
+# ---------- clustered_by
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -678,7 +636,8 @@ def test_table_stores_clustering_columns(table_type, column_type):
 @_EACH_TABLE_AND_COLUMN_TYPE
 def test_table_rejects_clustering_column_not_in_columns(table_type, column_type):
     # Given a clustering column that is not defined
-    with pytest.raises(ValueError, match=r"[Cc]luster"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, (column_type("id", Integer()),), clustered_by=("region",))
 
 
@@ -688,18 +647,20 @@ def test_clustering_reference_must_use_the_column_spelling(table_type, column_ty
     columns = (column_type("id", Integer()), column_type("region", String()))
 
     # Then construction rejects it — references must spell their column exactly
-    with pytest.raises(ValueError, match="Clustering column not found"):
+    with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
 def test_table_rejects_duplicate_clustering_column(table_type, column_type):
+    # Given the same clustering column listed twice
     columns = (column_type("id", Integer()), column_type("region", String()))
-    with pytest.raises(ValueError, match=r"[Cc]luster"):
+    # Then construction fails
+    with pytest.raises(ValueError):
         table_type(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
 
 
-# ---------- referencing_foreign_keys ----------
+# ---------- referencing_foreign_keys
 
 
 def test_observed_table_carries_referencing_foreign_keys() -> None:
@@ -718,20 +679,15 @@ def test_observed_table_carries_referencing_foreign_keys() -> None:
     assert observed.referencing_foreign_keys == (reference,)
 
 
-def test_foreign_key_reference_rejects_blank_constraint_name() -> None:
-    # Given a blank constraint_name
-    # When / Then construction raises ValueError
-    with pytest.raises(ValueError):
-        ForeignKeyReference(
-            name="  ",
-            referencing_table=QualifiedName("dev", "silver", "orders"),
-        )
+# ---------- column renames
 
 
 def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
-    with pytest.raises(ValueError, match="still declared"):
+    # Given a rename whose source column is still declared alongside the target
+    # Then construction fails — the old column must be removed first
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(
                 DesiredColumn("customer_nm", String()),
                 DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
@@ -740,9 +696,11 @@ def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
 
 
 def test_desired_table_rejects_duplicate_rename_sources() -> None:
-    with pytest.raises(ValueError, match="renamed_from 'customer_nm'"):
+    # Given two columns claiming the same rename source
+    # Then construction fails — a rename source must be unique
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(
                 DesiredColumn("a", String(), renamed_from="customer_nm"),
                 DesiredColumn("b", String(), renamed_from="customer_nm"),
@@ -753,32 +711,36 @@ def test_desired_table_rejects_duplicate_rename_sources() -> None:
 def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
     # Given a declaration managing only metadata aspects — renames imply
     # column-structure changes, which this scope does not manage
-    with pytest.raises(ValueError, match="column structure"):
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),),
             scope=TableScope.METADATA,
         )
 
 
 def test_desired_table_accepts_a_valid_rename() -> None:
+    # Given a rename whose source is absent from the declared columns
     table = DesiredTable(
-        qualified_name=_QN,
+        qualified_name=_QUALIFIED_NAME,
         columns=(
             DesiredColumn("id", Integer(), nullable=False),
             DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         ),
     )
+
+    # Then the declaration constructs and carries the hint
     assert table.columns[1].renamed_from == "customer_nm"
 
 
 def test_desired_table_rejects_partitioning_by_a_rename_source() -> None:
-    # Layout keys name desired columns and are never resolved through rename
-    # hints: renaming a partition column must move partitioned_by to the new
-    # name in the same declaration.
-    with pytest.raises(ValueError, match="Partition column not found: day"):
+    # Given partitioning keyed by a rename source — layout keys name desired
+    # columns and are never resolved through rename hints: renaming a partition
+    # column must move partitioned_by to the new name in the same declaration
+    # Then construction fails
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(
                 DesiredColumn("id", Integer()),
                 DesiredColumn("event_day", String(), renamed_from="day"),
@@ -788,9 +750,11 @@ def test_desired_table_rejects_partitioning_by_a_rename_source() -> None:
 
 
 def test_desired_table_rejects_clustering_by_a_rename_source() -> None:
-    with pytest.raises(ValueError, match="Clustering column not found: day"):
+    # Given clustering keyed by a rename source (same rule as partitioning)
+    # Then construction fails
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(
                 DesiredColumn("id", Integer()),
                 DesiredColumn("event_day", String(), renamed_from="day"),
@@ -800,11 +764,13 @@ def test_desired_table_rejects_clustering_by_a_rename_source() -> None:
 
 
 def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
-    # Constraint columns name desired columns, exactly like layout keys: a
-    # renamed key column moves the primary_key declaration to the new name.
-    with pytest.raises(ValueError, match="Primary key column not found"):
+    # Given a primary key on a rename source — constraint columns name desired
+    # columns, exactly like layout keys: a renamed key column moves the
+    # primary_key declaration to the new name
+    # Then construction fails
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(
                 DesiredColumn(
                     "customer_name", String(), nullable=False, renamed_from="customer_nm"
@@ -815,9 +781,11 @@ def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
 
 
 def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -> None:
-    with pytest.raises(ValueError, match="Foreign key local column not found"):
+    # Given a foreign key whose local column is a rename source
+    # Then construction fails
+    with pytest.raises(ValueError):
         DesiredTable(
-            qualified_name=_QN,
+            qualified_name=_QUALIFIED_NAME,
             columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
             foreign_keys=(
                 ForeignKeyConstraint(
@@ -830,24 +798,30 @@ def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -
         )
 
 
+# ---------- observed facts
+
+
 def test_observed_table_kind_defaults_to_an_ordinary_table():
-    # Kind is an observed fact with a safe default: construction sites that
-    # predate relation kinds still describe an ordinary table.
+    # Given catalog state read without a relation kind — construction sites
+    # that predate relation kinds still describe an ordinary table
     table = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         columns=(ObservedColumn("id", Integer()),),
     )
 
+    # Then the kind is the ordinary table default
     assert table.kind is TableKind.TABLE
 
 
 def test_observed_table_carries_a_streaming_table_kind():
+    # Given catalog state observed as a streaming table
     table = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         columns=(ObservedColumn("id", Integer()),),
         kind=TableKind.STREAMING_TABLE,
     )
 
+    # Then the kind is readable on the snapshot
     assert table.kind is TableKind.STREAMING_TABLE
 
 

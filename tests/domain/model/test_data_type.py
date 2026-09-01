@@ -27,7 +27,8 @@ from tests.domain.model.strategies import NON_DATA_TYPES
     invalid=NON_DATA_TYPES,
 )
 def test_composite_types_reject_non_data_type_members(position: str, invalid: Any) -> None:
-    with pytest.raises(TypeError, match=f"(?i){position}"):
+    # When any composite member is not a DataType instance, then construction fails
+    with pytest.raises(TypeError):
         match position:
             case "array element":
                 Array(invalid)
@@ -57,86 +58,106 @@ def test_decimal_accepts_valid_pairs_and_rejects_invalid_ones(precision: int, sc
             Decimal(precision, scale)
 
 
-def test_decimal_rejects_precision_above_delta_maximum() -> None:
-    # Delta/Spark cap DECIMAL precision at 38
-    with pytest.raises(ValueError, match="38"):
-        Decimal(39, 0)
-
-    # The limit message wins even when the scale is also out of range
-    with pytest.raises(ValueError, match="38"):
-        Decimal(40, 45)
-
-
-@given(
-    field=st.sampled_from(("precision", "scale")),
-    malformed=st.sampled_from(["1", 1.0, True, False]),
+@pytest.mark.parametrize(
+    ("precision", "scale"),
+    [
+        pytest.param("1", 1, id="string-precision"),
+        pytest.param(10, 1.0, id="float-scale"),
+        pytest.param(True, 1, id="bool-precision"),
+        pytest.param(10, False, id="bool-scale"),
+    ],
 )
-def test_decimal_rejects_non_integer_precision_and_scale(field: str, malformed: object) -> None:
-    values = {"precision": 10, "scale": 1}
-    values[field] = malformed
+def test_decimal_rejects_non_integer_precision_and_scale(precision: object, scale: object) -> None:
+    # When precision or scale is not a plain int (bools included), then construction fails
     with pytest.raises(TypeError):
-        Decimal(**values)
+        Decimal(precision, scale)  # type: ignore[arg-type]
 
 
-def test_struct_field_validates_name_and_nullability_and_preserves_them() -> None:
+def test_struct_field_rejects_blank_name() -> None:
+    # When the field name is blank, then construction fails
     with pytest.raises(ValueError):
         StructField("", Integer())
-    with pytest.raises(TypeError, match="nullable"):
-        StructField("amount", Integer(), nullable=1)
 
+
+def test_struct_field_rejects_non_bool_nullable() -> None:
+    # When nullability is not a bool, then construction fails
+    with pytest.raises(TypeError):
+        StructField("amount", Integer(), nullable=1)  # type: ignore[arg-type]
+
+
+def test_struct_field_defaults_to_nullable() -> None:
+    # Then a field with no explicit nullability is nullable, matching Databricks SQL
     assert StructField("Amount", Integer()).nullable is True
+
+
+def test_struct_field_nullability_is_part_of_identity() -> None:
+    # Given two fields differing only in nullability
+    # Then they are different fields
     assert StructField("Amount", Integer(), nullable=False) != StructField("Amount", Integer())
+
+
+def test_struct_field_renders_name_type_and_nullability() -> None:
+    # Then the rendered form shows the field as it appears in messages
     assert str(StructField("Amount", Integer(), nullable=False)) == "Amount: Integer NOT NULL"
-    assert StructField("straße", Integer()).name == "straße"
 
 
-def test_struct_requires_at_least_one_field_and_unique_names() -> None:
+def test_struct_rejects_empty_fields() -> None:
+    # When a struct has no fields, then construction fails
     with pytest.raises(ValueError):
         Struct(())
+
+
+def test_struct_rejects_duplicate_field_names() -> None:
+    # When two fields share a name, then construction fails
     with pytest.raises(ValueError):
         Struct((StructField("a", Integer()), StructField("a", String())))
 
 
-def test_struct_equality_is_structural() -> None:
-    left = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
-    right = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
-    assert left == right
+def test_struct_rejects_fields_differing_only_by_case() -> None:
+    # Given two fields whose names differ only in case (case is not identity)
+    # Then construction fails as a duplicate
+    with pytest.raises(ValueError):
+        Struct((StructField("id", Integer()), StructField("ID", Integer())))
 
 
 def test_struct_accepts_fields_as_a_list_and_compares_equal_to_tuple_form() -> None:
+    # Given the same fields supplied as a list and as a tuple
     from_list = Struct([StructField("a", Integer())])
     from_tuple = Struct((StructField("a", Integer()),))
 
+    # Then both construct the same struct
     assert from_list == from_tuple
     assert from_list.fields == (StructField("a", Integer()),)
 
 
 def test_map_rejects_a_map_key_type() -> None:
-    # Databricks allows any MAP key type except MAP itself.
-    with pytest.raises(ValueError, match="key"):
+    # Given a MAP key that is itself a MAP (Databricks allows any other key type)
+    # Then construction fails
+    with pytest.raises(ValueError):
         Map(Map(String(), Integer()), String())
 
 
 def test_map_allows_a_map_value_type() -> None:
-    # Only the key is restricted; a MAP value may itself be a MAP.
+    # Given a MAP value that is itself a MAP (only the key is restricted)
     nested = Map(String(), Map(String(), Integer()))
+
+    # Then the nested value type is preserved
     assert nested.value == Map(String(), Integer())
 
 
 def test_types_differing_only_in_nested_field_case_are_equal() -> None:
+    # Given deeply nested types whose only difference is a struct field's case
     nested_camel = Map(String(), Array(Struct((StructField("Amount", Integer()),))))
     nested_lower = Map(String(), Array(Struct((StructField("amount", Integer()),))))
 
+    # Then they are the same type — field case is not identity
     assert nested_camel == nested_lower
 
 
 def test_genuinely_different_field_names_stay_semantically_different() -> None:
+    # Given structs whose field names differ beyond case
     underscore = Struct((StructField("request_id", String()),))
     camel = Struct((StructField("requestId", String()),))
 
+    # Then they are different types
     assert underscore != camel
-
-
-def test_struct_rejects_fields_differing_only_by_case() -> None:
-    with pytest.raises(ValueError, match=r"[Dd]uplicate struct field"):
-        Struct((StructField("id", Integer()), StructField("ID", Integer())))

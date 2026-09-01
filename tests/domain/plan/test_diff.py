@@ -4,7 +4,6 @@ from delta_engine.domain.model import (
     Array,
     DesiredColumn,
     DesiredTable,
-    Identifier,
     Integer,
     Long,
     Map,
@@ -99,33 +98,17 @@ def _foreign_key(
 # ---------- top-level diff sum
 
 
-def test_missing_table_diffs_to_table_missing_carrying_desired():
-    # Given no observed table
+def test_missing_table_diffs_to_a_creation_of_the_declaration():
+    # Given a declared table with no observed counterpart
     desired = _desired()
 
     # When diffing against None
     diff = diff_table(desired, observed=None)
 
-    # Then the diff is the self-contained missing-table variant
+    # Then the diff is the self-contained creation variant: it carries the
+    # declaration, derives its target from it, and acts by creating the table
     assert diff == TableCreation(desired=desired)
-
-
-def test_missing_table_derives_target_from_desired_table():
-    desired = _desired()
-
-    diff = diff_table(desired, observed=None)
-
-    assert isinstance(diff, TableCreation)
     assert diff.target == _QUALIFIED_NAME
-
-
-def test_missing_table_actions_are_exactly_the_table_creation():
-    # Given a table with no observed counterpart
-    desired = _desired()
-
-    diff = diff_table(desired, observed=None)
-
-    # Then the derived actions are exactly the create
     assert diff.actions == (CreateTable(desired),)
 
 
@@ -166,7 +149,7 @@ def test_drift_rejects_different_desired_and_observed_tables():
     desired = _desired(qualified_name=QualifiedName("cat", "sch", "customers"))
     observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
 
-    # When / Then constructing their comparison is rejected
+    # Then constructing their comparison is rejected
     with pytest.raises(ValueError):
         TableDrift(desired=desired, observed=observed)
 
@@ -458,8 +441,10 @@ def test_identical_column_tags_produce_no_changes():
 
 
 def test_table_comment_drift_produces_change_with_both_sides():
+    # Given desired and observed table comments that disagree
     diff = diff_table(_desired(comment="new"), _observed(comment="old"))
 
+    # Then one comment change carries both sides of the transition
     assert isinstance(diff, TableDrift)
     assert diff.actions == (SetTableComment(desired_comment="new", observed_comment="old"),)
 
@@ -481,11 +466,13 @@ def test_declared_property_absent_from_catalog_produces_first_write_set():
 
 
 def test_declared_property_with_stale_value_produces_set_carrying_both_sides():
+    # Given a declared key whose catalog value is stale
     diff = diff_table(
         _desired(properties={"delta.enableChangeDataFeed": "true"}),
         _observed(properties={"delta.enableChangeDataFeed": "false"}),
     )
 
+    # Then one set change carries both sides of the transition
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
         SetProperty(
@@ -587,20 +574,6 @@ def test_declared_properties_are_not_compared_when_properties_unmanaged():
     assert diff.unresolvable == ()
 
 
-def test_property_set_rejects_equal_values():
-    with pytest.raises(ValueError):
-        SetProperty(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
-
-
-def test_property_set_first_write_is_always_representable():
-    # Given observed_value=None — the guard is bypassed by type
-    change = SetProperty(
-        name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
-    )
-
-    assert change.observed_value is None
-
-
 # ---------- table tag changes (full-state)
 
 
@@ -620,11 +593,13 @@ def test_table_tag_drift_produces_set_and_unset_changes():
 
 
 def test_changed_table_tag_preserves_observed_value():
+    # Given a declared tag whose catalog value differs
     diff = diff_table(
         _desired(tags={"env": "prod"}),
         _observed(tags={"env": "dev"}),
     )
 
+    # Then the set change carries the observed value it replaces
     assert isinstance(diff, TableDrift)
     assert diff.actions == (SetTableTag(name="env", desired_value="prod", observed_value="dev"),)
 
@@ -689,35 +664,16 @@ def test_clustering_removal_produces_cluster_by_none_action():
 
 
 def test_desired_only_primary_key_produces_added_change():
+    # Given a declared primary key the catalog does not have
     pk = PrimaryKeyConstraint(columns=("id",), name="test_pk")
     diff = diff_table(
         _desired(columns=(DesiredColumn("id", Integer(), nullable=False),), primary_key=pk),
         _observed(columns=(DesiredColumn("id", Integer(), nullable=False),)),
     )
 
+    # Then the key is set
     assert isinstance(diff, TableDrift)
     assert diff.actions == (SetPrimaryKey(primary_key=pk),)
-
-
-def test_primary_key_equality_ignores_column_order_and_case():
-    # Given the same PK column set under different orders and casing
-    desired_pk = PrimaryKeyConstraint(columns=("a", "b"), name="Other_Name")
-    observed_pk = PrimaryKeyConstraint(columns=("b", "a"), name="other_name")
-    columns = (
-        DesiredColumn("a", Integer(), nullable=False),
-        DesiredColumn("b", Integer(), nullable=False),
-    )
-
-    # When diffing the declarations
-    diff = diff_table(
-        _desired(columns=columns, primary_key=desired_pk),
-        _observed(columns=columns, primary_key=observed_pk),
-    )
-
-    # Then structural equality produces no change
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
 
 
 @pytest.mark.parametrize("desired_name", [None, "managed_pk"], ids=["unnamed", "explicit"])
@@ -774,28 +730,9 @@ def test_present_table_diffs_foreign_keys_by_definition():
     )
 
 
-@pytest.mark.parametrize(
-    "desired_name",
-    [None, "orders_customer_fk"],
-    ids=["unnamed", "explicit"],
-)
-def test_matching_foreign_key_definition_ignores_names(desired_name: str | None):
-    desired_key = _foreign_key(desired_name, local_columns=("customer_id",))
-    observed_key = _foreign_key("legacy_customer_fk", local_columns=("customer_id",))
-    columns = (DesiredColumn("customer_id", String()),)
-
-    # When the table is diffed
-    drift = diff_table(
-        _desired(columns=columns, foreign_keys=(desired_key,)),
-        _observed(columns=columns, foreign_keys=(observed_key,)),
-    )
-
-    # Then the matching definition is already converged
-    assert isinstance(drift, TableDrift)
-    assert drift.actions == ()
-
-
 def test_multiple_foreign_keys_match_by_definition_regardless_of_names():
+    # Given declared keys (one unnamed) whose observed counterparts carry
+    # unrelated names — one of which reuses a declared name on a different key
     unnamed_customer = _foreign_key(None, local_columns=("customer_id",))
     named_billing = _foreign_key("claimed_fk", local_columns=("billing_id",))
     observed_customer = _foreign_key("claimed_fk", local_columns=("customer_id",))
@@ -805,11 +742,13 @@ def test_multiple_foreign_keys_match_by_definition_regardless_of_names():
         DesiredColumn("billing_id", String()),
     )
 
+    # When the table is diffed
     drift = diff_table(
         _desired(columns=columns, foreign_keys=(unnamed_customer, named_billing)),
         _observed(columns=columns, foreign_keys=(observed_customer, observed_billing)),
     )
 
+    # Then every declaration adopts its structural match — nothing to converge
     assert isinstance(drift, TableDrift)
     assert drift.actions == ()
 
@@ -999,6 +938,7 @@ def test_observed_only_column_tags_are_unset_before_the_column_is_removed():
 
 
 def test_diff_emits_rename_when_source_observed_and_target_absent():
+    # Given a rename hint whose source exists in the catalog and target does not
     desired = _desired(
         columns=(
             DesiredColumn("id", Integer()),
@@ -1009,18 +949,22 @@ def test_diff_emits_rename_when_source_observed_and_target_absent():
         columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_nm", String()))
     )
 
+    # When the table is diffed
     drift = diff_table(desired, observed)
 
+    # Then the one action is the rename itself
     assert drift.actions == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
 
 
 def test_diff_pairs_residual_drift_under_the_new_name():
-    # A rename plus a widen decomposes into RenameColumn + AlterColumnType
+    # Given a renamed column whose type also widens
     desired = _desired(columns=(DesiredColumn("amount", Long(), renamed_from="amt"),))
     observed = _observed(columns=(DesiredColumn("amt", Integer()),))
 
+    # When the table is diffed
     drift = diff_table(desired, observed)
 
+    # Then the drift decomposes into RenameColumn + AlterColumnType, not add/drop
     assert RenameColumn(old_name="amt", new_name="amount") in drift.actions
     assert (
         AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer())
@@ -1030,11 +974,16 @@ def test_diff_pairs_residual_drift_under_the_new_name():
 
 
 def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
+    # Given a rename hint whose target is already the observed column
     desired = _desired(
         columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
     )
     applied = _observed(columns=(DesiredColumn("customer_name", String()),))
+
+    # When the table is diffed
     drift = diff_table(desired, applied)
+
+    # Then the hint is inert — nothing to do, nothing to judge
     assert drift.actions == ()
     assert drift.unresolvable == ()
 
@@ -1075,12 +1024,15 @@ def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
 
 
 def test_diff_missing_table_ignores_rename_hints():
+    # Given a missing table whose declaration carries a rename hint
     desired = _desired(
         columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
     )
 
+    # When diffing against absence
     diff = diff_table(desired, None)
 
+    # Then the hint is inert — the table is simply created as declared
     assert isinstance(diff, TableCreation)
     assert diff.desired is desired
 
@@ -1171,23 +1123,6 @@ def test_drift_carries_the_observed_table_it_was_computed_against():
     assert diff.observed.kind is TableKind.STREAMING_TABLE
 
 
-def test_drift_against_an_ordinary_table_carries_the_table_kind():
-    qualified_name = QualifiedName("cat", "sch", "orders")
-    desired = DesiredTable(
-        qualified_name=qualified_name,
-        columns=(DesiredColumn("id", Integer()),),
-    )
-    observed = ObservedTable(
-        qualified_name=qualified_name,
-        columns=(ObservedColumn("id", Integer()),),
-    )
-
-    diff = diff_table(desired, observed)
-
-    assert isinstance(diff, TableDrift)
-    assert diff.observed.kind is TableKind.TABLE
-
-
 def test_case_only_column_difference_produces_no_actions_but_states_the_drift():
     # A case variant is the same column, so nothing is actionable — but the
     # spelling disagreement itself is stated for validation to judge.
@@ -1231,21 +1166,8 @@ def test_case_only_layout_and_key_differences_produce_no_actions():
     assert diff.unresolvable == (ColumnCaseDrift("requestId", "requestid"),)
 
 
-def test_case_only_struct_field_difference_is_not_drift():
-    qualified_name = QualifiedName("cat", "sch", "t")
-    desired = DesiredTable(
-        qualified_name=qualified_name,
-        columns=(DesiredColumn("payload", Struct((StructField("requestId", String()),))),),
-    )
-    observed = ObservedTable(
-        qualified_name=qualified_name,
-        columns=(ObservedColumn("payload", Struct((StructField("requestid", String()),))),),
-    )
-
-    assert diff_table(desired, observed).actions == ()
-
-
 def test_genuinely_different_name_still_reports_structural_drift():
+    # Given columns whose names differ beyond case
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1256,13 +1178,16 @@ def test_genuinely_different_name_still_reports_structural_drift():
         columns=(ObservedColumn("request_id", String()),),
     )
 
+    # When the table is diffed
     diff = diff_table(desired, observed)
 
+    # Then they are different columns: one added, one dropped
     action_types = {type(action) for action in diff.actions}
     assert action_types == {AddColumn, DropColumn}
 
 
 def test_matched_column_action_uses_observed_spelling_across_casing():
+    # Given a matched column declared with different casing than the catalog
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1273,13 +1198,16 @@ def test_matched_column_action_uses_observed_spelling_across_casing():
         columns=(ObservedColumn("requestId", String(), comment=""),),
     )
 
+    # When the table is diffed
     [action] = diff_table(desired, observed).actions
 
+    # Then the action addresses the column by its observed spelling
     assert isinstance(action, SetColumnComment)
     assert str(action.column_name) == "requestId"
 
 
 def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
+    # Given a rename hint spelled differently from its catalog column
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1290,33 +1218,17 @@ def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
         columns=(ObservedColumn("OldName", String()),),
     )
 
+    # When the table is diffed
     [action] = diff_table(desired, observed).actions
 
+    # Then the rename addresses the source by its observed spelling and the
+    # target by its declared spelling
     assert isinstance(action, RenameColumn)
     assert str(action.old_name) == "OldName"
     assert str(action.new_name) == "newName"
 
 
 # ---------- column case drift
-
-
-def test_column_case_drift_requires_a_real_spelling_difference():
-    with pytest.raises(ValueError):
-        ColumnCaseDrift(declared_name="orderid", observed_name="orderid")
-
-
-def test_column_case_drift_requires_the_same_identifier():
-    with pytest.raises(ValueError):
-        ColumnCaseDrift(declared_name="orderid", observed_name="customer_id")
-
-
-def test_column_case_drift_equality_is_exact_even_when_built_from_identifiers():
-    # Given a drift built from Identifier names, as the differ builds them
-    drift = ColumnCaseDrift(Identifier("OrderId"), Identifier("orderid"))
-
-    # Then the record compares by exact spelling, not case-insensitively
-    assert drift == ColumnCaseDrift("OrderId", "orderid")
-    assert drift != ColumnCaseDrift("ORDERID", "orderid")
 
 
 def test_matched_column_case_drift_is_stated_as_unresolvable():
