@@ -241,6 +241,29 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
     assert length_complaint.search(str(error.value))
 
 
+def test_platform_rejects_a_hyphen_in_a_tag_key(live_connection, live_tables):
+    """Databricks rejects a tag key containing a hyphen."""
+    # Unity Catalog forbids . , - = / : in tag keys. The hyphen is the
+    # surprising member of the list — hyphenated keys look natural — so it is
+    # the one pinned here. This backs the key-character gate in
+    # api/delta_table.py (_validate_tags), which rejects all six characters
+    # at declaration time.
+
+    # Given a live table
+    table_name = live_tables("tag_key_chars")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (id INT) USING DELTA",
+    )
+
+    # Then a hyphenated tag key is rejected
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} SET TAGS ('cost-centre'='data')",
+        )
+
+
 def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, live_tables):
     """Databricks rejects a complex type as a partition column."""
     # Delta refuses complex/nested types as partition columns, raising

@@ -994,18 +994,20 @@ def test_delta_table_defaults_to_no_tags():
     assert dict(desired.tags) == {}
 
 
-def test_delta_table_does_not_restrict_tag_keys():
-    # Given arbitrary tag keys (tags are free-form, unlike the Property allowlist)
+def test_delta_table_accepts_free_form_tag_keys():
+    # Given an arbitrary tag key (tags are free-form, unlike the Property
+    # allowlist), including an interior space — only leading and trailing
+    # spaces are forbidden
     table = DeltaTable(
         catalog="cat",
         schema="sales",
         name="orders",
         columns=[Column("id", Integer())],
-        tags={"any.custom-key": "v"},
+        tags={"any custom_key": "v"},
     )
 
     # Then construction succeeds and the key is preserved (no ValueError)
-    assert dict(table.to_desired_table().tags) == {"any.custom-key": "v"}
+    assert dict(table.to_desired_table().tags) == {"any custom_key": "v"}
 
 
 def test_delta_table_preserves_tag_key_case():
@@ -1531,6 +1533,111 @@ def test_delta_table_accepts_tags_at_the_limits() -> None:
 
     # Then the declaration accepts all of them
     assert len(table.to_desired_table().tags) == 50
+
+
+@pytest.mark.parametrize("character", [".", ",", "-", "=", "/", ":"])
+def test_delta_table_rejects_a_forbidden_character_in_a_table_tag_key(character: str) -> None:
+    # Given a table tag key containing a character Unity Catalog forbids in keys
+    key = f"cost{character}centre"
+
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            tags={key: "v"},
+        )
+
+
+def test_delta_table_rejects_a_forbidden_character_in_a_column_tag_key() -> None:
+    # Given a column tag key containing a character Unity Catalog forbids in keys
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer(), tags={"pii-class": "high"})],
+        )
+
+
+def test_delta_table_accepts_forbidden_key_characters_in_a_tag_value() -> None:
+    # Given a tag value using every character forbidden in keys
+    value = "team-data/eng:eu, v=1."
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags={"owner": value},
+    )
+
+    # Then the value passes through: the character rule binds keys only
+    assert table.to_desired_table().tags["owner"] == value
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [
+        {" env": "prod"},
+        {"env ": "prod"},
+        {"env": " prod"},
+        {"env": "prod "},
+    ],
+)
+def test_delta_table_rejects_a_leading_or_trailing_space_in_a_tag_key_or_value(
+    tags: dict[str, str],
+) -> None:
+    # Given a tag whose key or value begins or ends with a space
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            tags=tags,
+        )
+
+
+def test_delta_table_accepts_one_thousand_column_tags_in_total() -> None:
+    # Given 20 columns each carrying its 50-tag quota — exactly the 1,000
+    # column-tag table total — plus 50 table tags, which do not count
+    columns = [
+        Column(f"column_{i}", Integer(), tags={f"tag_{j}": "v" for j in range(50)})
+        for i in range(20)
+    ]
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=columns,
+        tags={f"table_tag_{i}": "v" for i in range(50)},
+    )
+
+    # Then the declaration is accepted at the boundary
+    assert sum(len(column.tags) for column in table.columns) == 1000
+
+
+def test_delta_table_rejects_more_than_one_thousand_column_tags_in_total() -> None:
+    # Given columns whose tags total 1,001 while every column stays within
+    # its own 50-tag quota
+    columns = [
+        Column(f"column_{i}", Integer(), tags={f"tag_{j}": "v" for j in range(50)})
+        for i in range(20)
+    ]
+    columns.append(Column("column_20", Integer(), tags={"tag_0": "v"}))
+
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=columns,
+        )
 
 
 def test_delta_table_rejects_rename_hint_without_column_mapping():

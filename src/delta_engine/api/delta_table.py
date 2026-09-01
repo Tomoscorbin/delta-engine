@@ -86,10 +86,17 @@ _TYPES_UNUSABLE_AS_CLUSTERING_KEYS: Final[tuple[type[DataType], ...]] = (
 # are separate securables). Databricks caps both tag keys and values at 256
 # characters; the platform's rejection of a 300-character key and value is
 # pinned live by test_platform_rejects_an_over_long_column_tag_key_or_value.
-# (A separate 1,000-column-tag-per-table total is not enforced here.)
 _MAX_TAGS_PER_SECURABLE: Final[int] = 50
 _MAX_TAG_KEY_LENGTH: Final[int] = 256
 _MAX_TAG_VALUE_LENGTH: Final[int] = 256
+
+# Unity Catalog forbids these characters anywhere in a tag key (values may
+# contain them), and neither keys nor values may begin or end with a space.
+_TAG_KEY_FORBIDDEN_CHARACTERS: Final[frozenset[str]] = frozenset(".,-=/:")
+
+# Beyond the per-securable quota, Unity Catalog caps one table's column tags
+# at 1,000 in total across all its columns; table tags do not count.
+_MAX_COLUMN_TAGS_PER_TABLE: Final[int] = 1_000
 
 _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
     "foreign key with a name reference requires an explicit"
@@ -136,6 +143,22 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(value)}-character"
                 f" value; Unity Catalog allows at most {_MAX_TAG_VALUE_LENGTH}"
+            )
+        forbidden = sorted(set(key) & _TAG_KEY_FORBIDDEN_CHARACTERS)
+        if forbidden:
+            raise ValueError(
+                f"Tag {key!r} on {subject} contains characters Unity Catalog"
+                f" forbids in tag keys: {forbidden}"
+            )
+        if key != key.strip(" "):
+            raise ValueError(
+                f"Tag {key!r} on {subject} begins or ends with a space in its"
+                " key; Unity Catalog forbids either"
+            )
+        if value != value.strip(" "):
+            raise ValueError(
+                f"Tag {key!r} on {subject} begins or ends with a space in its"
+                " value; Unity Catalog forbids either"
             )
 
 
@@ -427,6 +450,17 @@ def _validate_column_names(
             )
 
 
+def _validate_column_tag_total(declaration: _NormalizedDeclaration) -> None:
+    """Reject a declaration whose columns carry more tags than one table may hold."""
+    total = sum(len(column.tags) for column in declaration.columns)
+    if total > _MAX_COLUMN_TAGS_PER_TABLE:
+        raise ValueError(
+            f"table '{declaration.qualified_name.name}' declares {total} column"
+            " tags across its columns; Unity Catalog allows at most"
+            f" {_MAX_COLUMN_TAGS_PER_TABLE} per table"
+        )
+
+
 def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     """
     Reject invalid frozen declarations before lowering.
@@ -446,6 +480,7 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
         _validate_renames(declaration.columns, declaration.properties)
 
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
+    _validate_column_tag_total(declaration)
     for column in declaration.columns:
         _validate_tags(f"column '{column.name}'", column.tags)
         _validate_nested_not_null(column)
