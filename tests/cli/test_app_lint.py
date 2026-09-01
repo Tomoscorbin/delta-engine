@@ -55,10 +55,10 @@ def test_compliant_declarations_exit_zero_and_report_no_findings(
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_compliant", COMPLIANT_TABLES)
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
-    # Then
+    # Then the run succeeds with a no-findings summary
     assert result.exit_code == 0
     assert "1 table checked: no findings" in result.stdout
 
@@ -70,10 +70,10 @@ def test_violations_exit_one_and_name_rule_table_and_message(
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_ungoverned", UNGOVERNED_TABLES)
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
-    # Then
+    # Then each finding names its table, rule, and message, and errors exit one
     assert result.exit_code == 1
     assert "dev.silver.orders" in result.stdout
     assert "table-comment" in result.stdout
@@ -90,7 +90,7 @@ def test_findings_are_grouped_under_one_heading_per_table(
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_two_tables", TWO_UNGOVERNED_TABLES)
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
     # Then each table appears once as a heading, in name order, and both are tallied
@@ -107,10 +107,10 @@ def test_warnings_alone_exit_zero(runner, write_module, tmp_path, monkeypatch):
     write_pyproject(tmp_path, ALL_WARNINGS_CONFIG)
     module = write_module("lint_warned", UNGOVERNED_TABLES)
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
-    # Then
+    # Then the findings print but the run still succeeds
     assert result.exit_code == 0
     assert "1 table checked: 3 warnings" in result.stdout
 
@@ -120,10 +120,10 @@ def test_json_output_is_machine_readable(runner, write_module, tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_json", UNGOVERNED_TABLES)
 
-    # When
+    # When linting with JSON output
     result = runner.invoke(app, ["lint", f"{module}:all_tables", "--output", "json"])
 
-    # Then
+    # Then stdout is one parseable report carrying the tally and findings
     report = json.loads(result.stdout)
     assert report["tables_checked"] == 1
     assert report["error_count"] == 3
@@ -146,10 +146,10 @@ def test_invalid_config_exits_one_with_an_error_line(runner, write_module, tmp_p
     )
     module = write_module("lint_bad_config", COMPLIANT_TABLES)
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
-    # Then
+    # Then the error line on stderr names the offending rule
     assert result.exit_code == 1
     assert "error:" in result.stderr
     assert "table-comment" in result.stderr
@@ -172,7 +172,7 @@ def test_declarations_target_from_config_is_used_when_argument_omitted(
     # When invoked bare
     result = runner.invoke(app, ["lint"])
 
-    # Then
+    # Then the configured declarations are linted
     assert result.exit_code == 0
     assert "no findings" in result.stdout
 
@@ -203,7 +203,7 @@ def test_a_non_table_tool_key_is_a_config_error(runner, write_module, tmp_path, 
     module = write_module("lint_bad_tool", COMPLIANT_TABLES)
     write_pyproject(tmp_path, 'tool = "not a table"')
 
-    # When
+    # When linting
     result = runner.invoke(app, ["lint", f"{module}:all_tables"])
 
     # Then the malformed file is rejected, not silently treated as defaults
@@ -225,7 +225,7 @@ def test_a_non_string_declarations_target_is_a_config_error(runner, tmp_path, mo
     # When invoked bare
     result = runner.invoke(app, ["lint"])
 
-    # Then
+    # Then the error names the offending setting
     assert result.exit_code == 1
     assert "declarations" in result.stderr
 
@@ -234,10 +234,10 @@ def test_missing_target_everywhere_is_a_config_error(runner, tmp_path, monkeypat
     # Given no argument and no config
     monkeypatch.chdir(tmp_path)
 
-    # When
+    # When invoked bare
     result = runner.invoke(app, ["lint"])
 
-    # Then
+    # Then the error explains where a target may come from
     assert result.exit_code == 1
     assert "error:" in result.stderr
     assert "declarations" in result.stderr
@@ -276,11 +276,11 @@ def test_missing_explicit_config_path_is_an_error(runner, write_module, tmp_path
     monkeypatch.chdir(tmp_path)
     module = write_module("lint_missing_config", COMPLIANT_TABLES)
 
-    # When
+    # When linting with that path
     result = runner.invoke(
         app, ["lint", f"{module}:all_tables", "--config", str(tmp_path / "absent.toml")]
     )
 
-    # Then
+    # Then the missing file is an error rather than a fallback to defaults
     assert result.exit_code == 1
     assert "error:" in result.stderr

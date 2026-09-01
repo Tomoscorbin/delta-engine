@@ -44,37 +44,40 @@ def build_table(
 
 class TestTableCommentRule:
     def test_table_with_comment_produces_no_messages(self) -> None:
-        # Given
+        # Given a table with a comment
         table = build_table(comment="Orders placed by customers")
 
-        # When
+        # When the rule evaluates it
         messages = TableCommentRule().evaluate(table)
 
-        # Then
+        # Then nothing is reported
         assert messages == ()
 
-    def test_blank_table_comment_is_reported(self) -> None:
-        # Given tables whose comments are empty or whitespace-only
-        tables = (build_table(comment=""), build_table(comment="   "))
+    @pytest.mark.parametrize("comment", ["", "   "], ids=["empty", "whitespace-only"])
+    def test_blank_table_comment_is_reported(self, comment: str) -> None:
+        # Given a table whose comment is blank
+        table = build_table(comment=comment)
 
-        # When / Then each counts as missing
-        for table in tables:
-            assert TableCommentRule().evaluate(table) == ("table has no comment",)
+        # When the rule evaluates it
+        messages = TableCommentRule().evaluate(table)
+
+        # Then the blank comment counts as missing
+        assert messages == ("table has no comment",)
 
 
 class TestColumnCommentRule:
     def test_table_with_all_columns_commented_produces_no_messages(self) -> None:
-        # Given
+        # Given a table whose columns all carry comments
         table = build_table(columns=_COMMENTED_COLUMNS)
 
-        # When
+        # When the rule evaluates it
         messages = ColumnCommentRule().evaluate(table)
 
-        # Then
+        # Then nothing is reported
         assert messages == ()
 
     def test_each_uncommented_column_is_reported_by_name(self) -> None:
-        # Given
+        # Given one commented column, one bare, and one whitespace-only
         table = build_table(
             columns=(
                 DesiredColumn("id", String(), comment="Row identifier"),
@@ -83,10 +86,10 @@ class TestColumnCommentRule:
             )
         )
 
-        # When
+        # When the rule evaluates it
         messages = ColumnCommentRule().evaluate(table)
 
-        # Then
+        # Then each blank column is reported by name
         assert messages == (
             "column 'status' has no comment",
             "column 'amount' has no comment",
@@ -95,23 +98,23 @@ class TestColumnCommentRule:
 
 class TestPrimaryKeyRule:
     def test_table_with_primary_key_produces_no_messages(self) -> None:
-        # Given
+        # Given a table declaring a primary key
         table = build_table(primary_key=PrimaryKeyConstraint(("id",)))
 
-        # When
+        # When the rule evaluates it
         messages = PrimaryKeyRule().evaluate(table)
 
-        # Then
+        # Then nothing is reported
         assert messages == ()
 
     def test_table_without_primary_key_is_reported(self) -> None:
-        # Given
+        # Given a table without a primary key
         table = build_table(primary_key=None)
 
-        # When
+        # When the rule evaluates it
         messages = PrimaryKeyRule().evaluate(table)
 
-        # Then
+        # Then the missing key is reported
         assert messages == ("table has no primary key",)
 
 
@@ -125,10 +128,10 @@ class TestNamingConventionRule:
             )
         )
 
-        # When
+        # When the rule evaluates it
         messages = NamingConventionRule().evaluate(table)
 
-        # Then
+        # Then nothing is reported
         assert messages == ()
 
     def test_a_table_name_that_is_not_snake_case_is_reported(self) -> None:
@@ -141,10 +144,10 @@ class TestNamingConventionRule:
             primary_key=None,
         )
 
-        # When
+        # When the rule evaluates it
         messages = NamingConventionRule().evaluate(table)
 
-        # Then
+        # Then the table name is reported with the pattern it broke
         assert messages == (
             "table name 'order-items' does not match naming convention '[a-z][a-z0-9_]*'",
         )
@@ -159,10 +162,10 @@ class TestNamingConventionRule:
             )
         )
 
-        # When
+        # When the rule evaluates it
         messages = NamingConventionRule().evaluate(table)
 
-        # Then
+        # Then each offending column is reported by name
         assert messages == (
             "column name 'CreatedAt' does not match naming convention '[a-z][a-z0-9_]*'",
             "column name 'unit-price' does not match naming convention '[a-z][a-z0-9_]*'",
@@ -174,7 +177,7 @@ class TestNamingConventionRule:
             columns=(DesiredColumn("CreatedAt", String(), comment="When the row was created"),)
         )
 
-        # When
+        # When a rule built with that pattern evaluates it
         messages = NamingConventionRule(pattern=r"[A-Za-z][A-Za-z0-9]*").evaluate(table)
 
         # Then the CamelCase column now passes
@@ -182,11 +185,9 @@ class TestNamingConventionRule:
 
     def test_a_name_that_only_matches_the_pattern_as_a_prefix_is_reported(self) -> None:
         # Given a column name that matches the default pattern up to a trailing symbol
-        table = build_table(
-            columns=(DesiredColumn("total_$", String(), comment="Total amount"),)
-        )
+        table = build_table(columns=(DesiredColumn("total_$", String(), comment="Total amount"),))
 
-        # When
+        # When the rule evaluates it
         messages = NamingConventionRule().evaluate(table)
 
         # Then the whole name must match, so the trailing '$' fails it
@@ -215,23 +216,23 @@ class TestNamingConventionRule:
 
 class TestRequiredTagRule:
     def test_table_carrying_all_required_tags_produces_no_messages(self) -> None:
-        # Given
+        # Given a table carrying every required tag
         table = build_table(tags={"owner": "dse", "domain": "sales"})
 
-        # When
+        # When the rule evaluates it
         messages = RequiredTagRule(keys=("owner", "domain")).evaluate(table)
 
-        # Then
+        # Then nothing is reported
         assert messages == ()
 
     def test_each_missing_required_tag_is_reported_by_key(self) -> None:
-        # Given
+        # Given a table carrying one of three required tags
         table = build_table(tags={"owner": "dse"})
 
-        # When
+        # When the rule evaluates it
         messages = RequiredTagRule(keys=("owner", "domain", "steward")).evaluate(table)
 
-        # Then
+        # Then each absent key is reported
         assert messages == (
             "missing required tag 'domain'",
             "missing required tag 'steward'",
@@ -241,23 +242,26 @@ class TestRequiredTagRule:
         # Given a required tag present with an empty value
         table = build_table(tags={"owner": ""})
 
-        # When
+        # When the rule evaluates it
         messages = RequiredTagRule(keys=("owner",)).evaluate(table)
 
-        # Then
+        # Then the key's presence alone satisfies the rule
         assert messages == ()
 
     def test_empty_keys_are_rejected_at_construction(self) -> None:
-        # Given / When / Then
+        # Given no keys
+        # Then construction fails
         with pytest.raises(ValueError):
             RequiredTagRule(keys=())
 
     def test_a_bare_string_for_keys_is_rejected_at_construction(self) -> None:
-        # Given / When / Then
+        # Given a bare string where a list of keys is required
+        # Then construction fails
         with pytest.raises(ValueError):
             RequiredTagRule(keys="owner")
 
     def test_blank_keys_are_rejected_at_construction(self) -> None:
-        # Given / When / Then
+        # Given a whitespace-only key
+        # Then construction fails
         with pytest.raises(ValueError):
             RequiredTagRule(keys=("owner", "   "))

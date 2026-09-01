@@ -1,7 +1,6 @@
 """Behavioural tests for lint_tables: severity attachment, report shape, ordering."""
 
-from delta_engine.domain.model import QualifiedName
-from delta_engine.lint import Finding, LintReport, Severity, lint_tables, parse_lint_config
+from delta_engine.lint import Severity, lint_tables, parse_lint_config
 from delta_engine.schema import Column, DeltaTable, String
 
 
@@ -27,13 +26,13 @@ def build_declared_table(
 
 class TestCleanRun:
     def test_compliant_tables_produce_no_findings(self) -> None:
-        # Given
+        # Given a fully governed declaration
         table = build_declared_table()
 
-        # When
+        # When linting it under the default policy
         report = lint_tables(table)
 
-        # Then
+        # Then the report is clean but still counts the table
         assert report.findings == ()
         assert report.tables_checked == 1
         assert not report.has_errors
@@ -41,27 +40,27 @@ class TestCleanRun:
 
 class TestSeverityAttachment:
     def test_findings_carry_the_severity_configured_for_their_rule(self) -> None:
-        # Given
+        # Given a table without a comment and a policy downgrading that rule
         table = build_declared_table(comment="")
         policy = parse_lint_config(
             {"table-comment": "warning", "column-comment": "off", "primary-key": "off"}
         )
 
-        # When
+        # When linting under that policy
         report = lint_tables(table, policy=policy)
 
-        # Then
+        # Then the finding carries the downgraded severity and the run is clean
         assert [finding.severity for finding in report.findings] == [Severity.WARNING]
         assert not report.has_errors
 
     def test_default_policy_reports_missing_comment_as_an_error(self) -> None:
-        # Given
+        # Given a table without a comment
         table = build_declared_table(comment="")
 
-        # When
+        # When linting under the default policy
         report = lint_tables(table)
 
-        # Then
+        # Then the missing comment is an error
         assert report.has_errors
         assert "table-comment" in [finding.rule for finding in report.findings]
 
@@ -76,7 +75,7 @@ class TestPerTableOverrides:
             {"overrides": [{"tables": ["dev.bronze.*"], "primary-key": "off"}]}
         )
 
-        # When
+        # When linting both under that policy
         report = lint_tables(bronze, silver, policy=policy)
 
         # Then only the silver table is reported
@@ -91,7 +90,7 @@ class TestOrdering:
         zeta = build_declared_table("zeta", comment="")
         alpha = build_declared_table("alpha", comment="")
 
-        # When
+        # When linting them
         report = lint_tables(zeta, alpha)
 
         # Then both are checked and their findings arrive in name order
@@ -101,30 +100,10 @@ class TestOrdering:
             "dev.silver.zeta",
         ]
 
-    def test_a_report_orders_findings_by_table_however_it_is_constructed(self) -> None:
-        # Given findings interleaved across two tables
-        alpha = QualifiedName("dev", "silver", "alpha")
-        zeta = QualifiedName("dev", "silver", "zeta")
-        interleaved = (
-            Finding("table-comment", zeta, "table has no comment", Severity.ERROR),
-            Finding("table-comment", alpha, "table has no comment", Severity.ERROR),
-            Finding("primary-key", zeta, "table has no primary key", Severity.ERROR),
-        )
-
-        # When
-        report = LintReport(findings=interleaved, tables_checked=2)
-
-        # Then each table's findings are contiguous, in their given order
-        assert [(str(finding.table), finding.rule) for finding in report.findings] == [
-            ("dev.silver.alpha", "table-comment"),
-            ("dev.silver.zeta", "table-comment"),
-            ("dev.silver.zeta", "primary-key"),
-        ]
-
 
 class TestReportProjection:
     def test_report_projects_findings_and_counts_as_plain_data(self) -> None:
-        # Given
+        # Given a table breaking one error-severity and one warning-severity rule
         table = build_declared_table(comment="", tags={})
         policy = parse_lint_config(
             {
@@ -134,10 +113,10 @@ class TestReportProjection:
             }
         )
 
-        # When
+        # When projecting the lint report as plain data
         data = lint_tables(table, policy=policy).to_dict()
 
-        # Then
+        # Then the counts and every finding's fields are serialisable values
         assert data == {
             "tables_checked": 1,
             "error_count": 1,

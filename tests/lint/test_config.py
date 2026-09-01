@@ -17,10 +17,13 @@ def severities_for(policy: LintPolicy, table: QualifiedName) -> dict[str, Severi
 
 class TestDefaults:
     def test_empty_config_enables_the_default_rules_as_errors(self) -> None:
-        # Given / When
-        policy = parse_lint_config({})
+        # Given an empty config section
+        section: dict[str, object] = {}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then every default rule is enabled at error severity
         assert severities_by_rule(policy) == {
             "table-comment": Severity.ERROR,
             "column-comment": Severity.ERROR,
@@ -30,29 +33,43 @@ class TestDefaults:
 
 class TestSeverityOverrides:
     def test_a_rule_can_be_downgraded_to_a_warning(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"column-comment": "warning"})
+        # Given a config downgrading one rule
+        section = {"column-comment": "warning"}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule carries the downgraded severity
         assert severities_by_rule(policy)["column-comment"] is Severity.WARNING
 
     def test_an_invalid_severity_is_rejected(self) -> None:
-        # Given / When / Then
+        # Given a severity the config does not offer
+        section = {"table-comment": "fatal"}
+
+        # When the config is parsed
+        # Then parsing fails
         with pytest.raises(LintConfigError):
-            parse_lint_config({"table-comment": "fatal"})
+            parse_lint_config(section)
 
     def test_an_unknown_rule_id_is_rejected(self) -> None:
-        # Given / When / Then
+        # Given a rule id written with an underscore instead of a hyphen
+        section = {"primary_key": "error"}
+
+        # When the config is parsed
+        # Then parsing fails
         with pytest.raises(LintConfigError):
-            parse_lint_config({"primary_key": "error"})
+            parse_lint_config(section)
 
 
 class TestRequiredTag:
     def test_required_tag_is_enabled_by_listing_keys(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"required-tag": {"keys": ["owner", "domain"]}})
+        # Given a config listing the required tag keys
+        section = {"required-tag": {"keys": ["owner", "domain"]}}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule is enabled at error severity, carrying those keys
         rules = {configured.rule.name: configured.rule for configured in policy.rules}
         rule = rules["required-tag"]
         assert isinstance(rule, RequiredTagRule)
@@ -60,34 +77,51 @@ class TestRequiredTag:
         assert severities_by_rule(policy)["required-tag"] is Severity.ERROR
 
     def test_required_tag_severity_can_be_downgraded(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"required-tag": {"keys": ["owner"], "severity": "warning"}})
+        # Given a config listing keys alongside a warning severity
+        section = {"required-tag": {"keys": ["owner"], "severity": "warning"}}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule carries the downgraded severity
         assert severities_by_rule(policy)["required-tag"] is Severity.WARNING
 
     def test_required_tag_set_to_off_stays_absent(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"required-tag": "off"})
+        # Given a config turning the rule off
+        section = {"required-tag": "off"}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule stays absent from the policy
         assert "required-tag" not in severities_by_rule(policy)
 
     def test_required_tag_without_keys_is_rejected(self) -> None:
-        # Given / When / Then
+        # Given the rule enabled without saying which keys are required
+        section = {"required-tag": "error"}
+
+        # When the config is parsed
+        # Then parsing fails
         with pytest.raises(LintConfigError):
-            parse_lint_config({"required-tag": "error"})
+            parse_lint_config(section)
 
     def test_required_tag_with_empty_keys_is_rejected(self) -> None:
-        # Given / When / Then
+        # Given the rule enabled with an empty keys list
+        section = {"required-tag": {"keys": []}}
+
+        # When the config is parsed
+        # Then parsing fails
         with pytest.raises(LintConfigError):
-            parse_lint_config({"required-tag": {"keys": []}})
+            parse_lint_config(section)
 
     def test_required_tag_severity_off_inside_the_table_disables_the_rule(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"required-tag": {"keys": ["owner"], "severity": "off"}})
+        # Given keys listed but the severity set to off
+        section = {"required-tag": {"keys": ["owner"], "severity": "off"}}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule stays absent from the policy
         assert "required-tag" not in severities_by_rule(policy)
 
 
@@ -317,22 +351,32 @@ class TestOverrides:
 
 class TestInlineTableForm:
     def test_a_parameter_free_rule_accepts_the_inline_table_form(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"table-comment": {"severity": "warning"}})
+        # Given a parameter-free rule configured as an inline table
+        section = {"table-comment": {"severity": "warning"}}
 
-        # Then
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule carries the severity from inside the table
         assert severities_by_rule(policy)["table-comment"] is Severity.WARNING
 
     def test_unknown_parameters_for_a_rule_are_rejected(self) -> None:
-        # Given / When / Then
+        # Given a parameter the rule does not take
+        section = {"table-comment": {"keys": ["owner"]}}
+
+        # When the config is parsed
+        # Then parsing fails
         with pytest.raises(LintConfigError):
-            parse_lint_config({"table-comment": {"keys": ["owner"]}})
+            parse_lint_config(section)
 
 
 class TestDeclarationsKey:
     def test_the_reserved_declarations_key_carries_no_policy(self) -> None:
-        # Given / When
-        policy = parse_lint_config({"declarations": "pkg.tables:all_tables"})
+        # Given a section holding only the declarations target
+        section = {"declarations": "pkg.tables:all_tables"}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
 
         # Then it parses exactly as if the key were absent
         assert severities_by_rule(policy) == severities_by_rule(parse_lint_config({}))

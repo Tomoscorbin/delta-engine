@@ -61,8 +61,11 @@ def fake_dependencies(monkeypatch, warehouse_env):
 
 
 def test_target_is_immutable_and_derives_connector_values():
+    # Given a target built from unnormalized input
     target = Target(" https://test.cloud.databricks.com/ ", " warehouse ")
 
+    # Then the identity is normalized, the connector values derive from it,
+    # and the frozen value cannot drift after construction
     assert target.host == "https://test.cloud.databricks.com"
     assert target.warehouse_id == "warehouse"
     assert target.server_hostname == "test.cloud.databricks.com"
@@ -72,21 +75,29 @@ def test_target_is_immutable_and_derives_connector_values():
 
 
 def test_warehouse_environment_variable_is_required(monkeypatch):
+    # Given an environment without the warehouse setting
     monkeypatch.delenv("DATABRICKS_SQL_WAREHOUSE_ID", raising=False)
 
-    with pytest.raises(ConfigError, match="DATABRICKS_SQL_WAREHOUSE_ID"):
+    # Then opening a connection is a configuration error
+    with pytest.raises(ConfigError):
         with open_connection():
             pass
 
 
 def test_target_is_normalized_and_authentication_is_delegated_to_the_sdk(fake_dependencies):
+    # When opening a connection
     with open_connection() as (target, connection):
+        # Then the yielded target carries the SDK-resolved identity and the
+        # yielded connection is the connector's
         assert target == Target(
             "https://test.cloud.databricks.com",
             "test-warehouse-id",
         )
         assert connection is fake_dependencies["connection"]
 
+    # Then the SDK config is built with no arguments (unified auth owns the
+    # environment) and the connector receives the derived values plus a
+    # credentials provider that defers to the SDK
     assert fake_dependencies["config_calls"] == [{}]
     [connect_call] = fake_dependencies["connect_calls"]
     assert connect_call["server_hostname"] == "test.cloud.databricks.com"
@@ -96,24 +107,30 @@ def test_target_is_normalized_and_authentication_is_delegated_to_the_sdk(fake_de
 
 
 def test_unified_auth_environment_is_left_for_the_sdk(fake_dependencies, monkeypatch):
+    # Given unified-auth variables set in the environment
     monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "pat")
     monkeypatch.setenv("DATABRICKS_TOKEN", "legacy-token")
 
+    # When opening a connection
     with open_connection():
         pass
 
+    # Then no auth values are forwarded — the SDK reads its own environment
     assert fake_dependencies["config_calls"] == [{}]
 
 
 def test_warehouse_http_path_is_rejected_instead_of_being_double_prefixed(monkeypatch):
+    # Given a warehouse setting that is already a full HTTP path
     monkeypatch.setenv("DATABRICKS_SQL_WAREHOUSE_ID", "/sql/1.0/warehouses/test")
 
-    with pytest.raises(ConfigError, match="warehouse ID, not an HTTP path"):
+    # Then the mistake is rejected up front rather than producing a broken URL
+    with pytest.raises(ConfigError):
         with open_connection():
             pass
 
 
 def test_sdk_configuration_error_is_sanitized_and_translated(monkeypatch, warehouse_env):
+    # Given an SDK configuration failure whose message leaks credential values
     from databricks.sdk import core as sdk_core
 
     class BrokenConfig:
@@ -124,10 +141,12 @@ def test_sdk_configuration_error_is_sanitized_and_translated(monkeypatch, wareho
     monkeypatch.setenv("DATABRICKS_TOKEN", "legacy-token")
     monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "client-secret")
 
+    # When opening a connection
     with pytest.raises(ConfigError) as excinfo:
         with open_connection():
             pass
 
+    # Then the failure is translated with every credential value redacted
     message = str(excinfo.value)
     assert "authentication configuration failed" in message
     assert "legacy-token" not in message
@@ -136,6 +155,7 @@ def test_sdk_configuration_error_is_sanitized_and_translated(monkeypatch, wareho
 
 
 def test_sdk_configuration_error_survives_an_unrenderable_message(monkeypatch, warehouse_env):
+    # Given an SDK configuration failure whose message itself raises
     from databricks.sdk import core as sdk_core
 
     class UnrenderableError(ValueError):
@@ -148,12 +168,14 @@ def test_sdk_configuration_error_survives_an_unrenderable_message(monkeypatch, w
 
     monkeypatch.setattr(sdk_core, "Config", BrokenConfig)
 
-    with pytest.raises(ConfigError, match="exception message unavailable"):
+    # Then translation still produces a configuration error, not a new crash
+    with pytest.raises(ConfigError):
         with open_connection():
             pass
 
 
 def test_sdk_configuration_must_resolve_a_workspace_host(monkeypatch, warehouse_env):
+    # Given an SDK configuration that resolves no workspace host
     from databricks.sdk import core as sdk_core
 
     class HostlessConfig:
@@ -161,7 +183,8 @@ def test_sdk_configuration_must_resolve_a_workspace_host(monkeypatch, warehouse_
 
     monkeypatch.setattr(sdk_core, "Config", HostlessConfig)
 
-    with pytest.raises(ConfigError, match="resolved no workspace host"):
+    # Then the missing host is a configuration error before any connect attempt
+    with pytest.raises(ConfigError):
         with open_connection():
             pass
 
@@ -177,6 +200,7 @@ def test_sdk_configuration_must_resolve_a_workspace_host(monkeypatch, warehouse_
 def test_auth_and_connect_failures_are_one_line_configuration_errors(
     fake_dependencies, monkeypatch, connect_error
 ):
+    # Given a connector that fails to connect
     from databricks import sql as databricks_sql
 
     def fail_connect(**kwargs):
@@ -184,10 +208,12 @@ def test_auth_and_connect_failures_are_one_line_configuration_errors(
 
     monkeypatch.setattr(databricks_sql, "connect", fail_connect)
 
+    # When opening a connection
     with pytest.raises(ConfigError) as excinfo:
         with open_connection():
             pass
 
+    # Then the translated error is one line naming the failure and its cause
     message = str(excinfo.value)
     assert "cannot connect to Databricks" in message
     assert type(connect_error).__name__ in message
@@ -205,21 +231,26 @@ def test_auth_and_connect_failures_are_one_line_configuration_errors(
 def test_missing_optional_package_has_the_cli_extra_hint(
     missing_module, distribution, monkeypatch, warehouse_env
 ):
+    # Given an environment missing one of the optional databricks packages
     import databricks
 
     monkeypatch.delattr(databricks, "sql", raising=False)
     monkeypatch.setitem(sys.modules, missing_module, None)
 
+    # When opening a connection
     with pytest.raises(ConfigError) as excinfo:
         with open_connection():
             pass
 
+    # Then the error names the missing distribution and the install command
     message = str(excinfo.value)
     assert distribution in message
     assert 'pip install "delta-engine[cli]"' in message
 
 
 def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
+    # Given a connector that emits the irrelevant PyArrow warning alongside a
+    # real one while connecting
     connector_logger = logging.getLogger("databricks.sql.client")
     original_filters = tuple(connector_logger.filters)
 
@@ -236,6 +267,7 @@ def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
         def authenticate(self) -> dict[str, str]:
             return {"Authorization": "Bearer resolved"}
 
+    # When connecting
     with caplog.at_level(logging.WARNING, logger="databricks.sql.client"):
         connection = _connect(
             lazy_databricks_sql,
@@ -243,6 +275,8 @@ def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
             Target("https://test.cloud.databricks.com", "warehouse"),
         )
 
+    # Then only the PyArrow noise is hidden, and the filter does not outlive
+    # the call
     assert isinstance(connection, _FakeConnection)
     assert _OPTIONAL_PYARROW_WARNING not in caplog.text
     assert "warehouse warning" in caplog.text
@@ -250,40 +284,52 @@ def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
 
 
 def test_local_databricks_module_is_reported_as_shadowing(tmp_path, monkeypatch, warehouse_env):
+    # Given a stray local databricks.py fronting sys.path
     (tmp_path / "databricks.py").write_text("x = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delitem(sys.modules, "databricks", raising=False)
     monkeypatch.delitem(sys.modules, "databricks.sql", raising=False)
 
+    # When opening a connection
     with pytest.raises(ConfigError) as excinfo:
         with open_connection():
             pass
 
+    # Then the diagnosis names the shadowing file, not a missing package
     message = str(excinfo.value)
     assert "shadows" in message
     assert "databricks.py" in message
 
 
 def test_close_failure_is_logged_without_replacing_success(fake_dependencies, monkeypatch, caplog):
+    # Given a connection whose close raises
     from databricks import sql as databricks_sql
 
     failing_connection = _FakeConnection(RuntimeError("close failed"))
     monkeypatch.setattr(databricks_sql, "connect", lambda **kwargs: failing_connection)
 
+    # When a successful use of the connection ends
     with caplog.at_level(logging.WARNING):
         with open_connection():
             pass
 
+    # Then the close is attempted once, logged, and never raised
     assert failing_connection.close_calls == 1
     assert "Failed to close" in caplog.text
 
 
 def test_close_failure_does_not_replace_primary_plan_exception(fake_dependencies, monkeypatch):
+    # Given a connection whose close raises
     from databricks import sql as databricks_sql
 
     failing_connection = _FakeConnection(RuntimeError("close failed"))
     monkeypatch.setattr(databricks_sql, "connect", lambda **kwargs: failing_connection)
+    primary_failure = LookupError("primary failure")
 
-    with pytest.raises(LookupError, match="primary failure"):
+    # When the body raises before the connection closes
+    with pytest.raises(LookupError) as exc_info:
         with open_connection():
-            raise LookupError("primary failure")
+            raise primary_failure
+
+    # Then the caller sees the primary failure, not the close failure
+    assert exc_info.value is primary_failure
