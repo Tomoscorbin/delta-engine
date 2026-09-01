@@ -27,7 +27,7 @@ from tests.domain.model.strategies import NON_DATA_TYPES
     invalid=NON_DATA_TYPES,
 )
 def test_composite_types_reject_non_data_type_members(position: str, invalid: Any) -> None:
-    with pytest.raises(ValueError, match=f"(?i){position}"):
+    with pytest.raises(TypeError, match=f"(?i){position}"):
         match position:
             case "array element":
                 Array(invalid)
@@ -74,14 +74,14 @@ def test_decimal_rejects_precision_above_delta_maximum() -> None:
 def test_decimal_rejects_non_integer_precision_and_scale(field: str, malformed: object) -> None:
     values = {"precision": 10, "scale": 1}
     values[field] = malformed
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         Decimal(**values)
 
 
 def test_struct_field_validates_name_and_nullability_and_preserves_them() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    with pytest.raises(ValueError, match="nullable"):
+    with pytest.raises(TypeError, match="nullable"):
         StructField("amount", Integer(), nullable=1)
 
     assert StructField("Amount", Integer()).nullable is True

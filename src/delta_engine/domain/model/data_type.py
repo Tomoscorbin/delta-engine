@@ -17,7 +17,7 @@ class DataType:
 
 def _require_data_type(value: object, *, subject: str) -> None:
     if not isinstance(value, DataType):
-        raise ValueError(f"{subject} must be a DataType instance; got {value!r}")
+        raise TypeError(f"{subject} must be a DataType instance; got {value!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,19 +76,20 @@ class Decimal(DataType):
 
     def __post_init__(self) -> None:
         if type(self.precision) is not int or type(self.scale) is not int:
-            raise ValueError(
-                "precision and scale must by type int;"
+            raise TypeError(
+                "precision and scale must be type int;"
                 f" got precision: {type(self.precision)}, scale: {type(self.scale)}"
             )
-        # The cap is checked first so an over-limit precision always gets the
-        # message naming the limit, even when the scale is also out of range.
-        if self.precision > _MAX_DECIMAL_PRECISION:
+        if not (1 <= self.precision <= _MAX_DECIMAL_PRECISION):
             raise ValueError(
-                f"decimal precision must be at most {_MAX_DECIMAL_PRECISION}"
+                f"decimal precision must be between 1 and {_MAX_DECIMAL_PRECISION}"
                 f" (Delta/Spark limit); got {self.precision}"
             )
-        if self.precision <= 0 or not (0 <= self.scale <= self.precision):
-            raise ValueError("invalid decimal(precision, scale)")
+        if not (0 <= self.scale <= self.precision):
+            raise ValueError(
+                f"decimal scale must be between 0 and precision ({self.precision});"
+                f" got {self.scale}"
+            )
 
     def __str__(self) -> str:
         return f"Decimal({self.precision},{self.scale})"
@@ -135,7 +136,7 @@ class StructField:
     def __post_init__(self) -> None:
         _require_data_type(self.data_type, subject="Struct field data type")
         if type(self.nullable) is not bool:
-            raise ValueError(f"Struct field nullable must be a bool; got {self.nullable!r}")
+            raise TypeError(f"Struct field nullable must be a bool; got {self.nullable!r}")
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
         object.__setattr__(self, "name", Identifier(self.name))
@@ -160,7 +161,7 @@ class Struct(DataType):
         seen: set[str] = set()
         for field in self.fields:
             if not isinstance(field, StructField):
-                raise ValueError(f"Struct field must be a StructField instance; got {field!r}")
+                raise TypeError(f"Struct field must be a StructField instance; got {field!r}")
             if field.name in seen:
                 raise ValueError(f"Duplicate struct field name: {field.name}")
             seen.add(field.name)
