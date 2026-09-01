@@ -18,8 +18,10 @@ def lint_tables(
     Evaluate every enabled rule against every table and report the findings.
 
     Tables are checked in qualified-name order, so the report never depends on
-    the order they were passed. Each violation a rule states is paired with the
-    severity the policy configures for that rule.
+    the order they were passed. The policy resolves which rules apply to each
+    table, so per-table overrides suppress or re-grade findings table by table;
+    each violation a rule states is paired with the severity the policy
+    configures for that rule on that table.
 
     Args:
         tables: Declarations to lint; anything with ``to_desired_table()``.
@@ -39,7 +41,7 @@ def lint_tables(
             severity=configured.severity,
         )
         for table in desired_tables
-        for configured in policy.rules
+        for configured in policy.resolve_rules(table.qualified_name)
         for message in configured.rule.evaluate(table)
     )
     return LintReport(findings=findings, tables_checked=len(desired_tables))

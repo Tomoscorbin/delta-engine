@@ -2,12 +2,17 @@
 
 import pytest
 
+from delta_engine.domain.model import QualifiedName
 from delta_engine.lint import LintConfigError, LintPolicy, Severity, parse_lint_config
 from delta_engine.lint.rules import NamingConventionRule, RequiredTagRule
 
 
 def severities_by_rule(policy: LintPolicy) -> dict[str, Severity]:
     return {configured.rule.name: configured.severity for configured in policy.rules}
+
+
+def severities_for(policy: LintPolicy, table: QualifiedName) -> dict[str, Severity]:
+    return {configured.rule.name: configured.severity for configured in policy.resolve_rules(table)}
 
 
 class TestDefaults:
@@ -128,6 +133,186 @@ class TestNamingConvention:
 
         # Then the rule is absent from the policy
         assert "naming-convention" not in severities_by_rule(policy)
+
+
+class TestOverrides:
+    def test_a_matching_override_turns_a_rule_off(self) -> None:
+        # Given an override that turns primary-key off for bronze tables
+        section = {"overrides": [{"tables": ["dev.bronze.*"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule is absent for a bronze table and unchanged elsewhere
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "raw"))
+        silver = QualifiedName("dev", "silver", "orders")
+        assert severities_for(policy, silver)["primary-key"] is Severity.ERROR
+
+    def test_a_matching_override_downgrades_severity(self) -> None:
+        # Given an override that downgrades column-comment for bronze tables
+        section = {"overrides": [{"tables": ["dev.bronze.*"], "column-comment": "warning"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule carries the downgraded severity for a bronze table
+        bronze = QualifiedName("dev", "bronze", "raw")
+        assert severities_for(policy, bronze)["column-comment"] is Severity.WARNING
+
+    def test_overlapping_overrides_merge_per_rule_and_the_last_match_wins(self) -> None:
+        # Given a broad bronze override and a narrower one for a single table
+        section = {
+            "overrides": [
+                {"tables": ["dev.bronze.*"], "primary-key": "off", "column-comment": "warning"},
+                {"tables": ["dev.bronze.raw_events"], "column-comment": "off"},
+            ]
+        }
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the narrow table keeps the broad block's settings for rules the
+        # narrow block does not name, and the narrow block wins where both speak
+        raw_events = severities_for(policy, QualifiedName("dev", "bronze", "raw_events"))
+        assert "primary-key" not in raw_events
+        assert "column-comment" not in raw_events
+        other_bronze = severities_for(policy, QualifiedName("dev", "bronze", "raw_clicks"))
+        assert "primary-key" not in other_bronze
+        assert other_bronze["column-comment"] is Severity.WARNING
+
+    def test_an_override_can_enable_a_rule_that_is_off_globally(self) -> None:
+        # Given naming-convention off globally but enabled for gold tables
+        section = {"overrides": [{"tables": ["prod.gold.*"], "naming-convention": "error"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule is in effect only for a gold table
+        gold = QualifiedName("prod", "gold", "orders")
+        assert severities_for(policy, gold)["naming-convention"] is Severity.ERROR
+        bronze = QualifiedName("prod", "bronze", "orders")
+        assert "naming-convention" not in severities_for(policy, bronze)
+
+    def test_an_override_can_reconfigure_rule_parameters(self) -> None:
+        # Given naming-convention enabled globally and a looser pattern for bronze tables
+        section = {
+            "naming-convention": "error",
+            "overrides": [
+                {"tables": ["dev.bronze.*"], "naming-convention": {"pattern": "[a-z0-9_]+"}}
+            ],
+        }
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the rule in effect for a bronze table carries the override's pattern
+        bronze = QualifiedName("dev", "bronze", "raw")
+        rules = {
+            configured.rule.name: configured.rule for configured in policy.resolve_rules(bronze)
+        }
+        rule = rules["naming-convention"]
+        assert isinstance(rule, NamingConventionRule)
+        assert rule.pattern == "[a-z0-9_]+"
+
+    def test_a_wildcard_matches_within_a_single_segment(self) -> None:
+        # Given a pattern with a wildcard schema segment
+        section = {"overrides": [{"tables": ["dev.*.orders"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then the pattern matches across schemas but only the named table
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "silver", "orders"))
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "orders"))
+        payments = QualifiedName("dev", "silver", "payments")
+        assert severities_for(policy, payments)["primary-key"] is Severity.ERROR
+
+    def test_pattern_matching_ignores_case(self) -> None:
+        # Given a pattern written with capitals
+        section = {"overrides": [{"tables": ["DEV.Bronze.*"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then it matches the canonical lowercase qualified name
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "raw"))
+
+    def test_whitespace_around_a_segment_is_ignored(self) -> None:
+        # Given a pattern with stray whitespace around a segment
+        section = {"overrides": [{"tables": ["dev. bronze .*"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        policy = parse_lint_config(section)
+
+        # Then it matches as if the whitespace were absent
+        assert "primary-key" not in severities_for(policy, QualifiedName("dev", "bronze", "raw"))
+
+    def test_a_pattern_without_three_segments_is_rejected(self) -> None:
+        # Given a pattern that names only a catalog and a schema
+        section = {"overrides": [{"tables": ["dev.bronze"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_a_pattern_with_a_blank_segment_is_rejected(self) -> None:
+        # Given a pattern whose schema segment is blank
+        section = {"overrides": [{"tables": ["dev..orders"], "primary-key": "off"}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_an_empty_tables_list_is_rejected(self) -> None:
+        # Given an override that matches no tables
+        section = {"overrides": [{"tables": [], "primary-key": "off"}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_an_override_without_rule_settings_is_rejected(self) -> None:
+        # Given an override that names tables but sets no rule
+        section = {"overrides": [{"tables": ["dev.bronze.*"]}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_an_unknown_rule_in_an_override_is_rejected(self) -> None:
+        # Given an override that names a rule that does not exist
+        section = {"overrides": [{"tables": ["dev.bronze.*"], "primary_key": "off"}]}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_invalid_rule_parameters_in_an_override_are_rejected(self) -> None:
+        # Given an override whose rule parameters the rule itself rejects
+        section = {
+            "overrides": [
+                {"tables": ["dev.bronze.*"], "naming-convention": {"pattern": "[unclosed"}}
+            ]
+        }
+
+        # When the config is parsed
+        # Then parsing fails, even though no table has been matched yet
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
+
+    def test_overrides_that_are_not_an_array_are_rejected(self) -> None:
+        # Given an overrides value that is not an array of tables
+        section = {"overrides": {"tables": ["dev.bronze.*"], "primary-key": "off"}}
+
+        # When the config is parsed
+        # Then parsing fails
+        with pytest.raises(LintConfigError):
+            parse_lint_config(section)
 
 
 class TestInlineTableForm:
