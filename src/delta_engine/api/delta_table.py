@@ -685,6 +685,17 @@ class ForeignKey:
         object.__setattr__(self, "_lowered_columns", lowered)
         object.__setattr__(self, "_reference", _resolve_reference(self.references, lowered))
 
+    def __hash__(self) -> int:
+        """
+        Hash the declaration, consistently with equality, in every column form.
+
+        A mapping declaration hashes by its unordered pairs, so two mappings
+        equal in any insertion order hash equal.
+        """
+        columns = self.columns
+        columns_key = frozenset(columns.items()) if isinstance(columns, Mapping) else columns
+        return hash((columns_key, self.references, self.name))
+
     def _to_constraint(
         self,
         owner: _NormalizedDeclaration,
