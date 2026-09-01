@@ -11,7 +11,7 @@ def severities_by_rule(policy: LintPolicy) -> dict[str, Severity]:
 
 
 class TestDefaults:
-    def test_empty_config_enables_the_parameter_free_rules_as_errors(self) -> None:
+    def test_empty_config_enables_the_default_rules_as_errors(self) -> None:
         # Given / When
         policy = parse_lint_config({})
 
@@ -20,7 +20,6 @@ class TestDefaults:
             "table-comment": Severity.ERROR,
             "column-comment": Severity.ERROR,
             "primary-key": Severity.ERROR,
-            "naming-convention": Severity.ERROR,
         }
 
 
@@ -88,6 +87,13 @@ class TestRequiredTag:
 
 
 class TestNamingConvention:
+    def test_it_is_off_by_default(self) -> None:
+        # Given / When
+        policy = parse_lint_config({})
+
+        # Then
+        assert "naming-convention" not in severities_by_rule(policy)
+
     def test_a_custom_pattern_is_passed_through_to_the_rule(self) -> None:
         # Given / When
         policy = parse_lint_config({"naming-convention": {"pattern": r"[A-Za-z][A-Za-z0-9]*"}})

@@ -11,6 +11,9 @@ from delta_engine.domain.model import DesiredTable
 class LintRule(Protocol):
     """One governance policy evaluated per table."""
 
+    # Whether the rule runs when the config does not mention it.
+    enabled_by_default: ClassVar[bool]
+
     @property
     def name(self) -> str:
         """The rule id used in config keys and finding output."""
@@ -26,6 +29,7 @@ class TableCommentRule:
     """Every table has a non-blank comment."""
 
     name: ClassVar[str] = "table-comment"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when its comment is blank."""
@@ -39,6 +43,7 @@ class ColumnCommentRule:
     """Every column has a non-blank comment."""
 
     name: ClassVar[str] = "column-comment"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report each column whose comment is blank, by name."""
@@ -54,6 +59,7 @@ class PrimaryKeyRule:
     """Every table declares a primary key."""
 
     name: ClassVar[str] = "primary-key"
+    enabled_by_default: ClassVar[bool] = True
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table when it has no primary key."""
@@ -68,6 +74,7 @@ class RequiredTagRule:
 
     keys: ListOrTuple[str]
     name: ClassVar[str] = "required-tag"
+    enabled_by_default: ClassVar[bool] = False
 
     def __post_init__(self) -> None:
         if isinstance(self.keys, str):
@@ -94,6 +101,7 @@ class NamingConventionRule:
 
     pattern: str = _DEFAULT_NAME_PATTERN
     name: ClassVar[str] = "naming-convention"
+    enabled_by_default: ClassVar[bool] = False
 
     def __post_init__(self) -> None:
         if not self.pattern.strip():
@@ -105,23 +113,23 @@ class NamingConventionRule:
 
     def evaluate(self, table: DesiredTable) -> tuple[str, ...]:
         """Report the table name and each column name the pattern does not fully match."""
-        names = (
-            ("table", table.qualified_name.name),
-            *(("column", str(column.name)) for column in table.columns),
-        )
-        return tuple(
-            f"{kind} name '{value}' does not match naming convention '{self.pattern}'"
-            for kind, value in names
-            if re.fullmatch(self.pattern, value) is None
-        )
+        named_values: list[tuple[str, str]] = [("table", table.qualified_name.name)]
+        named_values += [("column", str(column.name)) for column in table.columns]
+
+        messages: list[str] = []
+        for kind, value in named_values:
+            if re.fullmatch(self.pattern, value) is None:
+                messages.append(
+                    f"{kind} name '{value}' does not match naming convention '{self.pattern}'"
+                )
+        return tuple(messages)
 
 
 # Every rule the config section can name. A rule's dataclass fields are its
 # config parameters: an inline TOML table is `severity` plus constructor
-# keyword arguments, so no rule may have a field called `severity`. A rule
-# constructible without arguments defaults to enabled at error severity; one
-# with required fields stays off until configured. Registering a rule here is
-# all the wiring it needs.
+# keyword arguments, so no rule may have a field called `severity`. A rule's
+# `enabled_by_default` decides whether it runs when the config is silent.
+# Registering a rule here is all the wiring it needs.
 ALL_RULES: Final = (
     TableCommentRule,
     ColumnCommentRule,

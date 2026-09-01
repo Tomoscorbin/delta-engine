@@ -195,14 +195,22 @@ class TestNamingConventionRule:
         )
 
     def test_a_blank_pattern_is_rejected_at_construction(self) -> None:
-        # Given / When / Then
+        # Given a blank pattern
+        pattern = "   "
+
+        # When the rule is constructed
+        # Then construction fails
         with pytest.raises(ValueError):
-            NamingConventionRule(pattern="   ")
+            NamingConventionRule(pattern=pattern)
 
     def test_an_invalid_regular_expression_is_rejected_at_construction(self) -> None:
-        # Given / When / Then
+        # Given a pattern that is not a valid regular expression
+        pattern = "[unclosed"
+
+        # When the rule is constructed
+        # Then construction fails
         with pytest.raises(ValueError):
-            NamingConventionRule(pattern="[unclosed")
+            NamingConventionRule(pattern=pattern)
 
 
 class TestRequiredTagRule:
