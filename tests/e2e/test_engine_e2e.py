@@ -60,6 +60,7 @@ def test_engine_sync_happy_path(spark, temp_schema):
 
 
 def test_engine_preserves_spark_variable_expressions_in_comments(spark, temp_schema):
+    # Given a declaration whose comments contain a ${...} expression
     variable_substitution = "spark.sql.variable.substitute"
     original_setting = spark.conf.get(variable_substitution)
     table_name = f"e2e_literal_{uuid4().hex[:8]}"
@@ -74,21 +75,23 @@ def test_engine_preserves_spark_variable_expressions_in_comments(spark, temp_sch
     )
     engine = Engine(reader=NativeSparkReader(spark), executor=_spark_executor(spark))
 
-    # Spark normally substitutes ${...} before parsing, even inside quoted SQL
-    # literals. Exercise that default explicitly so this remains a regression
-    # test for the runner's session guard rather than merely for SQL quoting.
+    # When syncing with variable substitution explicitly on — Spark normally
+    # substitutes ${...} before parsing, even inside quoted SQL literals, so
+    # this remains a regression test for the runner's session guard rather
+    # than merely for SQL quoting
     spark.conf.set(variable_substitution, "true")
     try:
         report = engine.sync(declaration)
 
+        # Then the literal survives verbatim and the session setting is intact
         assert report.has_failures is False
         assert spark.catalog.getTable(fq).description == literal
         [field] = spark.table(fq).schema.fields
         assert field.metadata.get("comment") == literal
         assert spark.conf.get(variable_substitution) == "true"
 
+        # Then a second sync sees no drift from the expression-shaped comment
         second_report = engine.sync(declaration)
-
         assert len(second_report.table_runs[0].plan) == 0
         assert spark.conf.get(variable_substitution) == "true"
     finally:
@@ -195,6 +198,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, temp_schema):
 
 
 def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
+    # Given a declaration already synced once
     table_name = f"idem_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
@@ -220,6 +224,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
 
 
 def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp_schema):
+    # Given an initial declaration synced successfully
     table_name = f"lifecycle_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     engine = Engine(NativeSparkReader(spark), _spark_executor(spark))
@@ -239,6 +244,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
     first_report = engine.sync(initial)
     assert first_report.has_failures is False
 
+    # When syncing an evolved declaration that adds, drops, and re-comments
     evolved = DeltaTable(
         TEST_CATALOG,
         temp_schema,
@@ -258,6 +264,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
     assert second_report.has_failures is False
     assert second_report.table_runs[0].execution is not None
 
+    # Then the catalog reflects the evolved declaration exactly
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert set(fields) == {"id", "name", "age"}
     assert isinstance(fields["id"].dataType, T.IntegerType)
@@ -274,17 +281,20 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
     assert detail["properties"].get("delta.columnMapping.mode") == "name"
     assert detail["properties"].get("delta.logRetentionDuration") == "interval 30 days"
 
+    # Then a third sync of the same declaration plans nothing
     third_report = engine.sync(evolved)
     assert len(third_report.table_runs[0].plan) == 0
 
 
 def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, temp_schema):
+    # Given an existing table whose id column is NOT NULL
     fq = make_temp_table(
         "nullable",
         "id INT NOT NULL, name STRING",
         tblprops={"delta.columnMapping.mode": "name"},
     )
 
+    # When syncing a declaration loosening it to nullable
     engine = Engine(NativeSparkReader(spark), _spark_executor(spark))
     engine.sync(
         DeltaTable(
@@ -297,15 +307,18 @@ def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, 
         )
     )
 
+    # Then the column is nullable in the catalog
     field = next(f for f in spark.table(fq).schema.fields if f.name == "id")
     assert isinstance(field.dataType, T.IntegerType)
     assert field.nullable is True
 
 
 def test_engine_creates_partitioned_table_with_expected_partitions(spark, temp_schema):
+    # Given a partitioned declaration for a table that does not exist yet
     table_name = f"part_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
+    # When syncing it
     engine = Engine(NativeSparkReader(spark), _spark_executor(spark))
     engine.sync(
         DeltaTable(
@@ -322,6 +335,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, temp_s
         )
     )
 
+    # Then the table exists with the declared partition columns, in order
     assert spark.catalog.tableExists(f"{temp_schema}.{table_name}")
     parts = tuple(c.name for c in spark.catalog.listColumns(fq) if getattr(c, "isPartition", False))
     assert parts == ("p_date", "store")
@@ -329,12 +343,12 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, temp_s
 
 
 def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_schema):
+    # Given two seeded tables the sync will target
     ok = f"ok_{uuid4().hex[:8]}"
     bad = f"bad_{uuid4().hex[:8]}"
     fq_ok = f"{TEST_CATALOG}.{temp_schema}.{ok}"
     fq_bad = f"{TEST_CATALOG}.{temp_schema}.{bad}"
 
-    # seed both tables with specific names the sync will target
     spark.sql(
         f"CREATE TABLE {fq_ok} (id INT NOT NULL, name STRING)"
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
@@ -344,6 +358,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_sche
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
     )
 
+    # When syncing one valid change alongside one invalid non-nullable add
     engine = Engine(NativeSparkReader(spark), _spark_executor(spark))
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(
@@ -372,6 +387,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_sche
         )
     assert bad in str(excinfo.value)
 
+    # Then the valid table was applied and the invalid one left untouched
     ok_fields = {f.name: f for f in spark.table(fq_ok).schema.fields}
     assert "age" in ok_fields and ok_fields["age"].nullable is True
 
@@ -472,7 +488,7 @@ def test_engine_fails_loud_on_undeclared_column_mapping(spark, temp_schema):
 
     engine = Engine(NativeSparkReader(spark), _spark_executor(spark))
 
-    # When / Then the sync fails at validation, naming the property
+    # Then the sync fails at validation, naming the property
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(
             DeltaTable(
