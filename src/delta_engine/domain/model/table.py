@@ -20,11 +20,16 @@ from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
 
 
-def _validate_key_column_list(kind: str, names: Sequence[str], column_names: set[str]) -> None:
-    """Rules shared by partition and clustering key lists: existing and unique."""
-    missing = [name for name in names if str(name) not in column_names]
+def _require_existing_columns(kind: str, names: Sequence[str], exact_names: set[str]) -> None:
+    """Require every name to match a table column by its exact spelling."""
+    missing = [name for name in names if str(name) not in exact_names]
     if missing:
         raise ValueError(f"{kind} column not found: {', '.join(missing)}")
+
+
+def _validate_key_column_list(kind: str, names: Sequence[str], exact_names: set[str]) -> None:
+    """Rules shared by partition and clustering key lists: existing and unique."""
+    _require_existing_columns(kind, names, exact_names)
 
     seen: set[str] = set()
     for name in names:
@@ -66,18 +71,10 @@ def _validate_table_structure(
     _validate_key_column_list("Clustering", clustered_by, exact_names)
 
     if primary_key is not None:
-        missing_pk = [name for name in primary_key.columns if str(name) not in exact_names]
-        if missing_pk:
-            raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
+        _require_existing_columns("Primary key", primary_key.columns, exact_names)
 
     for foreign_key in foreign_keys:
-        missing_fk_columns = [
-            name for name in foreign_key.local_columns if str(name) not in exact_names
-        ]
-        if missing_fk_columns:
-            raise ValueError(
-                f"Foreign key local column not found in columns: {missing_fk_columns[0]}"
-            )
+        _require_existing_columns("Foreign key local", foreign_key.local_columns, exact_names)
 
     for tag_key in tags:
         if not tag_key.strip():
