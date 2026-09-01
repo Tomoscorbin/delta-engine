@@ -564,6 +564,10 @@ def _validate_reference_coherence(
             )
 
 
+# The domain re-enforces these column rules when the constraint is built
+# (constraints._constraint_columns). The two lowering helpers below check them
+# anyway — deliberately — so the error points at the ForeignKey(...)
+# construction site, not at whichever DeltaTable later includes the declaration.
 def _lower_column_mapping(columns: Mapping[str, str]) -> Mapping[Identifier, Identifier]:
     """Lower an explicit ``{local: referenced}`` mapping, rejecting duplicate locals."""
     if not columns:
