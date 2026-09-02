@@ -2,7 +2,6 @@ import pytest
 
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
-    CompiledAction,
     CompiledPlan,
     ExecutionResult,
 )
@@ -26,44 +25,44 @@ def _compiled(*statements: str) -> CompiledPlan:
     return build_compiled_comment_plan(_TARGET, *statements)
 
 
-def test_compiled_action_rejects_an_empty_statement():
-    # Given an action whose compilation produced only whitespace
-    action = SetTableComment(desired_comment="new", observed_comment="old")
-
-    # Then pairing them is rejected
-    with pytest.raises(ValueError):
-        CompiledAction(action=action, statement="  ")
-
-
-def test_compiled_plan_rejects_an_omitted_action():
-    # Given a plan with one action and no compiled statements
+def test_compiled_plan_rejects_a_blank_statement():
+    # Given a plan whose one action compiled to only whitespace
     plan = ActionPlan(
         target=_TARGET,
         actions=(SetTableComment(desired_comment="new", observed_comment="old"),),
     )
 
-    # Then the mismatch is rejected — statements must correspond exactly to actions
+    # Then pairing them is rejected
     with pytest.raises(ValueError):
-        CompiledPlan(plan=plan, compiled_actions=())
+        CompiledPlan(plan=plan, statements=("  ",))
 
 
-def test_compiled_plan_copies_mutable_compiled_actions_to_a_tuple():
+@pytest.mark.parametrize("statements", [(), ("SQL 0", "SQL 1")], ids=["omitted", "extra"])
+def test_compiled_plan_rejects_a_statement_count_mismatch(statements):
+    # Given a plan with one action
+    plan = ActionPlan(
+        target=_TARGET,
+        actions=(SetTableComment(desired_comment="new", observed_comment="old"),),
+    )
+
+    # Then a statement count that differs from the action count is rejected
+    with pytest.raises(ValueError):
+        CompiledPlan(plan=plan, statements=statements)
+
+
+def test_compiled_plan_copies_mutable_statements_to_a_tuple():
     # Given a compiled plan built from a mutable list
     action = SetTableComment(desired_comment="new", observed_comment="old")
     plan = ActionPlan(target=_TARGET, actions=(action,))
-    compiled_action = CompiledAction(action=action, statement="SQL")
-    compiled_actions = [compiled_action]
+    statements = ["SQL"]
 
-    compiled = CompiledPlan(
-        plan=plan,
-        compiled_actions=compiled_actions,  # type: ignore[arg-type]
-    )
+    compiled = CompiledPlan(plan=plan, statements=statements)
 
     # When the caller mutates its list afterwards
-    compiled_actions.clear()
+    statements.clear()
 
     # Then the compiled plan is unaffected
-    assert compiled.compiled_actions == (compiled_action,)
+    assert compiled.statements == ("SQL",)
 
 
 def test_execution_result_success_covers_the_complete_plan():

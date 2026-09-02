@@ -289,7 +289,7 @@ class Engine:
                 continue
 
             compiled = run.compiled
-            if compiled is None or not compiled.compiled_actions:
+            if compiled is None or not compiled.statements:
                 executed.append(run)
                 continue
 

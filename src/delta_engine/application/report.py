@@ -508,7 +508,7 @@ class SyncReport:
     def planned_sql_statements(self) -> dict[str, tuple[str, ...]]:
         """Dotted table name → the SQL its plan compiles to; no-op tables omitted."""
         return {
-            str(run.qualified_name): run.compiled.statements
+            str(run.qualified_name): tuple(run.compiled.statements)
             for run in self.table_runs
             if run.compiled is not None and run.compiled.statements
         }
