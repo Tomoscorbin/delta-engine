@@ -94,8 +94,8 @@ _MAX_TAG_VALUE_LENGTH: Final[int] = 256
 # contain them), and neither keys nor values may begin or end with a space.
 _TAG_KEY_FORBIDDEN_CHARACTERS: Final[frozenset[str]] = frozenset(".,-=/:")
 
-# Beyond the per-securable quota, Unity Catalog caps one table's column tags
-# at 1,000 in total across all its columns; table tags do not count.
+# Unity Catalog caps one table's column tags at 1,000 in total across
+# all its columns; table tags do not count.
 _MAX_COLUMN_TAGS_PER_TABLE: Final[int] = 1_000
 
 _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
