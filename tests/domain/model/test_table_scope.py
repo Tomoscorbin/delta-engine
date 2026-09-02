@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model import TableAspect, TableScope
+from delta_engine.domain.model import ReconciliationMode, TableAspect, TableScope
 
 TAGS = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
 COMMENTS = frozenset({TableAspect.TABLE_COMMENT, TableAspect.COLUMN_COMMENTS})
@@ -15,21 +15,50 @@ STRUCTURE = frozenset(
     }
 )
 
+MANAGED_BY_SCOPE = [
+    (TableScope.TAGS, TAGS),
+    (TableScope.ANNOTATIONS, TAGS | COMMENTS),
+    (TableScope.METADATA, TAGS | COMMENTS | KEYS),
+    (TableScope.FULL, TAGS | COMMENTS | KEYS | STRUCTURE),
+]
 
-@pytest.mark.parametrize(
-    ("scope", "managed"),
-    [
-        (TableScope.TAGS, TAGS),
-        (TableScope.ANNOTATIONS, TAGS | COMMENTS),
-        (TableScope.METADATA, TAGS | COMMENTS | KEYS),
-        (TableScope.FULL, TAGS | COMMENTS | KEYS | STRUCTURE),
-    ],
-)
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
 def test_each_scope_manages_its_part_of_the_table(
     scope: TableScope, managed: frozenset[TableAspect]
 ) -> None:
     # Then each scope manages exactly its slice of the aspect vocabulary
     assert {aspect for aspect in TableAspect if scope.manages(aspect)} == managed
+
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
+def test_a_scope_converges_exactly_the_aspects_it_manages(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Then MANAGE is the reconciliation mode of exactly the managed slice
+    converged = {
+        aspect for aspect in TableAspect if scope.reconciles(aspect) is ReconciliationMode.MANAGE
+    }
+    assert converged == managed
+
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
+def test_aspects_outside_a_scope_must_match_the_live_table_except_properties(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Given the aspects outside this scope
+    outside = frozenset(TableAspect) - managed
+
+    # Then properties make no assertion at all, while every other outside
+    # aspect mirrors the live table and refuses drift
+    ignored = {
+        aspect for aspect in outside if scope.reconciles(aspect) is ReconciliationMode.IGNORE
+    }
+    checked = {
+        aspect for aspect in outside if scope.reconciles(aspect) is ReconciliationMode.REQUIRE_MATCH
+    }
+    assert ignored == ({TableAspect.PROPERTIES} & outside)
+    assert checked == outside - {TableAspect.PROPERTIES}
 
 
 @pytest.mark.parametrize(

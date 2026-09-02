@@ -508,19 +508,24 @@ declared value is reconciled, a declared `None` asserts absence (unset
 when present), a managed key observed without a declaration is a blocking
 change, and unmanaged keys (platform-written) are invisible. The reader
 adapter filters unmanaged keys out of the observed state before the domain
-sees them, and the properties diff runs only when the declaration manages
-`PROPERTIES`. Tags are full-state (an observed-only tag is drift and is
-unset).
+sees them, and a scope that does not manage `PROPERTIES` reconciles them as
+`IGNORE`, so the properties diff does not run at all. Tags are full-state
+(an observed-only tag is drift and is unset).
 
 ## Managed aspects
 
 Every `DesiredTable` carries a closed `TableScope` value. It owns the questions
 of whether an aspect is managed and whether one scope fits within another, so
 callers do not interpret a permission bitmap themselves and arbitrary scope
-combinations cannot enter the domain. The differ
-(`diff_table`) is scope-blind for every aspect except properties — the
-properties diff runs only when the declaration manages `PROPERTIES` (see
-Diff-first planning). The `TableDrift` it produces carries the `desired`
+combinations cannot enter the domain. For each aspect the scope answers a
+*reconciliation mode* (`TableScope.reconciles`): `MANAGE` converges the live
+table to the declaration, `REQUIRE_MATCH` mirrors the live table and refuses
+drift, and `IGNORE` makes no assertion at all. Managed aspects are `MANAGE`;
+below its minimum scope every aspect is `REQUIRE_MATCH` except properties,
+which are `IGNORE` — a restricted declaration carries property values without
+comparing them. The differ compares every aspect that is not `IGNORE`, so its
+one scope question is whether to diff properties (see Diff-first planning).
+The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableCreation`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in
 validation, as an eligibility check rather than an optional rule. Before any

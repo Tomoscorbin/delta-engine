@@ -7,6 +7,7 @@ from delta_engine.application.diff_entries import difference_entries
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, PropertyPolicy
 from delta_engine.domain.model import (
+    ReconciliationMode,
     TableAspect,
     TableKind,
     TableProperty,
@@ -476,7 +477,12 @@ def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
 
 class UnmanagedAspectDrift:
     """
-    Fail once per unmanaged aspect that has drifted.
+    Fail once per require-match aspect that has drifted.
+
+    The interpreter of ``ReconciliationMode.REQUIRE_MATCH``: an aspect the
+    scope mirrors rather than manages must match the live table, and this
+    check is where a mismatch becomes a failure. Ignored aspects never
+    surface here — the differ does not compare them at all.
 
     One of the ``ELIGIBILITY_CHECKS``: it defines what a declaration is allowed
     to govern and runs before any safety rule, short-circuiting
@@ -501,12 +507,13 @@ class UnmanagedAspectDrift:
     name: ClassVar[str] = "UnmanagedAspectDrift"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every drifted aspect the declaration does not manage."""
+        """Flag every drifted aspect the declaration requires to match."""
         lines_by_aspect: dict[TableAspect, list[str]] = {}
         for difference in (*drift.actions, *drift.unresolvable):
             if isinstance(difference, ColumnCaseDrift):
                 continue
-            if drift.desired.scope.manages(difference.aspect):
+            mode = drift.desired.scope.reconciles(difference.aspect)
+            if mode is not ReconciliationMode.REQUIRE_MATCH:
                 continue
             lines_by_aspect.setdefault(difference.aspect, []).extend(_difference_lines(difference))
 

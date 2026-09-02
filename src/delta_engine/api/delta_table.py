@@ -957,7 +957,11 @@ class DeltaTable:
                 table and column tags alone. The scopes nest:
                 tags ⊂ annotations ⊂ metadata ⊂ full. Every scope declares
                 the full table shape; a restricted scope never changes the
-                aspects outside it.
+                aspects outside it. Aspects outside the scope must instead
+                mirror the live table — drift there fails the sync — with
+                one exception: properties. A restricted scope carries
+                declared properties without comparing them, so they are
+                neither deployed nor checked against the catalog.
 
         Raises:
             TypeError: ``partitioned_by``, ``clustered_by``, or

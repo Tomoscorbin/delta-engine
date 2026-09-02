@@ -104,6 +104,22 @@ class TableAspect(Enum):
 ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
+class ReconciliationMode(Enum):
+    """
+    How a declaration treats one aspect of the observed table.
+
+    ``MANAGE``: compare the aspect and converge the live table to the
+    declaration. ``REQUIRE_MATCH``: compare the aspect, but drift is refused
+    rather than converged — the declaration mirrors the live state and asserts
+    it. ``IGNORE``: do not compare the aspect at all; declared values are
+    carried but make no assertion about the live table.
+    """
+
+    MANAGE = auto()
+    REQUIRE_MATCH = auto()
+    IGNORE = auto()
+
+
 class TableScope(Enum):
     """The portion of a desired table managed by the engine."""
 
@@ -112,9 +128,15 @@ class TableScope(Enum):
     METADATA = 3
     FULL = 4
 
+    def reconciles(self, aspect: TableAspect) -> ReconciliationMode:
+        """Return how a declaration under this scope reconciles ``aspect``."""
+        if self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value:
+            return ReconciliationMode.MANAGE
+        return _UNMANAGED_MODE_BY_ASPECT[aspect]
+
     def manages(self, aspect: TableAspect) -> bool:
         """Return whether this scope manages ``aspect``."""
-        return self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value
+        return self.reconciles(aspect) is ReconciliationMode.MANAGE
 
     def is_within(self, other: Self) -> bool:
         """Return whether this scope grants no more authority than ``other``."""
@@ -135,6 +157,27 @@ _MINIMUM_SCOPE_BY_ASPECT: Final[Mapping[TableAspect, TableScope]] = MappingProxy
         TableAspect.PROPERTIES: TableScope.FULL,
         TableAspect.PARTITIONING: TableScope.FULL,
         TableAspect.CLUSTERING: TableScope.FULL,
+    }
+)
+
+# What a scope too narrow to manage an aspect does with it instead. Most
+# aspects are mirrored: the declaration restates the live table and drift is
+# refused, never converged. Properties are the one exception — a restricted
+# declaration makes no property assertion at all, so a pipeline-owned or
+# previously synced property never reads as drift.
+_UNMANAGED_MODE_BY_ASPECT: Final[Mapping[TableAspect, ReconciliationMode]] = MappingProxyType(
+    {
+        TableAspect.TABLE_TAGS: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.COLUMN_TAGS: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.TABLE_COMMENT: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.COLUMN_COMMENTS: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.PRIMARY_KEY: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.FOREIGN_KEYS: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.TABLE_EXISTENCE: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.COLUMN_STRUCTURE: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.PROPERTIES: ReconciliationMode.IGNORE,
+        TableAspect.PARTITIONING: ReconciliationMode.REQUIRE_MATCH,
+        TableAspect.CLUSTERING: ReconciliationMode.REQUIRE_MATCH,
     }
 )
 
