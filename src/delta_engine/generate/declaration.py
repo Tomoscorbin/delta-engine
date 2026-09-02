@@ -8,8 +8,7 @@ import json
 import keyword
 import re
 
-from delta_engine.api.delta_table import DeltaTable, ForeignKey, Self
-from delta_engine.application.scopes import ScopeName
+from delta_engine.api.delta_table import DeltaTable, ForeignKey, ScopeName, Self
 from delta_engine.domain.model import (
     Array,
     Binary,

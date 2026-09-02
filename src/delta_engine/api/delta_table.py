@@ -29,10 +29,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field as dataclass_field
 from types import MappingProxyType
-from typing import Final, NamedTuple, cast
+from typing import Final, Literal, NamedTuple, cast
 
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
-from delta_engine.application.scopes import ScopeName, table_scope_for
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     Array,
@@ -106,6 +105,31 @@ _NAME_REFERENCE_NEEDS_MAPPING: Final[str] = (
     " shorthand forms resolve against the referenced table's primary key,"
     " which a name does not carry"
 )
+
+type ScopeName = Literal["full", "metadata", "annotations", "tags"]
+
+_SCOPE_BY_NAME: Final[dict[ScopeName, TableScope]] = {
+    "full": TableScope.FULL,
+    "metadata": TableScope.METADATA,
+    "annotations": TableScope.ANNOTATIONS,
+    "tags": TableScope.TAGS,
+}
+
+
+def _resolve_scope_name(scope: ScopeName) -> TableScope:
+    """
+    Resolve a public scope name into the domain's table scope.
+
+    Raises:
+        ValueError: If an untyped caller supplies an unknown scope name.
+
+    """
+    # Keep the runtime check for untyped callers.
+    if scope not in _SCOPE_BY_NAME:
+        expected = ", ".join(repr(name) for name in _SCOPE_BY_NAME)
+        raise ValueError(f"Unknown scope {scope!r}; expected one of: {expected}")
+
+    return _SCOPE_BY_NAME[scope]
 
 
 # ---------- Value rules ----------
@@ -271,7 +295,7 @@ def _normalize_declaration(
         ),
         primary_key_name=(Identifier(primary_key_name) if primary_key_name is not None else None),
         foreign_key_declarations=tuple(foreign_keys or ()),
-        scope=table_scope_for(scope),
+        scope=_resolve_scope_name(scope),
     )
 
 

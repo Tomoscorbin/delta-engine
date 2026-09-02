@@ -33,8 +33,8 @@ pytest.importorskip("databricks.sql")
 from delta_engine import SyncFailedError, TableRunStatus, ValidationFailure
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
+from delta_engine.api.delta_table import ScopeName
 from delta_engine.application.ports import TablePresent
-from delta_engine.application.scopes import ScopeName
 from delta_engine.databricks import build_sql_engine
 from delta_engine.domain.model import QualifiedName, TableKind
 from delta_engine.schema import Column, DeltaTable, Integer
