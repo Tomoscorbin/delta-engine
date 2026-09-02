@@ -67,22 +67,6 @@ _TABLE_KINDS_BY_RELATION_TYPE: Final[Mapping[str, TableKind]] = MappingProxyType
 _SUPPORTED_PROVIDERS: Final = {"delta"}
 
 
-class UnsupportedRelationError(Exception):
-    """The described relation is not a kind of table the engine manages."""
-
-
-class _QueryError(Exception):
-    """One physical query raised; ``physical`` is the backend's exception."""
-
-    def __init__(self, physical: Exception) -> None:
-        super().__init__(exception_message(physical))
-        self.physical = physical
-
-
-class MissingSchemaError(Exception):
-    """The table's containing schema (or catalog) does not exist."""
-
-
 def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
     """
     Read one table's catalog state: ``TablePresent`` or ``TableAbsent``.
@@ -91,44 +75,35 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
     serves the AS JSON describe and the information_schema follow-ups. Expected
     read failures — a query the backend cannot run, a missing container,
     metadata the engine cannot model, a relation kind it does not manage —
-    cross as ``ReadError``; a defect in the engine's own parsing or assembly
-    propagates as itself.
+    raise ``ReadError`` where they are detected. A defect in the engine's own
+    parsing or assembly propagates as itself: nothing here catches it.
 
     Raises:
         ReadError: The catalog state could not be determined.
 
     """
     # The injected callable is the outbound client call, so anything it raises
-    # is a backend failure by construction — the wrapper makes that boundary
-    # executable, keeping the catch below off the engine's own code.
-    run_query = _translate_physical_failures(run_query)
-    try:
-        description = _describe_table(run_query, qualified_name)
-        if description is None:
-            return TableAbsent()
-        kind = _supported_relation_kind(description)
-        return TablePresent(table=_read_observed_table(run_query, description, kind))
-    except (
-        _QueryError,
-        MissingSchemaError,
-        MetadataParseError,
-        UnsupportedRelationError,
-    ) as exception:
-        cause = exception.physical if isinstance(exception, _QueryError) else exception
-        raise ReadError(
-            exception_type=exception_type_name(cause),
-            message=exception_message(cause),
-        ) from cause
+    # is a backend failure by construction — the wrapper turns exactly that
+    # into ReadError, and nothing broader is caught anywhere in the read.
+    run_query = _translate_backend_failures(run_query)
+    description = _describe_table(run_query, qualified_name)
+    if description is None:
+        return TableAbsent()
+    kind = _supported_relation_kind(description)
+    return TablePresent(table=_read_observed_table(run_query, description, kind))
 
 
-def _translate_physical_failures(run_query: RunQuery) -> RunQuery:
-    """Wrap ``run_query`` so every exception it raises crosses as ``_QueryError``."""
+def _translate_backend_failures(run_query: RunQuery) -> RunQuery:
+    """Wrap ``run_query`` so every exception it raises crosses as ``ReadError``."""
 
     def run(statement: str) -> Rows:
         try:
             return run_query(statement)
         except Exception as exception:
-            raise _QueryError(exception) from exception
+            raise ReadError(
+                exception_type=exception_type_name(exception),
+                message=exception_message(exception),
+            ) from exception
 
     return run
 
@@ -140,8 +115,9 @@ def _describe_table(
     """Describe the table: the parsed description, or ``None`` when it does not exist."""
     try:
         rows = run_query(describe_json_query(qualified_name))
-    except _QueryError as exception:
-        if not is_missing_relation(exception.physical):
+    except ReadError as read_error:
+        cause = read_error.__cause__
+        if cause is None or not is_missing_relation(cause):
             raise
         # The describe reports TABLE_OR_VIEW_NOT_FOUND even when the schema or
         # the catalog is what is missing (verified live), so absence needs
@@ -150,11 +126,18 @@ def _describe_table(
         # CREATE TABLE that cannot succeed — and a dry run would report that
         # impossible plan as success.
         if not schema_exists(run_query, qualified_name):
-            raise MissingSchemaError(
-                f"schema {qualified_name.catalog}.{qualified_name.schema} does not exist"
-            ) from exception
+            raise ReadError(
+                exception_type="MissingSchemaError",
+                message=f"schema {qualified_name.catalog}.{qualified_name.schema} does not exist",
+            ) from read_error
         return None
-    return table_description_from_rows(rows, qualified_name)
+    try:
+        return table_description_from_rows(rows, qualified_name)
+    except MetadataParseError as exception:
+        raise ReadError(
+            exception_type=exception_type_name(exception),
+            message=exception_message(exception),
+        ) from exception
 
 
 def _supported_relation_kind(description: TableDescription) -> TableKind:
@@ -163,19 +146,22 @@ def _supported_relation_kind(description: TableDescription) -> TableKind:
 
     Relations in the admit mapping with a supported provider map onto their
     kind. Any other relation — a view, a materialized view, a foreign table,
-    a non-Delta format, or an unknown future kind — raises rather than being
-    modelled as a table. The error names the admitted set from the mapping
-    itself, so it cannot go stale against it.
+    a non-Delta format, or an unknown future kind — fails the read rather
+    than being modelled as a table. The error names the admitted set from
+    the mapping itself, so it cannot go stale against it.
     """
     kind = _TABLE_KINDS_BY_RELATION_TYPE.get(description.relation_type or "")
     if kind is not None and description.provider in _SUPPORTED_PROVIDERS:
         return kind
     supported_types = ", ".join(sorted(_TABLE_KINDS_BY_RELATION_TYPE))
     supported_providers = ", ".join(sorted(_SUPPORTED_PROVIDERS))
-    raise UnsupportedRelationError(
-        f"{description.qualified_name}: the engine reads relations of type"
-        f" {supported_types} with provider {supported_providers}; this relation"
-        f" has type={description.relation_type!r}, provider={description.provider!r}"
+    raise ReadError(
+        exception_type="UnsupportedRelationError",
+        message=(
+            f"{description.qualified_name}: the engine reads relations of type"
+            f" {supported_types} with provider {supported_providers}; this relation"
+            f" has type={description.relation_type!r}, provider={description.provider!r}"
+        ),
     )
 
 
