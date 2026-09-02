@@ -192,8 +192,8 @@ def _foreign_key(name: str | None = "orders_customer_id_fk") -> ForeignKeyConstr
             ),
         ),
         (
-            DropPrimaryKey("legacy_pk"),
-            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key legacy_pk"),),
+            DropPrimaryKey(("id", "tenant_id")),
+            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key (id, tenant_id)"),),
         ),
         (
             SetForeignKey(constraint=_foreign_key()),

@@ -463,7 +463,7 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.KEYS,
             DiffOperation.REMOVE,
-            subject=f"primary key {action.name}",
+            subject=f"primary key ({', '.join(action.columns)})",
         ),
     )
 

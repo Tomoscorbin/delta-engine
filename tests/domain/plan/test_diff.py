@@ -847,7 +847,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropPrimaryKey("legacy_pk"),)
+    assert diff.actions == (DropPrimaryKey(columns=("id",)),)
 
 
 def test_changed_primary_key_produces_drop_and_set_actions():
@@ -868,7 +868,7 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     # Then the observed key is dropped and the desired key is set
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey("legacy_pk"),
+        DropPrimaryKey(columns=("other_id",)),
         SetPrimaryKey(primary_key=desired_primary_key),
     )
 
@@ -1090,7 +1090,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropPrimaryKey("legacy_pk"),
+        DropPrimaryKey(columns=("customer_nm",)),
         SetPrimaryKey(primary_key=desired_key),
     }
 

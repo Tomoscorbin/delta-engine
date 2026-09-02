@@ -821,11 +821,14 @@ no-op rather than an implicit drop and recreate.
 Desired and observed constraints share one class per kind
 (`PrimaryKeyConstraint`, `ForeignKeyConstraint`); what distinguishes an
 observed constraint is that `ObservedTable` requires it to carry its catalog
-name, keeping physical identity available for drop operations. Reconciliation
-itself stays ordinary: desired and observed constraints compare with `==`,
-unmatched observations are dropped, and unmatched declarations are created.
-Optional SQL grammar remains inside the compiler; other layers neither predict
-nor reconcile platform names.
+name — the catalog always names its constraints. A foreign-key drop addresses
+the constraint by that name (`DROP CONSTRAINT`); a primary key is dropped
+positionally (`DROP PRIMARY KEY` — a table has at most one), so
+`DropPrimaryKey` carries the observed key's columns for reporting rather than
+a name. Reconciliation itself stays ordinary: desired and observed constraints
+compare with `==`, unmatched observations are dropped, and unmatched
+declarations are created. Optional SQL grammar remains inside the compiler;
+other layers neither predict nor reconcile platform names.
 
 ## Reporting and failure semantics
 

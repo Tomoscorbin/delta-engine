@@ -813,7 +813,7 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
         name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
-    change = DropPrimaryKey("test_pk")
+    change = DropPrimaryKey(("id",))
 
     failures = validate_diff(
         _drift(change, observed=_observed_table(referencing_foreign_keys=(reference,)))
@@ -828,7 +828,7 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
 
 
 def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
-    change = DropPrimaryKey("test_pk")
+    change = DropPrimaryKey(("id",))
 
     failures = validate_diff(_drift(change))
 
@@ -842,7 +842,7 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
         name="test_parent_id_fk",
         referencing_table=_QUALIFIED_NAME,
     )
-    pk_change = DropPrimaryKey("test_pk")
+    pk_change = DropPrimaryKey(("id",))
     fk_change = DropForeignKey(name="test_parent_id_fk")
 
     observed = _observed_table(referencing_foreign_keys=(reference,))
