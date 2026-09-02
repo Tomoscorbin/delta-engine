@@ -10,23 +10,17 @@ execution ordering, and backend compilation live elsewhere.
 
 from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, replace
-from typing import Final
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
-    Array,
-    DataType,
     DesiredColumn,
     DesiredTable,
-    Map,
     ObservedColumn,
     ObservedTable,
     QualifiedName,
-    Struct,
     TableAspect,
     TableFeature,
-    TimestampNtz,
-    Variant,
+    walk_data_type,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -58,11 +52,6 @@ from delta_engine.domain.plan.unresolvable import (
     PropertyUndeclared,
     Unresolvable,
 )
-
-_REQUIRED_FEATURE_BY_TYPE: Final[Mapping[type[DataType], TableFeature]] = {
-    TimestampNtz: TableFeature.TIMESTAMP_NTZ,
-    Variant: TableFeature.VARIANT,
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,26 +168,13 @@ def _diff_required_features(
     required_features = {
         feature
         for column in columns
-        for data_type in _walk_data_type(column.data_type)
-        if (feature := _REQUIRED_FEATURE_BY_TYPE.get(type(data_type))) is not None
+        for data_type in walk_data_type(column.data_type)
+        if (feature := data_type.required_feature) is not None
     }
     return tuple(
         EnableTableFeature(feature)
         for feature in sorted(required_features - supported_features, key=lambda item: item.value)
     )
-
-
-def _walk_data_type(data_type: DataType) -> Iterable[DataType]:
-    yield data_type
-    match data_type:
-        case Array(element=element):
-            yield from _walk_data_type(element)
-        case Map(key=key, value=value):
-            yield from _walk_data_type(key)
-            yield from _walk_data_type(value)
-        case Struct(fields=fields):
-            for field in fields:
-                yield from _walk_data_type(field.data_type)
 
 
 def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
