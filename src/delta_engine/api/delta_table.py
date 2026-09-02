@@ -959,9 +959,10 @@ class DeltaTable:
                 the full table shape; a restricted scope never changes the
                 aspects outside it. Aspects outside the scope must instead
                 mirror the live table — drift there fails the sync — with
-                one exception: properties. A restricted scope carries
-                declared properties without comparing them, so they are
-                neither deployed nor checked against the catalog.
+                one exception: properties. A restricted scope makes no
+                property assertion at all: the live table's properties are
+                never compared, and declaring ``properties`` under one is
+                rejected.
 
         Raises:
             TypeError: ``partitioned_by``, ``clustered_by``, or

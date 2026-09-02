@@ -75,9 +75,9 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     columns = tuple(_raise_column(column) for column in observed.columns)
     primary_key = observed.primary_key
     scope: ScopeName = "annotations" if observed.kind is TableKind.STREAMING_TABLE else "full"
-    # A restricted scope ignores properties — never compares them — so a
-    # streaming table's pipeline-owned property values stay out of the
-    # module entirely.
+    # A restricted scope may not declare properties — the live values are
+    # pipeline-owned and never compared — so they stay out of the module
+    # entirely.
     properties = dict(observed.properties) if scope == "full" else {}
     try:
         foreign_keys = tuple(

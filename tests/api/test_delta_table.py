@@ -1107,22 +1107,19 @@ def test_delta_table_rejects_unknown_scope():
         )
 
 
-def test_metadata_scope_carries_properties_without_deploying_them():
-    # Given a metadata-scoped declaration of a full table, properties included —
-    # the scope restricts deployment, not what may be declared
-    table = DeltaTable(
-        catalog="dev",
-        schema="silver",
-        name="orders",
-        columns=[Column("id", Integer())],
-        properties={TableProperty.CHANGE_DATA_FEED.value: "true"},
-        scope="metadata",
-    )
-
-    # Then the declaration carries the property; PROPERTIES stays unmanaged
-    desired = table.to_desired_table()
-    assert desired.properties == {TableProperty.CHANGE_DATA_FEED.value: "true"}
-    assert not desired.scope.manages(TableAspect.PROPERTIES)
+def test_declaring_properties_under_a_restricted_scope_is_rejected():
+    # Given a metadata-scoped declaration that also declares a property —
+    # a restricted scope makes no property assertion
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            properties={TableProperty.CHANGE_DATA_FEED.value: "true"},
+            scope="metadata",
+        )
 
 
 def test_tag_scope_carries_foreign_keys_without_managing_them():
@@ -1231,14 +1228,12 @@ def test_delta_table_accepts_none_property_value_without_value_check() -> None:
 def test_a_restricted_scope_mirrors_cdf_reserved_column_names(scope) -> None:
     # Given a restricted-scope declaration naming a CDF reserved column — a
     # declaration that does not manage column structure never creates or adds
-    # a column, so naming one mirrors state the catalog already holds; it
-    # carries the CDF property for the same reason, not to enable the feature
+    # a column, so naming one mirrors state the catalog already holds
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer()), Column("_change_type", String())],
-        properties={"delta.enableChangeDataFeed": "true"},
         scope=scope,
     )
 

@@ -293,6 +293,13 @@ class DesiredTable:
                     " primary key column."
                 )
 
+        if self.properties and not self.scope.manages(TableAspect.PROPERTIES):
+            raise ValueError(
+                f"Properties are declared ({sorted(self.properties)}), but this"
+                " declaration does not manage properties. Remove them, or widen"
+                " the scope to manage properties."
+            )
+
         declared_names = {column.name for column in self.columns}
         rename_sources: set[str] = set()
         for column in self.columns:

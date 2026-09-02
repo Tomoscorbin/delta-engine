@@ -553,20 +553,6 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
     assert diff.unresolvable == ()
 
 
-def test_declared_properties_are_not_compared_when_properties_unmanaged():
-    # Given a declaration that carries a property but does not manage
-    # properties, over a catalog where that property is absent
-    diff = diff_table(
-        _desired(properties={"delta.enableChangeDataFeed": "true"}, scope=TableScope.METADATA),
-        _observed(properties={}),
-    )
-
-    # Then the carried property makes no assertion and produces no change
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
-
-
 # ---------- table tag changes (full-state)
 
 

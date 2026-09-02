@@ -696,6 +696,19 @@ def test_desired_table_rejects_duplicate_rename_sources() -> None:
         )
 
 
+def test_desired_table_rejects_declared_properties_outside_a_properties_scope() -> None:
+    # Given a declaration managing only metadata aspects — under this scope
+    # a declared property would assert nothing
+    # Then construction fails
+    with pytest.raises(ValueError):
+        DesiredTable(
+            qualified_name=_QUALIFIED_NAME,
+            columns=(_COL,),
+            properties={"delta.enableChangeDataFeed": "true"},
+            scope=TableScope.METADATA,
+        )
+
+
 def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
     # Given a declaration managing only metadata aspects — renames imply
     # column-structure changes, which this scope does not manage
