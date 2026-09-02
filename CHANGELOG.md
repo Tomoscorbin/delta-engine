@@ -1,3 +1,40 @@
+## v0.14.0 (2026-09-02)
+
+### BREAKING CHANGE
+
+- delta_engine.schema exports TableProperty instead of
+Property.
+- DataType can no longer be subclassed outside
+delta_engine.domain.model.data_type, and DataType() itself no longer
+constructs. The docs already describe the set as closed, and a custom
+type raised at compilation before, so nothing that deployed successfully
+stops working.
+
+### Feat
+
+- **domain**: seal the data-type vocabulary (#399)
+- **api**: enforce all Unity Catalog tag constraints at declaration (#397)
+
+### Fix
+
+- **cli**: restore sys.path after loading declarations (#404)
+- **cli**: show the install hint only for genuinely missing packages (#403)
+
+### Refactor
+
+- **domain**: give every aspect one reconciliation mode per scope (#423)
+- **api**: move the public scope names into the api layer (#421)
+- **domain**: merge the desired and observed constraint classes (#418)
+- inline four shallow single-use helpers (#419)
+- **domain**: move the type-widening matrix into the domain (#416)
+- **domain**: give declared properties a home that owns their meaning (#411)
+- **application**: make Failure a closed union (#410)
+- **application**: inline PropertyPolicy.permits_removal (#409)
+- **application**: store statements directly on CompiledPlan (#408)
+- **application**: render diff entries through one dispatcher (#407)
+- **application**: settle creation diffs once in validate_diff (#406)
+- **tests**: prune platform pins that only mirror client gates (#398)
+
 ## v0.13.2 (2026-09-01)
 
 ### Refactor
