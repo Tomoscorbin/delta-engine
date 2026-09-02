@@ -96,7 +96,11 @@ class TableDrift:
     def __post_init__(self) -> None:
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "unresolvable", tuple(self.unresolvable))
-        _require_same_table(self.desired, self.observed)
+        if self.desired.qualified_name != self.observed.qualified_name:
+            raise ValueError(
+                "Cannot compare different tables:"
+                f" {self.desired.qualified_name} != {self.observed.qualified_name}"
+            )
 
     @property
     def target(self) -> QualifiedName:
@@ -104,15 +108,6 @@ class TableDrift:
 
 
 type TableDiff = TableCreation | TableDrift
-
-
-def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
-    """Reject endpoints that do not describe the same table."""
-    if desired.qualified_name != observed.qualified_name:
-        raise ValueError(
-            "Cannot compare different tables:"
-            f" {desired.qualified_name} != {observed.qualified_name}"
-        )
 
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
