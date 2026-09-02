@@ -6,8 +6,9 @@ tags:
 # How to report schema plans in CI
 
 Run `delta-engine plan` when a trusted same-repository pull request opens. The
-command reads the live Unity Catalog state, prints the target, semantic diff,
-sync report, and exact planned SQL without executing the planned DDL.
+command reads the live Unity Catalog state and prints the target, semantic
+diff, and sync report — plus the exact planned SQL when changes are pending —
+without executing any DDL.
 
 Pending valid changes exit successfully. Catalog-read, validation,
 foreign-key-resolution, connection, and configuration failures exit

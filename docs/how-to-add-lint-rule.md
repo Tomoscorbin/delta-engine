@@ -24,6 +24,7 @@ class MaxColumnsRule:
 
     limit: int
     name: ClassVar[str] = "max-columns"
+    enabled_by_default: ClassVar[bool] = False
 
     def __post_init__(self) -> None:
         if self.limit < 1:
@@ -39,7 +40,8 @@ class MaxColumnsRule:
 > Note: `max-columns` is a hypothetical example showing the pattern.
 
 A rule satisfies the `LintRule` protocol: a `name` `ClassVar[str]` — the id
-used in config keys and in output — and
+used in config keys and in output — an `enabled_by_default` `ClassVar[bool]`
+— whether the rule runs when the config does not mention it — and
 `evaluate(table: DesiredTable) -> tuple[str, ...]`. Messages state facts
 only, one per violation; the runner pairs each message with the rule id, the
 table, and the configured severity. This is the same separation the safety
@@ -60,6 +62,7 @@ ALL_RULES: Final = (
     TableCommentRule,
     ColumnCommentRule,
     PrimaryKeyRule,
+    NamingConventionRule,
     RequiredTagRule,
     MaxColumnsRule,
 )
@@ -73,9 +76,10 @@ Registration is all the wiring. From the registry, config parsing derives:
 - An inline table is `severity` plus constructor keyword arguments:
   `max-columns = { limit = 50, severity = "warning" }`. `severity` is a
   reserved name, so no rule may have a field called `severity`.
-- The default when the key is absent: enabled at `error` if the rule
-  constructs without arguments, off otherwise. `max-columns` requires
-  `limit`, so it stays off until a limit is configured.
+- The default when the key is absent: enabled at `error` if the rule's
+  `enabled_by_default` is `True`, off otherwise. `MaxColumnsRule` sets it to
+  `False` because the rule needs a `limit` to be useful, so `max-columns`
+  stays off until it is configured.
 
 ## 3. Write tests
 
@@ -85,8 +89,9 @@ Add tests in:
   built with the file's `build_table` helper: a compliant table yields no
   messages, each violation yields its message. If the rule has parameters,
   invalid ones raise `ValueError` at construction.
-- `tests/lint/test_config.py` — if the rule constructs without arguments,
-  add it to the default-policy expectation in `TestDefaults`. That mapping
+- `tests/lint/test_config.py` — if the rule is enabled by default
+  (`enabled_by_default = True`), add it to the default-policy expectation in
+  `TestDefaults`. That mapping
   is pinned exactly on purpose: a new default-on rule changes what a bare
   `delta-engine lint` enforces, and the test makes that a conscious choice.
 
