@@ -6,13 +6,15 @@ the table's run, never raised (it is not an ``Exception``). ``ReadFailure``
 and ``ExecutionFailure`` are born when the engine catches the corresponding
 adapter error; ``ValidationFailure`` and ``ForeignKeyFailure`` are born as
 values from pure judgment — no exception is ever involved. Each failure
-knows the phase that produced it (`FailurePhase`) and renders itself as
-display lines; reports derive a table's status from the earliest failing
-phase, so the family stays together rather than being scattered across its
-producers.
+knows the phase that produced it (`FailurePhase`) and renders itself for
+display: ``format_lines`` returns the human-readable lines, carrying no
+indentation — how deeply a report nests them is the renderer's decision, and
+the machine projection joins them flat — and ``headline`` is the compact
+one-line summary for the report grid. Reports derive a table's status from
+the earliest failing phase, so the family stays together rather than being
+scattered across its producers.
 """
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import ClassVar, Final, assert_never
@@ -78,36 +80,8 @@ def _message_head(message: str) -> str:
     return "\n".join(message.splitlines()[:_MESSAGE_HEAD_LINES])
 
 
-class Failure(ABC):
-    """A failure that can render itself as display lines, tagged with its phase."""
-
-    phase: ClassVar[FailurePhase]
-
-    def __init_subclass__(cls, **kwargs: object) -> None:
-        # A report derives a table's status from the earliest failing phase, so
-        # a failure without one fails there rather than where it was written.
-        super().__init_subclass__(**kwargs)
-        if not hasattr(cls, "phase"):
-            raise TypeError(f"{cls.__name__} must declare the phase that produces it")
-
-    @abstractmethod
-    def format_lines(self) -> tuple[str, ...]:
-        """
-        Return the human-readable lines describing this failure.
-
-        Lines carry no indentation: how deeply a report nests them is the
-        renderer's decision, and the machine projection joins them flat.
-        """
-        ...
-
-    @abstractmethod
-    def headline(self) -> str:
-        """Return a compact one-line summary without the detail message, for the report grid."""
-        ...
-
-
 @dataclass(frozen=True, slots=True)
-class ReadFailure(Failure):
+class ReadFailure:
     """Failure reading current catalog state for a table."""
 
     phase: ClassVar[FailurePhase] = FailurePhase.READ
@@ -122,7 +96,7 @@ class ReadFailure(Failure):
 
 
 @dataclass(frozen=True, slots=True)
-class ValidationFailure(Failure):
+class ValidationFailure:
     """
     Description of a validation rule failure.
 
@@ -155,7 +129,7 @@ class ValidationFailure(Failure):
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionFailure(Failure):
+class ExecutionFailure:
     """Details about a statement that failed while executing."""
 
     phase: ClassVar[FailurePhase] = FailurePhase.EXECUTION
@@ -187,7 +161,7 @@ class ExecutionFailure(Failure):
 
 
 @dataclass(frozen=True, slots=True)
-class ForeignKeyFailure(Failure):
+class ForeignKeyFailure:
     """A foreign key constraint that could not be applied, failing its whole table."""
 
     phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
@@ -218,3 +192,6 @@ class ForeignKeyFailure(Failure):
 
     def headline(self) -> str:
         return f"Foreign key {self._constraint} not applied"
+
+
+type Failure = ReadFailure | ValidationFailure | ExecutionFailure | ForeignKeyFailure

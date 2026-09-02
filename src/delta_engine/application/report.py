@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, NamedTuple, Self
+from typing import Any, Final, NamedTuple, Self, assert_never
 
 from delta_engine.application.diff_entries import DiffEntry, drift_entries, plan_entries
 from delta_engine.application.failures import (
@@ -88,7 +88,7 @@ class RunCounts(NamedTuple):
     changed: int
     unchanged: int
     failed: int
-    deferred: int = 0
+    deferred: int
 
     @property
     def total(self) -> int:
@@ -180,8 +180,8 @@ def _failure_facts(failure: Failure) -> dict[str, Any]:
                 "columns": list(failure.local_columns),
                 "references": str(failure.references),
             }
-        case _:
-            raise NotImplementedError(f"No wire facts for failure {type(failure).__name__}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:
