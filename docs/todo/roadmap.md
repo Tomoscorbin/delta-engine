@@ -261,13 +261,15 @@ feature — property-policy definition). Generation expressions are create-time
 only — same blocked-drift pattern as identity. Do after identity proves the
 column-metadata plumbing.
 
-### 14. Declaration-time limit checks
+### 14. Declaration-time limit checks — DONE
 
-The declaration already validates tag counts, clustering limits, decimal
-precision, CDF reserved names, column-mapping characters, and catalog/schema/
-table identifier limits. Comment length, the table-wide column-tag total, and
-the remaining tag character rules are the same class. Verify the actual Unity
-Catalog limits against current docs before implementing — do not guess them.
+The tag character rules and the table-wide column-tag total shipped at
+declaration time (PRs #397/#398). Comment length was verified against current
+Databricks docs on 2026-09-02 and closed with no code: neither the Unity
+Catalog resource-limits page, the `COMMENT ON` SQL reference, nor the
+comments guide documents any comment-length limit, and a guessed cap would
+reject declarations the catalog accepts. If a hidden limit ever exists, an
+oversized comment fails loudly at execution, not silently.
 
 ### 15. Multi-environment deployment pattern (docs)
 
