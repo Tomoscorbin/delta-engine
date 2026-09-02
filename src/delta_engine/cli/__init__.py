@@ -9,12 +9,15 @@ def main() -> None:
 
     This module stays stdlib-only so the console script always starts. A
     missing third-party dependency — typer or anything it needs — becomes an
-    install hint instead of a traceback, while an ImportError originating in
-    delta-engine's own modules is a real bug and propagates.
+    install hint instead of a traceback. Everything else propagates: an
+    import failure in delta-engine's own modules is a real bug, and an
+    installed-but-incompatible dependency (module present, symbol gone —
+    an ImportError that is not ModuleNotFoundError) needs its real
+    traceback, not advice to install what is already installed.
     """
     try:
         from delta_engine.cli.app import app
-    except ImportError as error:
+    except ModuleNotFoundError as error:
         top_level_package = (error.name or "").partition(".")[0]
         if top_level_package in ("", "delta_engine"):
             raise
