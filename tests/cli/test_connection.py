@@ -248,6 +248,20 @@ def test_missing_optional_package_has_the_cli_extra_hint(
     assert 'pip install "delta-engine[cli]"' in message
 
 
+def test_an_incompatible_installed_package_propagates_instead_of_the_install_hint(
+    monkeypatch, warehouse_env
+):
+    # Given databricks-sdk installed but incompatible: the module imports,
+    # the needed Config symbol is gone
+    monkeypatch.setitem(sys.modules, "databricks.sdk.core", ModuleType("databricks.sdk.core"))
+
+    # Then the real failure propagates — the package is installed, so the
+    # install hint would be wrong advice
+    with pytest.raises(ImportError):
+        with open_connection():
+            pass
+
+
 def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
     # Given a connector that emits the irrelevant PyArrow warning alongside a
     # real one while connecting

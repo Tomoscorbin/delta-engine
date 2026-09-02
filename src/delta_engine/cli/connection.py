@@ -104,7 +104,15 @@ def _target_from_config(config: Config, warehouse_id: str) -> Target:
 
 
 def _import_backends() -> tuple[ModuleType, type[Config]]:
-    """Import the connector and SDK, translating optional-dependency failures."""
+    """
+    Import the connector and SDK, translating environment problems.
+
+    A stray local module shadowing the ``databricks`` namespace gets its own
+    diagnosis. A genuinely missing package (ModuleNotFoundError) gets the
+    install hint: installing it is the fix. Any other import failure — the
+    package is installed but incompatible — propagates with its real
+    traceback, because the install hint would be wrong advice.
+    """
     try:
         from databricks import sql as databricks_sql
         from databricks.sdk.core import Config
@@ -115,6 +123,8 @@ def _import_backends() -> tuple[ModuleType, type[Config]]:
                 f"'{shadow}' shadows the installed databricks packages; "
                 "rename that file or run the CLI from a different directory"
             ) from error
+        if not isinstance(error, ModuleNotFoundError):
+            raise
         raise ConfigError(f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}") from error
     return databricks_sql, Config
 
@@ -146,7 +156,7 @@ def _shadowing_module_file() -> str | None:
     return None
 
 
-def _distribution_for(error: ImportError) -> str:
+def _distribution_for(error: ModuleNotFoundError) -> str:
     """Name the missing optional distribution represented by ``error``."""
     name = error.name or ""
     if name.startswith("databricks.sdk"):
