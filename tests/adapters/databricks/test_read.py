@@ -275,9 +275,22 @@ def test_other_describe_error_reads_as_failed():
 
     error = _read_error(responses)
 
-    # Then the read fails carrying the backend failure as its cause
+    # Then the read fails carrying the backend failure as its cause, and the
+    # failure record names the backend's own exception type
     assert "warehouse gone" in str(error)
     assert isinstance(error.__cause__, RuntimeError)
+    assert error.exception_type == "RuntimeError"
+
+
+def test_a_defect_in_the_engines_own_read_code_propagates_rather_than_reading_as_failed():
+    # Given tag rows whose shape the engine's row handling cannot process —
+    # the crash happens in engine code, after the query itself succeeded
+    responses = _describe_responses(**{table_tags_query(QN): [("Owner", "Data")]})
+
+    # Then the defect propagates as itself instead of masquerading as an
+    # unreadable table
+    with pytest.raises(AttributeError):
+        read_catalog_state(_router(responses), QN)
 
 
 def test_empty_describe_result_reads_as_failed():
