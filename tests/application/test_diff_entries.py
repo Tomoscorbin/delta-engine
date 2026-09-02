@@ -7,8 +7,7 @@ from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
     DiffOperation,
-    action_entries,
-    unresolvable_entries,
+    difference_entries,
 )
 from delta_engine.domain.model import (
     Array,
@@ -371,7 +370,7 @@ def _foreign_key(name: str | None = "orders_customer_id_fk") -> ForeignKeyConstr
 )
 def test_action_entries_render_expected(action, expected):
     # Then each action lowers to its category-tagged diff entries
-    assert action_entries(action) == expected
+    assert difference_entries(action) == expected
 
 
 @pytest.mark.parametrize(
@@ -400,7 +399,7 @@ def test_action_entries_render_expected(action, expected):
 )
 def test_unnamed_key_entries_identify_constraints_by_columns(action, expected):
     # Then the column list identifies the key and never repeats as detail
-    assert action_entries(action) == (expected,)
+    assert difference_entries(action) == (expected,)
 
 
 def test_create_table_entries_include_clustering_without_optimize_hint():
@@ -413,7 +412,7 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
         )
     )
     # When rendering its diff entries
-    entries = action_entries(action)
+    entries = difference_entries(action)
     # Then a clustering line is present with no OPTIMIZE hint (new table, no data)
     clustering = [e for e in entries if e.category is DiffCategory.CLUSTERING]
     assert clustering == [
@@ -444,7 +443,7 @@ def test_create_table_entries_include_all_state_embedded_in_create():
     # each column's comment on its own line rather than exiled to the
     # comments group. A None property asserts absence and is therefore not a
     # creation change.
-    assert action_entries(action) == (
+    assert difference_entries(action) == (
         DiffEntry(
             DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL", "'identifier'")
         ),
@@ -468,7 +467,9 @@ def test_create_table_entry_identifies_unnamed_primary_key_by_columns():
         )
     )
 
-    key_entries = [entry for entry in action_entries(action) if entry.category is DiffCategory.KEYS]
+    key_entries = [
+        entry for entry in difference_entries(action) if entry.category is DiffCategory.KEYS
+    ]
 
     # Then the key entry is identified by its column list
     assert key_entries == [DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key (id)")]
@@ -510,9 +511,9 @@ def test_every_action_type_has_registered_diff_entries():
     ]
 
     # Then each dispatches to a real arm, not the NotImplementedError fallback
-    fallback = action_entries.dispatch(object)
+    fallback = difference_entries.dispatch(object)
     for action_type in concrete_action_types:
-        assert action_entries.dispatch(action_type) is not fallback, (
+        assert difference_entries.dispatch(action_type) is not fallback, (
             f"No diff entries registered for {action_type.__name__}"
         )
 
@@ -520,9 +521,9 @@ def test_every_action_type_has_registered_diff_entries():
 def test_every_unresolvable_type_has_registered_diff_entries():
     # Given every member of the Unresolvable union
     # Then each dispatches to a real arm, not the NotImplementedError fallback
-    fallback = unresolvable_entries.dispatch(object)
+    fallback = difference_entries.dispatch(object)
     for unresolvable_type in typing.get_args(Unresolvable.__value__):
-        assert unresolvable_entries.dispatch(unresolvable_type) is not fallback, (
+        assert difference_entries.dispatch(unresolvable_type) is not fallback, (
             f"No diff entries registered for {unresolvable_type.__name__}"
         )
 
@@ -580,4 +581,4 @@ def test_every_unresolvable_type_has_registered_diff_entries():
 )
 def test_unresolvable_differences_describe_themselves(unresolvable, expected):
     # Then each unresolvable difference states itself as a CHANGE entry
-    assert unresolvable_entries(unresolvable) == expected
+    assert difference_entries(unresolvable) == expected

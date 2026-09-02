@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, assert_never
 
-from delta_engine.application.diff_entries import action_entries, unresolvable_entries
+from delta_engine.application.diff_entries import difference_entries
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import (
     DELTA_PROPERTY_POLICY,
@@ -527,13 +527,9 @@ def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
     is comparing it against. Layout is left to whoever renders the failure —
     these lines carry no indentation of their own.
     """
-    entries = (
-        action_entries(difference)
-        if isinstance(difference, Action)
-        else unresolvable_entries(difference)
-    )
     return tuple(
-        f"{entry.symbol} {' '.join(cell for cell in entry.cells if cell)}" for entry in entries
+        f"{entry.symbol} {' '.join(cell for cell in entry.cells if cell)}"
+        for entry in difference_entries(difference)
     )
 
 

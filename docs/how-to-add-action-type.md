@@ -128,7 +128,7 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 ## 5. Register a diff rendering arm
 
 In `src/delta_engine/application/diff_entries.py`, register a `singledispatch`
-arm on `action_entries` so the action shows up in reports. Return one or more
+arm on `difference_entries` so the action shows up in reports. Return one or more
 `DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys,
 clustering, partitioning, features, properties, tags, comments) and a
 `DiffOperation` (rendered `+`/`-`/`~`), names the target in `subject`, and
@@ -136,7 +136,7 @@ carries each descriptive phrase as a separate `detail` element so the text
 renderer can align them into columns:
 
 ```python
-@action_entries.register
+@difference_entries.register
 def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
