@@ -147,9 +147,11 @@ def _suppress_optional_pyarrow_warning() -> Iterator[None]:
 
 def _shadowing_module_file() -> str | None:
     """Return a plain module file shadowing the ``databricks`` namespace."""
-    # Declaration loading fronts the working directory on sys.path
-    # (declarations._ensure_working_directory_on_path), which is what makes
-    # this shadowing likely enough to deserve its own diagnosis.
+    # Declaration loading fronts the working directory on sys.path while the
+    # user module imports (declarations._front_working_directory_on_path). A
+    # stray databricks.py imported then stays cached in sys.modules after the
+    # path is restored — which is why this inspects sys.modules, not sys.path.
+    # Change either policy only together with the other.
     module = sys.modules.get("databricks")
     if module is not None and not hasattr(module, "__path__"):
         return getattr(module, "__file__", None) or repr(module)

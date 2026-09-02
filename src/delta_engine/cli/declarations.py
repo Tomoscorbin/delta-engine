@@ -1,6 +1,7 @@
 """Load one ordered collection of declarations from ``MODULE:ATTRIBUTE``."""
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 import importlib
 import os
@@ -46,7 +47,10 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
     Resolve ``reference`` into one non-empty ordered sequence of tables.
 
     A bare ``DeltaTable`` attribute loads as a one-table collection. Duplicate
-    qualified names fail before authentication or catalog access begins.
+    qualified names fail before authentication or catalog access begins. The
+    working directory fronts ``sys.path`` only while the declarations load, so
+    an uninstalled project module resolves; ``sys.path`` is restored
+    afterwards, and nothing the load did to it outlives the call.
 
     Raises:
         ConfigError: If the target module or attribute is missing, or the
@@ -58,24 +62,30 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
             propagate with its original traceback.
 
     """
-    _ensure_working_directory_on_path()
-    module = _import_module(reference.module_name)
-    value = _attribute(module, reference)
-    tables = _tables_from_attribute(value, reference)
+    with _front_working_directory_on_path():
+        module = _import_module(reference.module_name)
+        value = _attribute(module, reference)
+        tables = _tables_from_attribute(value, reference)
     # The engine's own lowering step owns the duplicate-name rule; running
     # it here surfaces the same typed error before a connection is opened.
     lower_desired_tables(*tables)
     return tables
 
 
-def _ensure_working_directory_on_path() -> None:
-    """Place the working directory first, even when it already appears later."""
+@contextmanager
+def _front_working_directory_on_path() -> Iterator[None]:
+    """Place the working directory first on ``sys.path`` within the block only."""
     # Fronting the working directory lets a stray local databricks.py shadow
-    # the installed SDK; connection._shadowing_module_file diagnoses exactly
-    # that. Change either policy only together with the other.
-    working_directory = os.getcwd()
-    sys.path[:] = [entry for entry in sys.path if entry != working_directory]
-    sys.path.insert(0, working_directory)
+    # the installed SDK while declarations load; the stray module then stays
+    # cached in sys.modules past the restore, which is what keeps
+    # connection._shadowing_module_file able to diagnose it. Change either
+    # policy only together with the other.
+    original = list(sys.path)
+    sys.path.insert(0, os.getcwd())
+    try:
+        yield
+    finally:
+        sys.path[:] = original
 
 
 def _import_module(module_name: str) -> ModuleType:
