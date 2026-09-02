@@ -780,9 +780,11 @@ unregistered object does.
 
 Partitioning is shaped by a related decision. `primary_key` and
 `partitioned_by` are both table-level lists of column names, but "order"
-means something different for each. A primary key's declaration order only
-controls how the constraint is rendered — identity and drift compare it as a
-set, so `(a, b)` and `(b, a)` are the same key. Partition order is
+means something different for each. A primary key's declaration order carries
+no meaning at all — the engine stores its columns in a canonical sorted order,
+so identity, drift, and the rendered constraint are all independent of how the
+columns were declared, and `(a, b)` and `(b, a)` are the same key. Partition
+order is
 significant instead: the order of names in `partitioned_by` sets the physical
 directory nesting Delta writes, and that nesting can be different from the
 order columns appear in the table. The differ compares that list positionally,

@@ -145,8 +145,9 @@ differences the engine did find are projected into `rejected_changes` in the
 same record shape, so a reader can see *what* was rejected alongside the
 `failures` list that says *why*. It includes both the actions the engine would
 have taken and the differences no action can close (a column spelled
-differently from the catalog, a property set but undeclared, a partitioning
-change). It is always empty for a table that planned successfully.
+differently from the catalog, a declared rename whose old and new names both
+exist, a property set but undeclared, a partitioning change). It is always
+empty for a table that planned successfully.
 
 ### Failure records
 

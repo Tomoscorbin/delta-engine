@@ -457,8 +457,10 @@ drift that the sync overwrites.
 ## Primary keys
 
 Declare a primary key by passing `primary_key` to `DeltaTable` — a list of
-column names, in the order the constraint is rendered. Every primary key
-column must be non-nullable.
+column names. Column order is not part of the key's meaning: the engine stores
+and renders the columns in a canonical (case-insensitive sorted) order, so the
+order you declare them in does not matter. Every primary key column must be
+non-nullable.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, Integer, String
@@ -509,8 +511,9 @@ key columns.
 
 ### Composite primary keys
 
-List several column names in `primary_key`. The constraint covers them in
-that order.
+List several column names in `primary_key`. Their order does not matter — the
+key covers the same set of columns however you order them, and the engine
+renders them in a canonical sorted order.
 
 ```python
 order_items = DeltaTable(
