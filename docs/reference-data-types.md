@@ -27,7 +27,7 @@ under [Unsupported types](#unsupported-types).
 | `Binary()`                               | `BINARY`               |                                                                      |
 | `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | Creation enables the feature; existing tables need it enabled first  |
 | `Variant()`                              | `VARIANT`              | Creation enables the feature; existing tables need it enabled first  |
-| `Struct([StructField(name, type, nullable=True), ...])` | `STRUCT<name: T, ...>` | `nullable=False` emits nested `NOT NULL`; field comments are unmanaged |
+| `Struct([StructField(name, type, nullable=True), ...])` | ``STRUCT<`name`: T, ...>`` | `nullable=False` emits nested `NOT NULL`; field comments are unmanaged |
 
 `Map` declarations should use a non-`Map` key type. Databricks accepts any
 supported map key type except another `Map`; `Map(Map(...), value_type)` is
@@ -58,7 +58,7 @@ Hitting this usually means the catalog's type vocabulary is ahead of this
 engine version: new Spark types (recent precedents: `TIMESTAMP_NTZ`,
 `VARIANT`) reach tables before tools that pin a type model.
 
-Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length bound is not modeled, produces no drift, and is never altered. The reasoning — facts that cannot round-trip declaration → catalog → observation are normalized out on both sides — is explained in [explanation-architecture.md](explanation-architecture.md).
+Observed `CHAR(n)`/`VARCHAR(n)` columns with the default `UTF8_BINARY` collation are treated as `String`: the length bound is not modeled, produces no drift, and is never altered. A `STRING`, `CHAR`, or `VARCHAR` column with any other collation cannot round-trip, so it is unreadable and the table fails with `READ_FAILED`, like any unsupported type. The reasoning — facts that cannot round-trip declaration → catalog → observation are normalized out on both sides — is explained in [explanation-architecture.md](explanation-architecture.md).
 
 For an existing Delta table, Databricks does not enable `TIMESTAMP_NTZ` or
 `VARIANT` support merely because an `ADD COLUMN` statement names the type.
