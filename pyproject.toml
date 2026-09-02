@@ -211,8 +211,8 @@ ignore_imports = [
   "delta_engine.databricks -> delta_engine.adapters.databricks.warehouse.factory",
   "delta_engine.databricks -> delta_engine.adapters.databricks.log_config",
   # Public schema facade: DeltaTable/ForeignKey/Self live in api.delta_table
-  # (same layer, so the facade edge is exempted). Property is imported downward
-  # from application.properties, which the layer order already permits.
+  # (same layer, so the facade edge is exempted). TableProperty is imported
+  # downward from domain.model, which the layer order already permits.
   "delta_engine.schema -> delta_engine.api.delta_table",
   # Module generation renders declaration source and proves it round-trips by
   # constructing the DeltaTable it prints (same layer, so the edge is exempted).

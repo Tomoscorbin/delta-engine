@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("databricks.sql")
 
 from delta_engine.databricks import build_sql_engine
-from delta_engine.schema import Column, DeltaTable, Integer, Long, Property, String
+from delta_engine.schema import Column, DeltaTable, Integer, Long, String, TableProperty
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     fetch_rows,
@@ -32,7 +32,7 @@ def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_ta
         comment="live customer table",
         clustered_by=("id",),
         primary_key=("id",),
-        properties={Property.CHANGE_DATA_FEED: "true"},
+        properties={TableProperty.CHANGE_DATA_FEED: "true"},
         tags={"owner": "data-platform"},
     )
 
@@ -54,7 +54,7 @@ def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_ta
     ]
     assert created["comment"] == "live customer table"
     assert created["clustering"] == ("id",)
-    assert created["properties"][Property.CHANGE_DATA_FEED] == "true"
+    assert created["properties"][TableProperty.CHANGE_DATA_FEED] == "true"
     assert created["table_tags"] == {"owner": "data-platform"}
     assert created["column_tags"] == {("name", "pii"): "true"}
     assert created["primary_key"] == ("id",)
@@ -85,9 +85,9 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
         clustered_by=("id",),
         primary_key=("id",),
         properties={
-            Property.COLUMN_MAPPING_MODE: "name",
-            Property.CHANGE_DATA_FEED: "true",
-            Property.LOG_RETENTION_DURATION: "interval 15 days",
+            TableProperty.COLUMN_MAPPING_MODE: "name",
+            TableProperty.CHANGE_DATA_FEED: "true",
+            TableProperty.LOG_RETENTION_DURATION: "interval 15 days",
         },
         tags={"owner": "legacy-team", "obsolete": "true"},
     )
@@ -115,10 +115,10 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
         clustered_by=("region",),
         primary_key=("id",),
         properties={
-            Property.COLUMN_MAPPING_MODE: "name",
-            Property.CHANGE_DATA_FEED: None,
-            Property.LOG_RETENTION_DURATION: "interval 30 days",
-            Property.DATA_SKIPPING_NUM_INDEXED_COLS: "10",
+            TableProperty.COLUMN_MAPPING_MODE: "name",
+            TableProperty.CHANGE_DATA_FEED: None,
+            TableProperty.LOG_RETENTION_DURATION: "interval 30 days",
+            TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS: "10",
         },
         tags={"owner": "data-platform", "lifecycle": "v2"},
     )
@@ -147,10 +147,10 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
     ]
     assert state["comment"] == ""
     assert state["clustering"] == ("region",)
-    assert state["properties"][Property.COLUMN_MAPPING_MODE] == "name"
-    assert Property.CHANGE_DATA_FEED not in state["properties"]
-    assert state["properties"][Property.LOG_RETENTION_DURATION] == "interval 30 days"
-    assert state["properties"][Property.DATA_SKIPPING_NUM_INDEXED_COLS] == "10"
+    assert state["properties"][TableProperty.COLUMN_MAPPING_MODE] == "name"
+    assert TableProperty.CHANGE_DATA_FEED not in state["properties"]
+    assert state["properties"][TableProperty.LOG_RETENTION_DURATION] == "interval 30 days"
+    assert state["properties"][TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS] == "10"
     assert state["table_tags"] == {"owner": "data-platform", "lifecycle": "v2"}
     assert state["column_tags"] == {("account_code", "classification"): "public"}
     assert state["primary_key"] == ("id",)
@@ -169,7 +169,7 @@ def test_identical_sync_does_not_alter_live_catalog(live_connection, live_tables
         table_name,
         columns=(Column("id", Integer(), nullable=False), Column("name", String())),
         comment="stable declaration",
-        properties={Property.LOG_RETENTION_DURATION: "interval 30 days"},
+        properties={TableProperty.LOG_RETENTION_DURATION: "interval 30 days"},
         tags={"owner": "data-platform"},
     )
     engine = build_sql_engine(live_connection)
@@ -257,7 +257,7 @@ def test_sync_alters_preserve_existing_rows(live_connection, live_tables):
                 Column("id", Integer(), nullable=False),
                 Column("amount", Integer()),
             ),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         )
     )
     execute_sql(
@@ -278,7 +278,7 @@ def test_sync_alters_preserve_existing_rows(live_connection, live_tables):
                 Column("note", String(), comment="added after load"),
             ),
             clustered_by=("id",),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         )
     )
 
@@ -315,7 +315,7 @@ def test_sync_round_trips_quoted_identifiers_and_unicode_metadata(live_connectio
             ),
         ),
         comment=r"O'Reilly's live table — C:\landing\new — 東京",
-        properties={Property.COLUMN_MAPPING_MODE: "name"},
+        properties={TableProperty.COLUMN_MAPPING_MODE: "name"},
         tags={"owner": "data platform's team"},
     )
 

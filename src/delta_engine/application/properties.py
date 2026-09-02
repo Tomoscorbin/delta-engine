@@ -1,22 +1,10 @@
 """
-The Delta table properties this engine manages, and their restrictions.
+Restrictions on the Delta table properties this engine manages.
 
-Reference: https://docs.delta.io/latest/table-properties.html
-
-Properties share their namespace with the platform: Databricks writes keys
-like ``delta.minReaderVersion`` and ``delta.enableRowTracking`` into table
-metadata autonomously. The engine manages properties by exact declaration
-over the managed keys below; everything else is invisible — the reader
-adapter filters unmanaged keys out of the observed state before the
-domain ever sees them.
-
-``Property`` is the single source of the managed key names: the policy
-definitions below reference its members, and the api layer re-exports it as the
-user-facing declaration vocabulary. There is no second list to keep in sync.
-
-Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
-(workspaces auto-enable it on new tables), so the engine leaves the key
-entirely to the platform.
+The managed key vocabulary and what declared values mean live in the domain
+(``delta_engine.domain.model.property``); this module holds the policy over
+that vocabulary — which declared values are admitted, and which in-place
+transitions the catalog accepts.
 
 Admission policy — adding a key is a breaking change: tables carrying it
 undeclared start failing validation on upgrade. Before managing a new key,
@@ -27,12 +15,12 @@ the policy. Additions are called out in release notes.
 
 from collections.abc import Callable, Mapping, Set
 from dataclasses import dataclass, field
-from enum import StrEnum
 import re
 from types import MappingProxyType
 from typing import Final
 
 from delta_engine.domain.collection_types import ListOrTuple
+from delta_engine.domain.model.property import TableProperty
 
 # A single `interval <n> <unit>` term only — deliberately stricter than the
 # catalog, which also accepts compound intervals ("interval 1 hour 30
@@ -67,17 +55,6 @@ def _is_column_mapping_mode(value: str) -> bool:
     return value in {"none", "name"}
 
 
-class Property(StrEnum):
-    """The Delta table properties a user may declare on a table."""
-
-    COLUMN_MAPPING_MODE = "delta.columnMapping.mode"
-    CHANGE_DATA_FEED = "delta.enableChangeDataFeed"
-    DELETED_FILE_RETENTION_DURATION = "delta.deletedFileRetentionDuration"
-    LOG_RETENTION_DURATION = "delta.logRetentionDuration"
-    DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
-    TYPE_WIDENING = "delta.enableTypeWidening"
-
-
 @dataclass(frozen=True, slots=True)
 class PropertyDefinition:
     """
@@ -94,7 +71,7 @@ class PropertyDefinition:
     changes, where a ``desired_value`` of ``None`` means removal.
     """
 
-    key: Property
+    key: TableProperty
     value_description: str
     is_valid_value: Callable[[str], bool]
     permitted_transitions: Set[tuple[str, str | None]] = field(default_factory=frozenset)
@@ -147,15 +124,15 @@ class PropertyPolicy:
             raise ValueError("Property policy contains duplicate property definitions")
 
         managed_keys = frozenset(definitions_by_name)
-        public_keys = frozenset(member.value for member in Property)
+        public_keys = frozenset(member.value for member in TableProperty)
 
-        # Property is the public vocabulary. Every public member must have
+        # TableProperty is the public vocabulary. Every public member must have
         # exactly one policy definition, and no hidden definitions may exist
         if managed_keys != public_keys:
             missing = sorted(public_keys - managed_keys)
             unexpected = sorted(managed_keys - public_keys)
             raise ValueError(
-                "Property policy does not match the public Property vocabulary:"
+                "Property policy does not match the public TableProperty vocabulary:"
                 f" missing={missing}, unexpected={unexpected}"
             )
 
@@ -210,27 +187,27 @@ class PropertyPolicy:
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     PropertyDefinition(
-        key=Property.CHANGE_DATA_FEED,
+        key=TableProperty.CHANGE_DATA_FEED,
         value_description="'true' or 'false' (lowercase, as the catalog stores it)",
         is_valid_value=_is_lowercase_boolean,
     ),
     PropertyDefinition(
-        key=Property.DELETED_FILE_RETENTION_DURATION,
+        key=TableProperty.DELETED_FILE_RETENTION_DURATION,
         value_description="an interval string such as 'interval 7 days'",
         is_valid_value=_is_interval,
     ),
     PropertyDefinition(
-        key=Property.LOG_RETENTION_DURATION,
+        key=TableProperty.LOG_RETENTION_DURATION,
         value_description="an interval string such as 'interval 30 days'",
         is_valid_value=_is_interval,
     ),
     PropertyDefinition(
-        key=Property.DATA_SKIPPING_NUM_INDEXED_COLS,
+        key=TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS,
         value_description="an integer >= -1 (-1 indexes all columns)",
         is_valid_value=_is_integer_at_least_minus_one,
     ),
     PropertyDefinition(
-        key=Property.COLUMN_MAPPING_MODE,
+        key=TableProperty.COLUMN_MAPPING_MODE,
         value_description=("'none' or 'name'; 'id' is unsupported."),
         is_valid_value=_is_column_mapping_mode,
         # Only none -> name is permitted. Databricks can remove column
@@ -241,7 +218,7 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
         permitted_transitions=frozenset({("none", "name")}),
     ),
     PropertyDefinition(
-        key=Property.TYPE_WIDENING,
+        key=TableProperty.TYPE_WIDENING,
         value_description="'true' or 'false' (lowercase, as the catalog stores it)",
         is_valid_value=_is_lowercase_boolean,
         # No transition restrictions: the catalog accepts enabling, disabling,

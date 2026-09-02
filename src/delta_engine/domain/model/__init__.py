@@ -28,7 +28,9 @@ from delta_engine.domain.model.data_type import (
     Variant,
     walk_data_type,
 )
+from delta_engine.domain.model.feature import TableFeature
 from delta_engine.domain.model.identifier import Identifier
+from delta_engine.domain.model.property import DeclaredProperties, TableProperty
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import (
     ALL_ASPECTS,
@@ -38,7 +40,6 @@ from delta_engine.domain.model.table import (
     TableKind,
     TableScope,
 )
-from delta_engine.domain.model.table_feature import TableFeature
 
 __all__ = [
     "ALL_ASPECTS",
@@ -49,6 +50,7 @@ __all__ = [
     "DataType",
     "Date",
     "Decimal",
+    "DeclaredProperties",
     "DesiredColumn",
     "DesiredTable",
     "Double",
@@ -72,6 +74,7 @@ __all__ = [
     "TableAspect",
     "TableFeature",
     "TableKind",
+    "TableProperty",
     "TableScope",
     "Timestamp",
     "TimestampNtz",

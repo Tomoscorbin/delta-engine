@@ -20,8 +20,8 @@ from delta_engine.schema import (
     DeltaTable,
     ForeignKey,
     Integer,
-    Property,
     String,
+    TableProperty,
 )
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
@@ -32,7 +32,7 @@ from tests.live.sql_warehouse_live_helpers import (
     read_live_table,
 )
 
-_COLUMN_MAPPING = {Property.COLUMN_MAPPING_MODE: "name"}
+_COLUMN_MAPPING = {TableProperty.COLUMN_MAPPING_MODE: "name"}
 
 
 def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection, live_tables):

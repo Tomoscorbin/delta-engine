@@ -22,11 +22,11 @@ from delta_engine.schema import (
     Integer,
     Long,
     Map,
-    Property,
     Self,
     String,
     Struct,
     StructField,
+    TableProperty,
 )
 from tests.builders import as_observed_columns
 
@@ -188,15 +188,15 @@ def test_delta_table_exposes_declared_properties_including_absence_assertions():
         name="orders",
         columns=[Column("id", Integer())],
         properties={
-            Property.CHANGE_DATA_FEED.value: "true",
-            Property.COLUMN_MAPPING_MODE.value: None,
+            TableProperty.CHANGE_DATA_FEED.value: "true",
+            TableProperty.COLUMN_MAPPING_MODE.value: None,
         },
     )
 
     # Then properties reads them back, preserving the None absence assertion
     assert dict(table.properties) == {
-        Property.CHANGE_DATA_FEED.value: "true",
-        Property.COLUMN_MAPPING_MODE.value: None,
+        TableProperty.CHANGE_DATA_FEED.value: "true",
+        TableProperty.COLUMN_MAPPING_MODE.value: None,
     }
 
 
@@ -358,7 +358,7 @@ def test_delta_table_accepts_boolean_or_binary_partition_column(data_type):
     ],
 )
 def test_rejects_unknown_table_property_keys(bad_keys):
-    # Given user supplied properties that are not recognised by the Property enum
+    # Given user supplied properties that are not recognised by the TableProperty enum
     user_properties = {k: "x" for k in bad_keys}
 
     # Then construction fails
@@ -375,8 +375,8 @@ def test_rejects_unknown_table_property_keys(bad_keys):
 def test_accepts_only_enum_property_keys():
     # Given user supplied allowed keys from the enum
     user_properties = {
-        Property.CHANGE_DATA_FEED.value: "true",
-        Property.COLUMN_MAPPING_MODE.value: "name",
+        TableProperty.CHANGE_DATA_FEED.value: "true",
+        TableProperty.COLUMN_MAPPING_MODE.value: "name",
     }
 
     # When constructing the table
@@ -390,13 +390,13 @@ def test_accepts_only_enum_property_keys():
 
     # Then it succeeds and the keys are intact
     properties = table.to_desired_table().properties
-    assert properties[Property.CHANGE_DATA_FEED.value] == "true"
-    assert properties[Property.COLUMN_MAPPING_MODE.value] == "name"
+    assert properties[TableProperty.CHANGE_DATA_FEED.value] == "true"
+    assert properties[TableProperty.COLUMN_MAPPING_MODE.value] == "name"
 
 
 def test_accepts_property_enum_members_as_keys():
-    # Given properties keyed by the Property enum members directly (not their .value)
-    user_properties = {Property.CHANGE_DATA_FEED: "true"}
+    # Given properties keyed by the TableProperty enum members directly (not their .value)
+    user_properties = {TableProperty.CHANGE_DATA_FEED: "true"}
 
     # When constructing the table
     table = DeltaTable(
@@ -410,7 +410,7 @@ def test_accepts_property_enum_members_as_keys():
     # Then the enum key is accepted and resolves to the same managed property as
     # its string value, so callers can declare properties without reaching for .value
     desired = table.to_desired_table()
-    assert desired.properties[Property.CHANGE_DATA_FEED.value] == "true"
+    assert desired.properties[TableProperty.CHANGE_DATA_FEED.value] == "true"
 
 
 def test_partition_columns_must_exist():
@@ -995,7 +995,7 @@ def test_delta_table_defaults_to_no_tags():
 
 
 def test_delta_table_accepts_free_form_tag_keys():
-    # Given an arbitrary tag key (tags are free-form, unlike the Property
+    # Given an arbitrary tag key (tags are free-form, unlike the TableProperty
     # allowlist), including an interior space — only leading and trailing
     # spaces are forbidden
     table = DeltaTable(
@@ -1115,13 +1115,13 @@ def test_metadata_scope_carries_properties_without_deploying_them():
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        properties={Property.CHANGE_DATA_FEED.value: "true"},
+        properties={TableProperty.CHANGE_DATA_FEED.value: "true"},
         scope="metadata",
     )
 
     # Then the declaration carries the property; PROPERTIES stays unmanaged
     desired = table.to_desired_table()
-    assert desired.properties == {Property.CHANGE_DATA_FEED.value: "true"}
+    assert desired.properties == {TableProperty.CHANGE_DATA_FEED.value: "true"}
     assert not desired.scope.manages(TableAspect.PROPERTIES)
 
 

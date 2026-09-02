@@ -45,7 +45,7 @@ only ever touches a key you named.
 
 ### The managed keys
 
-| `Property` member                 | Delta table property key             | Restrictions                          |
+| `TableProperty` member                 | Delta table property key             | Restrictions                          |
 | --------------------------------- | ------------------------------------ | ------------------------------------- |
 | `CHANGE_DATA_FEED`                | `delta.enableChangeDataFeed`         | none                                  |
 | `DELETED_FILE_RETENTION_DURATION` | `delta.deletedFileRetentionDuration` | none                                  |
@@ -69,7 +69,7 @@ only in documented releases.
 Declared values are validated at `DeltaTable` construction, before a first
 write can ever reach the catalog. Each managed key has an expected format:
 
-| `Property` member                 | Expected value                                 |
+| `TableProperty` member                 | Expected value                                 |
 | --------------------------------- | ---------------------------------------------- |
 | `CHANGE_DATA_FEED`                | lowercase `true` or `false`                    |
 | `DELETED_FILE_RETENTION_DURATION` | `interval <n> <unit>`, e.g. `interval 7 days`  |
@@ -97,7 +97,7 @@ property never re-diffs as drift.
 ### Declaring and removing properties
 
 ```python
-from delta_engine.schema import Column, DeltaTable, Integer, Property
+from delta_engine.schema import Column, DeltaTable, Integer, TableProperty
 
 orders = DeltaTable(
     catalog="prod",
@@ -106,8 +106,8 @@ orders = DeltaTable(
     columns=[Column("id", Integer(), nullable=False)],
     primary_key=["id"],
     properties={
-        Property.CHANGE_DATA_FEED: "true",          # ensure it is set
-        Property.LOG_RETENTION_DURATION: None,       # ensure it is absent
+        TableProperty.CHANGE_DATA_FEED: "true",          # ensure it is set
+        TableProperty.LOG_RETENTION_DURATION: None,       # ensure it is absent
     },
 )
 ```
@@ -131,7 +131,7 @@ Delta only permits `ALTER TABLE ... DROP COLUMN` when
 may be dropped:
 
 ```python
-properties={Property.COLUMN_MAPPING_MODE: "name"}
+properties={TableProperty.COLUMN_MAPPING_MODE: "name"}
 ```
 
 A sync that drops a column without this declaration fails at validation
@@ -146,7 +146,7 @@ remove column mapping, but doing so rewrites every data file and conflicts
 with concurrent writes, so the engine rejects it as an in-place change —
 the same class of operation as a partitioning change. Once a table has
 column mapping, its declaration must carry
-`Property.COLUMN_MAPPING_MODE: "name"`; remove the feature out of band if
+`TableProperty.COLUMN_MAPPING_MODE: "name"`; remove the feature out of band if
 you truly need to.
 
 ### Renaming a column
@@ -218,7 +218,7 @@ Declaring `delta.enableTypeWidening='true'` allows a sync to widen a column's
 type in place:
 
 ```python
-properties={Property.TYPE_WIDENING: "true"}
+properties={TableProperty.TYPE_WIDENING: "true"}
 ```
 
 The widenings Delta can apply in place are supported:

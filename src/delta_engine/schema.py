@@ -6,7 +6,6 @@ from here when defining desired Delta table schemas.
 """
 
 from delta_engine.api.delta_table import DeltaTable, ForeignKey, Self
-from delta_engine.application.properties import Property
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -24,6 +23,7 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
+    TableProperty,
     Timestamp,
     TimestampNtz,
     Variant,
@@ -44,12 +44,12 @@ __all__ = [
     "Integer",
     "Long",
     "Map",
-    "Property",
     "Self",
     "Short",
     "String",
     "Struct",
     "StructField",
+    "TableProperty",
     "Timestamp",
     "TimestampNtz",
     "Variant",

@@ -1,20 +1,7 @@
 import pytest
 
-from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
-
-
-def test_property_is_the_expected_public_vocabulary() -> None:
-    # Then the managed-key vocabulary is exactly the documented set — adding a
-    # key is a breaking change (tables carrying it undeclared start failing),
-    # so growth must arrive here deliberately
-    assert set(Property) == {
-        "delta.enableChangeDataFeed",
-        "delta.deletedFileRetentionDuration",
-        "delta.logRetentionDuration",
-        "delta.dataSkippingNumIndexedCols",
-        "delta.columnMapping.mode",
-        "delta.enableTypeWidening",
-    }
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
+from delta_engine.domain.model.property import TableProperty
 
 
 def test_policy_rejects_an_unmanaged_declared_property() -> None:
@@ -27,16 +14,16 @@ def test_policy_rejects_an_unmanaged_declared_property() -> None:
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        (Property.CHANGE_DATA_FEED, "true"),
-        (Property.CHANGE_DATA_FEED, "false"),
-        (Property.COLUMN_MAPPING_MODE, "name"),
-        (Property.COLUMN_MAPPING_MODE, "none"),
-        (Property.LOG_RETENTION_DURATION, "interval 30 days"),
-        (Property.DELETED_FILE_RETENTION_DURATION, "interval 7 days"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-1"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "32"),
-        (Property.TYPE_WIDENING, "true"),
-        (Property.TYPE_WIDENING, "false"),
+        (TableProperty.CHANGE_DATA_FEED, "true"),
+        (TableProperty.CHANGE_DATA_FEED, "false"),
+        (TableProperty.COLUMN_MAPPING_MODE, "name"),
+        (TableProperty.COLUMN_MAPPING_MODE, "none"),
+        (TableProperty.LOG_RETENTION_DURATION, "interval 30 days"),
+        (TableProperty.DELETED_FILE_RETENTION_DURATION, "interval 7 days"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "-1"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "32"),
+        (TableProperty.TYPE_WIDENING, "true"),
+        (TableProperty.TYPE_WIDENING, "false"),
     ],
 )
 def test_policy_accepts_valid_property_values(key: str, value: str) -> None:
@@ -47,20 +34,20 @@ def test_policy_accepts_valid_property_values(key: str, value: str) -> None:
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        (Property.CHANGE_DATA_FEED, "True"),
-        (Property.CHANGE_DATA_FEED, "yes"),
-        (Property.COLUMN_MAPPING_MODE, "id"),
-        (Property.LOG_RETENTION_DURATION, "30 days"),
-        (Property.LOG_RETENTION_DURATION, "INTERVAL 1 WEEK"),
-        (Property.LOG_RETENTION_DURATION, "interval thirty days"),
-        (Property.LOG_RETENTION_DURATION, "interval 1 hour 30 minutes"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-2"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "many"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "1_000"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "+5"),
-        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, " 5 "),
-        (Property.TYPE_WIDENING, "True"),
-        (Property.TYPE_WIDENING, "enabled"),
+        (TableProperty.CHANGE_DATA_FEED, "True"),
+        (TableProperty.CHANGE_DATA_FEED, "yes"),
+        (TableProperty.COLUMN_MAPPING_MODE, "id"),
+        (TableProperty.LOG_RETENTION_DURATION, "30 days"),
+        (TableProperty.LOG_RETENTION_DURATION, "INTERVAL 1 WEEK"),
+        (TableProperty.LOG_RETENTION_DURATION, "interval thirty days"),
+        (TableProperty.LOG_RETENTION_DURATION, "interval 1 hour 30 minutes"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "-2"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "many"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "1_000"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, "+5"),
+        (TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS, " 5 "),
+        (TableProperty.TYPE_WIDENING, "True"),
+        (TableProperty.TYPE_WIDENING, "enabled"),
     ],
 )
 def test_policy_rejects_invalid_property_values(key: str, value: str) -> None:
@@ -71,7 +58,7 @@ def test_policy_rejects_invalid_property_values(key: str, value: str) -> None:
         DELTA_PROPERTY_POLICY.validate_declaration({key: value})
 
 
-@pytest.mark.parametrize("key", Property)
+@pytest.mark.parametrize("key", TableProperty)
 def test_policy_accepts_none_as_an_absence_assertion(key: str) -> None:
     # Then a None value — asserting the key's absence — is valid for every key
     DELTA_PROPERTY_POLICY.validate_declaration({key: None})
@@ -111,7 +98,7 @@ def test_policy_permits_only_the_column_mapping_upgrade() -> None:
 def test_policy_does_not_permit_column_mapping_removal(observed: str) -> None:
     # Then declaring the key absent is blocked whatever its current value
     assert not DELTA_PROPERTY_POLICY.permits_transition(
-        Property.COLUMN_MAPPING_MODE,
+        TableProperty.COLUMN_MAPPING_MODE,
         observed=observed,
         desired=None,
     )
@@ -120,7 +107,7 @@ def test_policy_does_not_permit_column_mapping_removal(observed: str) -> None:
 def test_policy_permits_first_write_of_a_restricted_property() -> None:
     # Then a key absent from the catalog may always be written
     assert DELTA_PROPERTY_POLICY.permits_transition(
-        Property.COLUMN_MAPPING_MODE,
+        TableProperty.COLUMN_MAPPING_MODE,
         observed=None,
         desired="name",
     )
@@ -129,11 +116,11 @@ def test_policy_permits_first_write_of_a_restricted_property() -> None:
 @pytest.mark.parametrize(
     "key",
     [
-        Property.CHANGE_DATA_FEED,
-        Property.DELETED_FILE_RETENTION_DURATION,
-        Property.LOG_RETENTION_DURATION,
-        Property.DATA_SKIPPING_NUM_INDEXED_COLS,
-        Property.TYPE_WIDENING,
+        TableProperty.CHANGE_DATA_FEED,
+        TableProperty.DELETED_FILE_RETENTION_DURATION,
+        TableProperty.LOG_RETENTION_DURATION,
+        TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS,
+        TableProperty.TYPE_WIDENING,
     ],
 )
 def test_policy_permits_transitions_and_removal_for_unrestricted_properties(key: str) -> None:
