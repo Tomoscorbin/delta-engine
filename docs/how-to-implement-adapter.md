@@ -47,7 +47,7 @@ Execution is a two-stage boundary. `compile` turns a domain plan into the backen
 ```python
 from delta_engine.application.errors import ExecutionError
 from delta_engine.application.ports import CompiledPlan, PlanExecutor
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan import ActionPlan
 
 class MyExecutor:
     def compile(self, plan: ActionPlan) -> CompiledPlan:
@@ -115,7 +115,7 @@ properties such as `SetColumnComment.column_name`. You can inspect the action ty
 with `isinstance` or `match`/`case`:
 
 ```python
-from delta_engine.domain.plan.actions import CreateTable, AddColumn, DropColumn
+from delta_engine.domain.plan import CreateTable, AddColumn, DropColumn
 
 for action in plan.actions:
     match action:
