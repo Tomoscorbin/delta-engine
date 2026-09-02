@@ -276,11 +276,6 @@ def _strongly_connected_components(
     return components
 
 
-def _is_cycle(component: list[QualifiedName]) -> bool:
-    """Return True if the component is a true multi-node dependency cycle."""
-    return len(component) > 1
-
-
 def _cycle_partners_by_table(
     components: list[list[QualifiedName]],
 ) -> dict[QualifiedName, frozenset[QualifiedName]]:
@@ -293,7 +288,8 @@ def _cycle_partners_by_table(
     """
     partners: dict[QualifiedName, frozenset[QualifiedName]] = {}
     for component in components:
-        if _is_cycle(component):
+        # A single-node component is not a cycle; more than one member is.
+        if len(component) > 1:
             members = frozenset(component)
             for name in component:
                 partners[name] = members - {name}

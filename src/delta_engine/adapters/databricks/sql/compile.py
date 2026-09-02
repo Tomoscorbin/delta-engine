@@ -110,7 +110,7 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
         column_defs.append(_primary_key_definition(table.primary_key))
 
     columns_clause = ", ".join(column_defs)
-    table_comment = _table_comment_clause(table.comment)
+    table_comment = f"COMMENT {quote_literal(table.comment)}" if table.comment else ""
     properties = _properties_clause(table.properties)
     partition_by = _partitioned_by_clause(table.partitioned_by)
     cluster_by = _clustered_by_clause(table.clustered_by)
@@ -296,13 +296,6 @@ def _column_definition(column: DesiredColumn) -> str:
     nullable = "" if column.nullable else "NOT NULL"
     comment = f"COMMENT {quote_literal(column.comment)}" if column.comment else ""
     return " ".join(part for part in (column_name, sql_type, nullable, comment) if part)
-
-
-def _table_comment_clause(comment: str) -> str:
-    """Render the table COMMENT clause, or '' when there is no comment to set."""
-    if not comment:
-        return ""
-    return f"COMMENT {quote_literal(comment)}"
 
 
 def _properties_clause(props: Mapping[str, str | None]) -> str:
