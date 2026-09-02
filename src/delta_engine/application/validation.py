@@ -79,19 +79,20 @@ _DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingP
 
 class EligibilityCheck(Protocol):
     """
-    Decides whether a diff is fit for safety validation.
+    Decides whether a drift is fit for safety validation.
 
     Eligibility concerns the declaration's authority and its reference to the
     table — what it is allowed to govern, and whether it names the table's
     columns the way the catalog does — not whether a given change is safe.
     These are laws rather than policies: every check runs before any safety
-    rule, and none can be suppressed via ``rules``.
+    rule, and none can be suppressed via ``rules``. Only drift is ever
+    judged: ``validate_diff`` settles a creation before any check runs.
     """
 
     name: ClassVar[str]
 
-    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
-        """Return this check's failures for the diff, or an empty tuple."""
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Return this check's failures for the drift, or an empty tuple."""
         ...
 
 
@@ -496,36 +497,25 @@ class ColumnSpellingMustMatchCatalog:
     likely to meet case drift would report unmanaged column-structure drift
     instead of the spelling that caused it. Reported first among the checks so
     the actionable root defect leads.
-
-    A missing table has no catalog counterpart to disagree with: what a
-    declaration creates, it spells freely.
     """
 
     name: ClassVar[str] = "ColumnSpellingMustMatchCatalog"
 
-    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every column reference spelled differently from the catalog."""
-        match diff:
-            case TableCreation():
-                return ()
-
-            case TableDrift() as drift:
-                return tuple(
-                    ValidationFailure(
-                        rule_name=self.name,
-                        message=(
-                            f"Column '{unresolvable.declared_name}' is spelled"
-                            f" '{unresolvable.observed_name}' in the catalog. Update the"
-                            " declaration to match the catalog's spelling exactly."
-                        ),
-                        subject=str(unresolvable.declared_name),
-                    )
-                    for unresolvable in drift.unresolvable
-                    if isinstance(unresolvable, ColumnCaseDrift)
-                )
-
-            case _ as unreachable:
-                assert_never(unreachable)
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Column '{unresolvable.declared_name}' is spelled"
+                    f" '{unresolvable.observed_name}' in the catalog. Update the"
+                    " declaration to match the catalog's spelling exactly."
+                ),
+                subject=str(unresolvable.declared_name),
+            )
+            for unresolvable in drift.unresolvable
+            if isinstance(unresolvable, ColumnCaseDrift)
+        )
 
 
 def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
@@ -573,37 +563,30 @@ class UnmanagedAspectDrift:
 
     name: ClassVar[str] = "UnmanagedAspectDrift"
 
-    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every drifted aspect the declaration does not manage."""
-        match diff:
-            case TableCreation():
-                return ()
+        lines_by_aspect: dict[TableAspect, list[str]] = {}
+        for difference in (*drift.actions, *drift.unresolvable):
+            if isinstance(difference, ColumnCaseDrift):
+                continue
+            if drift.desired.scope.manages(difference.aspect):
+                continue
+            lines_by_aspect.setdefault(difference.aspect, []).extend(_difference_lines(difference))
 
-            case TableDrift() as drift:
-                lines_by_aspect: dict[TableAspect, list[str]] = {}
-                for difference in (*drift.actions, *drift.unresolvable):
-                    if isinstance(difference, ColumnCaseDrift):
-                        continue
-                    if drift.desired.scope.manages(difference.aspect):
-                        continue
-                    lines_by_aspect.setdefault(difference.aspect, []).extend(
-                        _difference_lines(difference)
-                    )
-
-                return tuple(
-                    ValidationFailure(
-                        rule_name=self.name,
-                        message=(
-                            f"Operation not allowed: {aspect.label} has drifted"
-                            " but is not managed by this definition. Update the declaration"
-                            " to match the live table, or widen its scope to manage"
-                            " this aspect."
-                        ),
-                        subject=aspect.label,
-                        details=lines,
-                    )
-                    for aspect, lines in lines_by_aspect.items()
-                )
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: {aspect.label} has drifted"
+                    " but is not managed by this definition. Update the declaration"
+                    " to match the live table, or widen its scope to manage"
+                    " this aspect."
+                ),
+                subject=aspect.label,
+                details=lines,
+            )
+            for aspect, lines in lines_by_aspect.items()
+        )
 
 
 class StreamingTableAnnotationsOnly:
@@ -630,30 +613,25 @@ class StreamingTableAnnotationsOnly:
 
     name: ClassVar[str] = "StreamingTableAnnotationsOnly"
 
-    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a streaming-table declaration whose managed aspects exceed annotations."""
-        match diff:
-            case TableCreation():
-                return ()
-
-            case TableDrift() as drift:
-                if drift.observed.kind is not TableKind.STREAMING_TABLE:
-                    return ()
-                if drift.desired.scope.is_within(TableScope.ANNOTATIONS):
-                    return ()
-                return (
-                    ValidationFailure(
-                        rule_name=self.name,
-                        message=(
-                            "Operation not allowed: this relation is a streaming table,"
-                            " whose definition — schema, properties, and keys — is owned"
-                            " by its pipeline. Only comments and Unity Catalog tags can"
-                            " be managed on it: declare the table with"
-                            ' scope="annotations" (or scope="tags"), or change its'
-                            " definition in the owning pipeline."
-                        ),
-                    ),
-                )
+        if drift.observed.kind is not TableKind.STREAMING_TABLE:
+            return ()
+        if drift.desired.scope.is_within(TableScope.ANNOTATIONS):
+            return ()
+        return (
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: this relation is a streaming table,"
+                    " whose definition — schema, properties, and keys — is owned"
+                    " by its pipeline. Only comments and Unity Catalog tags can"
+                    " be managed on it: declare the table with"
+                    ' scope="annotations" (or scope="tags"), or change its'
+                    " definition in the owning pipeline."
+                ),
+            ),
+        )
 
 
 # Position is report order, so a root defect leads what it causes: spelling
@@ -687,33 +665,37 @@ def validate_diff(
     """
     Evaluate a table diff and return its failures, empty when it is valid.
 
-    Eligibility is settled before any safety rule. A column spelled differently
-    from the catalog, a drifted aspect the declaration does not manage, or a
-    streaming table it claims more than annotations on all fail here and
-    short-circuit, so the safety rules never run on a
-    diff the engine has already rejected. This is what makes an unmanaged
-    difference produce exactly the scope failure rather than also tripping rules
-    for work the user never requested, and a misspelled column produce the
-    spelling failure rather than safety verdicts on a diff whose column
-    references cannot be trusted. Failures are collected across every check and
-    reported together, spelling first, so the actionable root defect leads. No
+    A creation is valid outright, settled before any check or rule runs: a
+    missing table that reaches validation is a fully-managed create — the
+    planning boundary defers a creation whose declaration does not manage
+    table existence before validation ever sees it — and it has no catalog
+    counterpart to be judged against: what a declaration creates, it spells
+    freely.
+
+    For drift, eligibility is settled before any safety rule. A column spelled
+    differently from the catalog, a drifted aspect the declaration does not
+    manage, or a streaming table it claims more than annotations on all fail
+    here and short-circuit, so the safety rules never run on a drift the
+    engine has already rejected. This is what makes an unmanaged difference
+    produce exactly the scope failure rather than also tripping rules for work
+    the user never requested, and a misspelled column produce the spelling
+    failure rather than safety verdicts on a drift whose column references
+    cannot be trusted. Failures are collected across every check and reported
+    together, spelling first, so the actionable root defect leads. No
     eligibility check can be suppressed via ``rules``.
 
-    Past that point every difference is in scope and spelled as the catalog
-    spells it, so the safety rules judge the managed drift. A missing table
-    that reaches validation is a fully-managed create and needs no safety
-    judgement — the planning boundary defers a creation whose declaration does
-    not manage table existence before validation ever sees it.
+    Past the checks every difference is in scope and spelled as the catalog
+    spells it, so the safety rules judge the managed drift.
     """
-    ineligible = tuple(failure for check in ELIGIBILITY_CHECKS for failure in check.evaluate(diff))
-
-    if ineligible:
-        return ineligible
-
     match diff:
         case TableCreation():
             return ()
         case TableDrift() as drift:
+            ineligible = tuple(
+                failure for check in ELIGIBILITY_CHECKS for failure in check.evaluate(drift)
+            )
+            if ineligible:
+                return ineligible
             return tuple(failure for rule in rules for failure in rule.evaluate(drift))
         case _ as unreachable:
             assert_never(unreachable)
