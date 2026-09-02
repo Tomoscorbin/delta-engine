@@ -308,10 +308,9 @@ on that tag. Both delta-engine backends require Unity Catalog for reads.
 
 Databricks limits each table to 50 tags, tag keys to 256 characters, and tag
 values to 256 characters. Tag keys cannot contain `. , - = / :`, and tag keys
-or values cannot have leading or trailing spaces. Delta-engine validates only
-part of this platform contract at declaration time, so keep declarations
-within the Databricks limits even when construction succeeds; the catalog can
-reject the remaining violations at execution.
+or values cannot have leading or trailing spaces. Delta-engine enforces all of
+this at declaration time: a declaration that violates any of these limits
+raises `ValueError` when the `DeltaTable` is constructed, before any SQL runs.
 
 ### Column tags
 
@@ -415,8 +414,9 @@ Databricks Runtime 13.3 LTS or later, plus the `APPLY TAG` privilege; governed
 tags also require `ASSIGN`. Databricks limits each column to 50 tags, each
 table to 1,000 column tags in total, tag keys and values to 256 characters,
 forbids `. , - = / :` in tag keys, and forbids leading or trailing spaces in
-keys and values. Delta-engine validates only part of this platform contract at
-declaration time, so other violations surface at execution.
+keys and values. Delta-engine enforces all of this at declaration time: a
+declaration that violates any of these limits raises `ValueError` when the
+`DeltaTable` is constructed, before any SQL runs.
 
 ## Comments
 
