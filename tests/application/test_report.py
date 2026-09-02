@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import typing
 
 import pytest
 
@@ -311,7 +312,7 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(failed,))
 
     # Then it counts as failed, not changed: the change was planned, not applied
-    assert report.counts == RunCounts(changed=0, unchanged=0, failed=1)
+    assert report.counts == RunCounts(changed=0, unchanged=0, failed=1, deferred=0)
 
 
 def test_sync_report_reports_its_own_duration():
@@ -1171,7 +1172,7 @@ def test_the_wire_vocabulary_is_frozen():
         "FOREIGN_KEY",
         "EXECUTION",
     }
-    assert {cls.__name__ for cls in Failure.__subclasses__()} == {
+    assert {cls.__name__ for cls in typing.get_args(Failure.__value__)} == {
         "ReadFailure",
         "ValidationFailure",
         "ExecutionFailure",
