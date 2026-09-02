@@ -352,7 +352,12 @@ class PropertyMustBeDeclared:
         )
 
     def _message(self, unresolvable: PropertyUndeclared) -> str:
-        if not self.property_policy.permits_removal(unresolvable.name, unresolvable.observed_value):
+        removable = self.property_policy.permits_transition(
+            name=unresolvable.name,
+            observed=unresolvable.observed_value,
+            desired=None,
+        )
+        if not removable:
             return (
                 f"Operation not allowed: {unresolvable.name} is set on the table"
                 f" (value '{unresolvable.observed_value}') but not declared; it cannot"
@@ -633,7 +638,6 @@ class StreamingTableAnnotationsOnly:
 # Position is report order, so a root defect leads what it causes: spelling
 # before the two it can co-fire with, then StreamingTableAnnotationsOnly before
 # UnmanagedAspectDrift.
-# TODO: fix order issue
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     StreamingTableAnnotationsOnly(),

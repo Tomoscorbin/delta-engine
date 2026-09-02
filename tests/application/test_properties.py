@@ -110,7 +110,11 @@ def test_policy_permits_only_the_column_mapping_upgrade() -> None:
 @pytest.mark.parametrize("observed", ["none", "name"])
 def test_policy_does_not_permit_column_mapping_removal(observed: str) -> None:
     # Then declaring the key absent is blocked whatever its current value
-    assert not DELTA_PROPERTY_POLICY.permits_removal(Property.COLUMN_MAPPING_MODE, observed)
+    assert not DELTA_PROPERTY_POLICY.permits_transition(
+        Property.COLUMN_MAPPING_MODE,
+        observed=observed,
+        desired=None,
+    )
 
 
 def test_policy_permits_first_write_of_a_restricted_property() -> None:
@@ -135,7 +139,7 @@ def test_policy_permits_first_write_of_a_restricted_property() -> None:
 def test_policy_permits_transitions_and_removal_for_unrestricted_properties(key: str) -> None:
     # Then a key with no restricted transitions accepts any change and removal
     assert DELTA_PROPERTY_POLICY.permits_transition(key, observed="anything", desired="else")
-    assert DELTA_PROPERTY_POLICY.permits_removal(key, observed="anything")
+    assert DELTA_PROPERTY_POLICY.permits_transition(key, observed="anything", desired=None)
 
 
 def test_policy_rejects_a_transition_check_on_an_unmanaged_property() -> None:
@@ -147,9 +151,3 @@ def test_policy_rejects_a_transition_check_on_an_unmanaged_property() -> None:
             observed="true",
             desired="false",
         )
-
-
-def test_policy_rejects_a_removal_check_on_an_unmanaged_property() -> None:
-    # When a removal check reaches an unmanaged key, then the policy fails
-    with pytest.raises(ValueError):
-        DELTA_PROPERTY_POLICY.permits_removal("delta.enableRowTracking", observed="true")

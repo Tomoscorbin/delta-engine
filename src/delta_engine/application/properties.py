@@ -207,18 +207,6 @@ class PropertyPolicy:
             raise ValueError(f"Property not managed by this engine: {name}")
         return definition.permits_transition(observed, desired)
 
-    def permits_removal(
-        self,
-        name: str,
-        observed: str,
-    ) -> bool:
-        """Return whether a managed property may be removed."""
-        return self.permits_transition(
-            name=name,
-            observed=observed,
-            desired=None,
-        )
-
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     PropertyDefinition(
