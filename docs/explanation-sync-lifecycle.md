@@ -73,6 +73,24 @@ failure stops that table's remaining statements. Re-running `sync` after
 fixing the cause is always the recovery path: the engine re-reads live state
 and plans only the drift that still remains.
 
+## One writer at a time: what success means
+
+A sync is not transactional across its phases. Every plan is computed from the
+snapshot the read phase observed, and execution applies the compiled
+statements without re-reading the table in between. DDL from another actor
+that lands between the read and a statement is invisible to the run: either it
+makes a statement fail — reported loudly as an execution failure — or the run
+never notices it.
+
+The operating contract is single-writer: while a sync runs, nothing else
+should run DDL against the tables it manages. Under that contract, a table
+reported as `SUCCESS` means every planned statement executed. The engine does
+not re-read the table afterwards to verify that the desired state now holds —
+a verification read could narrow the race with a concurrent writer, but it
+could not prevent the next writer from changing the table a moment later.
+Drift from outside the contract is caught the way all drift is caught: the
+next sync reads the live table and plans whatever remains.
+
 ## One table's failure does not abort the run
 
 Each table carries its own result through the phases. A table that fails an

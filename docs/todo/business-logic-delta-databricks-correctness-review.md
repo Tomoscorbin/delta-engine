@@ -749,6 +749,16 @@ postcondition, choose and document one of:
 A verification read narrows the race and detects interleaving; it cannot prevent
 a later external writer from changing the table.
 
+### Resolved (2026-09-02)
+
+The single-writer/no-concurrent-DDL contract was chosen and documented.
+`explanation-sync-lifecycle.md` states the contract and the success
+postcondition (a table reported `SUCCESS` means every planned statement
+executed; no post-execution verification read), and the "Concurrent catalog
+changes" section of `reference-limitations.md` carries the summary. A
+verification read remains a separate future decision, not implied by the
+documentation.
+
 ## Fresh-sweep verification
 
 The sweep was performed on `main` at
@@ -819,7 +829,7 @@ Before an implementation PR is ready for merge, run:
       is demonstrated.
 - [x] Dependency traversal will be iterative and `Decimal` will enforce runtime
       integer inputs.
-- [ ] The concurrency contract and success postcondition will be documented
+- [x] The concurrency contract and success postcondition will be documented
       explicitly.
 - [ ] Implementation will remain isolated from unrelated product and
       documentation work.
