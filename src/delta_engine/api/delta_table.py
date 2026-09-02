@@ -505,17 +505,6 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
-def _parse_name_reference(raw: str) -> QualifiedName:
-    """
-    Parse a ``catalog.schema.table`` string into the referenced table's name.
-
-    Every part must be a name Unity Catalog can store.
-    """
-    name = QualifiedName.parse(raw)
-    _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
-    return name
-
-
 def _validate_same_catalog(owner_name: QualifiedName, referenced_table: QualifiedName) -> None:
     """Reject a foreign key whose referenced table lives in another catalog."""
     if referenced_table.catalog != owner_name.catalog:
@@ -647,7 +636,9 @@ def _resolve_reference(
         case str() as raw:
             if not isinstance(lowered_columns, Mapping):
                 raise ValueError(_NAME_REFERENCE_NEEDS_MAPPING)
-            return _NameReference(_parse_name_reference(raw), lowered_columns)
+            name = QualifiedName.parse(raw)
+            _validate_object_name_parts(name, subject=f"foreign key reference {raw!r}")
+            return _NameReference(name, lowered_columns)
         case DeltaTable() | _SelfReference():
             return references
         case _:

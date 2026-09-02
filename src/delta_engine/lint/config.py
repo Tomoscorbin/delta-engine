@@ -145,18 +145,14 @@ def parse_lint_config(section: Mapping[str, object]) -> LintPolicy:
 
     rules: list[ConfiguredRule] = []
     for rule_type in ALL_RULES:
-        value = section.get(rule_type.name, _default_setting_for(rule_type))
+        default = Severity.ERROR.value if rule_type.enabled_by_default else _OFF
+        value = section.get(rule_type.name, default)
         configured = _parse_rule_setting(rule_type, value)
         if configured is not None:
             rules.append(configured)
 
     overrides = _parse_overrides(section.get(_OVERRIDES, ()))
     return LintPolicy(rules, overrides)
-
-
-def _default_setting_for(rule_type: type[LintRule]) -> str:
-    """Pick an absent rule's setting from whether the rule is enabled by default."""
-    return Severity.ERROR.value if rule_type.enabled_by_default else _OFF
 
 
 def _parse_rule_setting(rule_type: type[LintRule], value: object) -> ConfiguredRule | None:
