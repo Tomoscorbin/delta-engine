@@ -227,9 +227,6 @@ def test_loads_from_the_working_directory_without_installation(tmp_path, monkeyp
         )
     )
     monkeypatch.chdir(tmp_path)
-    # Loading mutates sys.path in place; snapshot it so a failed assertion
-    # cannot leak the temporary directory into later tests.
-    monkeypatch.setattr(sys, "path", list(sys.path))
 
     try:
         # When loading by module name alone
@@ -239,6 +236,31 @@ def test_loads_from_the_working_directory_without_installation(tmp_path, monkeyp
         assert _dotted_names(tables) == ["dev.silver.orders"]
     finally:
         sys.modules.pop("decl_cwd_tables", None)
+
+
+def test_sys_path_is_restored_after_loading(write_module):
+    # Given a loadable declaration module
+    module = write_module("decl_path_restored", _TWO_TABLES)
+    path_before = list(sys.path)
+
+    # When loading the collection
+    _load(f"{module}:all_tables")
+
+    # Then sys.path is exactly what it was before the load
+    assert sys.path == path_before
+
+
+def test_sys_path_is_restored_when_loading_fails(write_module):
+    # Given a declaration module whose import raises
+    module = write_module("decl_path_restored_on_failure", 'raise RuntimeError("boom")\n')
+    path_before = list(sys.path)
+
+    # When loading fails
+    with pytest.raises(RuntimeError):
+        _load(f"{module}:tables")
+
+    # Then sys.path is exactly what it was before the load
+    assert sys.path == path_before
 
 
 def test_working_directory_takes_precedence_when_already_later_on_path(tmp_path, monkeypatch):
