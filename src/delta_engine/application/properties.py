@@ -4,7 +4,7 @@ Restrictions on the Delta table properties this engine manages.
 The managed key vocabulary and what declared values mean live in the domain
 (``delta_engine.domain.model.property``); this module holds the policy over
 that vocabulary — which declared values are admitted, and which in-place
-transitions the catalog accepts.
+transitions the engine permits.
 
 Admission policy — adding a key is a breaking change: tables carrying it
 undeclared start failing validation on upgrade. Before managing a new key,
@@ -92,7 +92,12 @@ class PropertyDefinition:
 
     def permits_transition(self, observed: str | None, desired: str | None) -> bool:
         """
-        Whether the catalog accepts moving this key from observed to desired.
+        Whether the engine permits moving this key from observed to desired.
+
+        The permitted set is engine policy and can be stricter than the
+        catalog: a change the catalog would apply at unacceptable cost (such
+        as removing column mapping, which rewrites every data file) is not
+        permitted here.
 
         A first write (``observed`` is ``None``) is always legal; an empty
         restriction set permits everything; ``desired`` ``None`` means

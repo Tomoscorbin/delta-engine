@@ -924,8 +924,10 @@ class DeltaTable:
             clustered_by: Column names to use as Delta liquid-clustering keys
                 (at most four). Key order is immaterial. Mutually exclusive with
                 ``partitioned_by``.
-            primary_key: Column names forming the table's primary key, in the
-                order the constraint is rendered; None means no key.
+            primary_key: Column names forming the table's primary key; order
+                is not part of the key's identity, and the columns are stored
+                and rendered in a canonical case-insensitive sorted order.
+                None means no key.
             primary_key_name: Optional physical name to request when creating
                 the primary key. When omitted, Databricks chooses the name.
             foreign_keys: Foreign key relationships declared on this table.

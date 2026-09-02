@@ -26,6 +26,7 @@ from delta_engine.domain.model.data_type import (
     Timestamp,
     TimestampNtz,
     Variant,
+    can_widen_in_place,
     walk_data_type,
 )
 from delta_engine.domain.model.feature import TableFeature
@@ -79,5 +80,6 @@ __all__ = [
     "Timestamp",
     "TimestampNtz",
     "Variant",
+    "can_widen_in_place",
     "walk_data_type",
 ]
