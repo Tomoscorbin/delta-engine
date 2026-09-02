@@ -519,8 +519,8 @@ def _diff_foreign_keys(
 
     drops: list[DropForeignKey] = []
     for constraint in unmatched_observed:
-        if constraint.name is None:
-            raise ValueError("An observed foreign key must carry its catalog name")
+        # ObservedTable guarantees observed constraints are named.
+        assert constraint.name is not None
         drops.append(DropForeignKey(name=constraint.name))
     return (*drops, *sets)
 
