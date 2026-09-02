@@ -26,6 +26,7 @@ from delta_engine.domain.model.data_type import (
     Timestamp,
     TimestampNtz,
     Variant,
+    walk_data_type,
 )
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -75,4 +76,5 @@ __all__ = [
     "Timestamp",
     "TimestampNtz",
     "Variant",
+    "walk_data_type",
 ]

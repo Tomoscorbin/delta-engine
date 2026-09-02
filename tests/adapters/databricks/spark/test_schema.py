@@ -139,21 +139,6 @@ def test_public_converter_accepts_a_delta_table_declaration() -> None:
     )
 
 
-def test_rejects_an_unmapped_data_type() -> None:
-    # Given a desired table containing a DataType outside the closed modeled set
-    class CustomType(DataType):
-        pass
-
-    table = _table(DesiredColumn("value", CustomType()))
-
-    # When converting the desired row schema to PySpark
-    with pytest.raises(TypeError) as raised:
-        to_spark_schema(table)
-
-    # Then conversion fails explicitly at the unsupported type
-    assert str(raised.value) == "Unsupported DataType variant: CustomType"
-
-
 def test_public_converter_explains_when_pyspark_is_unavailable() -> None:
     # Given a fresh interpreter where PySpark cannot be imported
     program = """

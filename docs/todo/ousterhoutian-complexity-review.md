@@ -631,6 +631,17 @@ probe stands — a `TimestampNtz` subclass still renders while evading the
 exact-type feature lookup — and the duplicated tree traversals remain, so
 the extension-policy decision is still open.
 
+### Update (2026-09-02) — RESOLVED
+
+[PR #399](https://github.com/Tomoscorbin/delta-engine/pull/399) decided the
+extension policy: the vocabulary is closed. Subclassing `DataType` outside
+the domain type module raises at class definition, and the bare base is no
+longer constructible, so the remaining probe cannot be written. The feature
+requirement moved onto the type itself (`required_feature`), replacing the
+exact-type map, and the differ's tree traversal moved to the domain type
+module as `walk_data_type`. The API's per-field traversal stays separate:
+it carries path and nullability context a type-node iterator does not.
+
 ## 11. Prevent accepted plans from omitting unresolvable differences
 
 ### Cause

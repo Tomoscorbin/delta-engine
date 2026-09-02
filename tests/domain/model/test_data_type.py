@@ -5,12 +5,15 @@ import pytest
 
 from delta_engine.domain.model.data_type import (
     Array,
+    DataType,
     Decimal,
     Integer,
     Map,
     String,
     Struct,
     StructField,
+    TimestampNtz,
+    walk_data_type,
 )
 from tests.domain.model.strategies import NON_DATA_TYPES
 
@@ -161,3 +164,36 @@ def test_genuinely_different_field_names_stay_semantically_different() -> None:
 
     # Then they are different types
     assert underscore != camel
+
+
+def test_data_type_vocabulary_rejects_variants_defined_elsewhere() -> None:
+    # When defining a new type variant outside the domain vocabulary
+    # Then the definition itself fails
+    with pytest.raises(TypeError):
+
+        class CustomType(DataType):
+            pass
+
+
+def test_data_type_base_cannot_be_constructed() -> None:
+    # When constructing the abstract base rather than a concrete variant
+    # Then construction fails
+    with pytest.raises(TypeError):
+        DataType()
+
+
+def test_walking_a_type_yields_every_type_nested_inside_it() -> None:
+    # Given a type nesting others through map, array, and struct
+    nested = Map(String(), Array(Struct((StructField("when", TimestampNtz()),))))
+
+    # When walking the type tree
+    walked = tuple(walk_data_type(nested))
+
+    # Then every type in the tree appears, outermost first
+    assert walked == (
+        nested,
+        String(),
+        Array(Struct((StructField("when", TimestampNtz()),))),
+        Struct((StructField("when", TimestampNtz()),)),
+        TimestampNtz(),
+    )

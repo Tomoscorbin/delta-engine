@@ -1,15 +1,40 @@
 """Domain data type variants used to describe table schemas."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import ClassVar, Self
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
+from delta_engine.domain.model.table_feature import TableFeature
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 
 
 class DataType:
-    """Base class for all data types."""
+    """
+    Base class of the closed set of data types; only this module defines variants.
+
+    Attributes:
+        required_feature: Delta table feature a table's protocol must support
+            before a column of this type can exist, or ``None``.
+
+    """
+
+    required_feature: ClassVar[TableFeature | None] = None
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            raise TypeError(
+                f"DataType is a closed vocabulary; cannot define variant {cls.__name__!r}"
+            )
+
+    def __new__(cls, *args: object, **kwargs: object) -> Self:
+        """Construct a concrete variant; the abstract base itself is rejected."""
+        if cls is DataType:
+            raise TypeError("DataType is abstract; construct a concrete variant")
+        return super().__new__(cls)
 
     def __str__(self) -> str:
         return type(self).__name__
@@ -114,10 +139,14 @@ class Binary(DataType):
 class TimestampNtz(DataType):
     """Timestamp with date and time, no timezone."""
 
+    required_feature: ClassVar[TableFeature] = TableFeature.TIMESTAMP_NTZ
+
 
 @dataclass(frozen=True, slots=True)
 class Variant(DataType):
     """Semi-structured value type (Databricks VARIANT)."""
+
+    required_feature: ClassVar[TableFeature] = TableFeature.VARIANT
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,3 +228,17 @@ class Map(DataType):
 
     def __str__(self) -> str:
         return f"Map<{self.key}, {self.value}>"
+
+
+def walk_data_type(data_type: DataType) -> Iterator[DataType]:
+    """Yield ``data_type`` and every type nested inside it, depth-first."""
+    yield data_type
+    match data_type:
+        case Array(element=element):
+            yield from walk_data_type(element)
+        case Map(key=key, value=value):
+            yield from walk_data_type(key)
+            yield from walk_data_type(value)
+        case Struct(fields=fields):
+            for field in fields:
+                yield from walk_data_type(field.data_type)
