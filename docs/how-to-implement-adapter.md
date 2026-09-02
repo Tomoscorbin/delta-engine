@@ -134,10 +134,13 @@ instead of a Spark session, does not need to reimplement the SQL layer:
 `delta_engine.adapters.databricks.sql` — the compiler, identifier quoting, and
 `information_schema` queries — is PySpark-free by contract and is shared
 between backends. `delta_engine.adapters.databricks.warehouse` is the live
-example: its reader and executor are the only backend-specific code it adds,
-built entirely on that shared core. The Spark backend in
-`delta_engine.adapters.databricks.spark` is the other consumer, adding its own
-reader, executor, and backend-specific error translation.
+example: its reader, executor, and connection runner are the only
+backend-specific code it adds, built on that shared core. Error translation is
+shared too, one level up in `delta_engine.adapters.databricks`: both backends'
+readers go through `read_catalog_state` and both executors through
+`execute_statement`. The Spark backend in
+`delta_engine.adapters.databricks.spark` is the other consumer, in the same
+shape: its own reader, executor, and Spark-session runner.
 
 ## Adding a genuinely different backend
 
