@@ -11,7 +11,6 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
-    CompiledAction,
     CompiledPlan,
     ExecutionResult,
     ReadResult,
@@ -36,13 +35,7 @@ def build_compiled_plan(
     statements: Iterable[str],
 ) -> CompiledPlan:
     """Pair a real action plan with one deterministic statement per action."""
-    return CompiledPlan(
-        plan=plan,
-        compiled_actions=tuple(
-            CompiledAction(action=action, statement=statement)
-            for action, statement in zip(plan.actions, statements, strict=True)
-        ),
-    )
+    return CompiledPlan(plan=plan, statements=tuple(statements))
 
 
 def build_compiled_comment_plan(target: QualifiedName, *statements: str) -> CompiledPlan:

@@ -17,7 +17,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
-from delta_engine.application.ports import CompiledAction, CompiledPlan
+from delta_engine.application.ports import CompiledPlan
 from delta_engine.domain.model import (
     DesiredColumn,
     ForeignKeyConstraint,
@@ -88,13 +88,9 @@ def compile_plan(plan: ActionPlan) -> CompiledPlan:
     the relation-kind-specific ALTER dialect from action compilers.
     """
     target = _Target.for_relation(plan.target, plan.kind)
-    compiled_actions = [
-        CompiledAction(action=action, statement=_compile_action(action, target)) for action in plan
-    ]
-
     return CompiledPlan(
         plan=plan,
-        compiled_actions=compiled_actions,
+        statements=tuple(_compile_action(action, target) for action in plan),
     )
 
 

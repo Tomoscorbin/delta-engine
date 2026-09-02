@@ -15,7 +15,6 @@ from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import Action
 
 # ---------- DesiredTableSource ----------
 
@@ -82,36 +81,25 @@ class CatalogStateReader(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledAction:
-    """One domain action paired with the single statement that applies it."""
-
-    action: Action
-    statement: str
-
-    def __post_init__(self) -> None:
-        if not self.statement.strip():
-            raise ValueError(f"{type(self.action).__name__} compiled to an empty statement")
-
-
-@dataclass(frozen=True, slots=True)
 class CompiledPlan:
-    """An accepted action plan paired exactly with its compiled statements."""
+    """
+    An accepted action plan paired with its compiled statements.
+
+    The pairing is positional: ``statements[i]`` is the single statement that
+    applies ``plan.actions[i]``, in the plan's execution order.
+    """
 
     plan: ActionPlan
-    compiled_actions: ListOrTuple[CompiledAction]
+    statements: ListOrTuple[str]
 
     def __post_init__(self) -> None:
-        compiled_actions = tuple(self.compiled_actions)
-        object.__setattr__(self, "compiled_actions", compiled_actions)
-        source_actions = tuple(compiled.action for compiled in compiled_actions)
-
-        if source_actions != self.plan.actions:
-            raise ValueError("Compiled actions must correspond exactly to plan actions")
-
-    @property
-    def statements(self) -> tuple[str, ...]:
-        """Statements in the source plan's execution order."""
-        return tuple(item.statement for item in self.compiled_actions)
+        statements = tuple(self.statements)
+        object.__setattr__(self, "statements", statements)
+        if len(statements) != len(self.plan.actions):
+            raise ValueError("Compiled statements must correspond one-to-one with plan actions")
+        for action, statement in zip(self.plan.actions, statements, strict=True):
+            if not statement.strip():
+                raise ValueError(f"{type(action).__name__} compiled to an empty statement")
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +123,7 @@ class ExecutionResult:
         """Reject histories the engine's execution loop cannot produce."""
         statements = self.compiled_plan.statements
         attempted = self.applied_count + (0 if self.failure is None else 1)
-        if not 0 <= self.applied_count or attempted > len(statements):
+        if self.applied_count < 0 or attempted > len(statements):
             raise ValueError("Execution history must lie within the compiled plan")
         if self.failure is None:
             if self.applied_count != len(statements):
