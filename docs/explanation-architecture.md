@@ -247,7 +247,10 @@ are encoded as ordinary Python in the domain and application layers:
   `ColumnMappingRequiredForDrop` exists only because Delta permits
   `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;
   `PropertyTransitionNotSupported` and `PropertyMustBeDeclared` operate on that
-  Delta property policy.
+  Delta property policy. The type-widening matrix itself — which in-place type
+  changes Delta can apply — is a fact about the type vocabulary and lives with
+  it (`domain/model/data_type.py`, `can_widen_in_place`); the two widening
+  rules are the policy that asks it.
 
 import-linter cannot catch this, because it is backend _knowledge_ expressed in
 ordinary types, not a forbidden import.

@@ -1,28 +1,17 @@
 """Validation rules judging the diff between desired and observed table state."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.diff_entries import difference_entries
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, PropertyPolicy
 from delta_engine.domain.model import (
-    Byte,
-    DataType,
-    Date,
-    Decimal,
-    Double,
-    Float,
-    Integer,
-    Long,
-    Short,
     TableAspect,
     TableKind,
     TableProperty,
     TableScope,
-    TimestampNtz,
+    can_widen_in_place,
 )
 from delta_engine.domain.plan import (
     Action,
@@ -42,35 +31,6 @@ from delta_engine.domain.plan import (
     TableDrift,
     Unresolvable,
     UnsetProperty,
-)
-
-# The widenings Delta can apply in place (observed -> desired), per the
-# Databricks type-widening matrix. Decimal targets are handled separately —
-# whether they fit depends on precision and scale, not the type alone.
-# Composite types are deliberately absent: this engine models arrays, maps,
-# and structs atomically, so they are never widened as a whole and any change
-# to them stays blocked (Delta itself can widen nested fields).
-_WIDENING_TARGETS: Final[Mapping[type[DataType], frozenset[type[DataType]]]] = MappingProxyType(
-    {
-        Byte: frozenset({Short, Integer, Long, Double}),
-        Short: frozenset({Integer, Long, Double}),
-        Integer: frozenset({Long, Double}),
-        Float: frozenset({Double}),
-        Date: frozenset({TimestampNtz}),
-    }
-)
-
-# Widening an integer column to Decimal needs room for every value the source
-# type can hold. Databricks specifies DECIMAL(10,0) as the minimum for
-# Byte/Short/Integer and DECIMAL(20,0) for Long — i.e. this many integer
-# digits (precision minus scale).
-_DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingProxyType(
-    {
-        Byte: 10,
-        Short: 10,
-        Integer: 10,
-        Long: 20,
-    }
 )
 
 
@@ -165,27 +125,6 @@ class NullabilityTighteningOnExistingColumn:
         )
 
 
-def _is_safe_widening(observed: DataType, desired: DataType) -> bool:
-    """Whether Delta type widening can apply this type change in place."""
-    if isinstance(desired, Decimal):
-        return _is_safe_widening_to_decimal(observed, desired)
-    return type(desired) in _WIDENING_TARGETS.get(type(observed), frozenset())
-
-
-def _is_safe_widening_to_decimal(observed: DataType, desired: Decimal) -> bool:
-    """Decimal widening keeps integer digits: scale may grow only if precision grows with it."""
-    desired_integer_digits = desired.precision - desired.scale
-    if isinstance(observed, Decimal):
-        return (
-            desired.scale >= observed.scale
-            and desired_integer_digits >= observed.precision - observed.scale
-        )
-    required_integer_digits = _DECIMAL_INTEGER_DIGITS_REQUIRED.get(type(observed))
-    if required_integer_digits is None:
-        return False
-    return desired_integer_digits >= required_integer_digits
-
-
 class NonWideningColumnTypeChange:
     """Disallow in-place column type changes outside the type-widening matrix."""
 
@@ -209,7 +148,7 @@ class NonWideningColumnTypeChange:
             )
             for change in drift.actions
             if isinstance(change, AlterColumnType)
-            and not _is_safe_widening(change.observed_type, change.desired_type)
+            and not can_widen_in_place(change.observed_type, change.desired_type)
         )
 
 
@@ -242,7 +181,7 @@ class TypeWideningRequiredForTypeChange:
             )
             for change in drift.actions
             if isinstance(change, AlterColumnType)
-            and _is_safe_widening(change.observed_type, change.desired_type)
+            and can_widen_in_place(change.observed_type, change.desired_type)
         )
 
 

@@ -5,14 +5,21 @@ import pytest
 
 from delta_engine.domain.model.data_type import (
     Array,
+    Byte,
     DataType,
+    Date,
     Decimal,
+    Double,
+    Float,
     Integer,
+    Long,
     Map,
+    Short,
     String,
     Struct,
     StructField,
     TimestampNtz,
+    can_widen_in_place,
     walk_data_type,
 )
 from tests.domain.model.strategies import NON_DATA_TYPES
@@ -180,6 +187,72 @@ def test_data_type_base_cannot_be_constructed() -> None:
     # Then construction fails
     with pytest.raises(TypeError):
         DataType()
+
+
+@pytest.mark.parametrize(
+    ("observed", "desired"),
+    [
+        (Byte(), Short()),
+        (Byte(), Integer()),
+        (Byte(), Long()),
+        (Byte(), Double()),
+        (Short(), Integer()),
+        (Short(), Long()),
+        (Short(), Double()),
+        (Integer(), Long()),
+        (Integer(), Double()),
+        (Float(), Double()),
+        (Date(), TimestampNtz()),
+    ],
+)
+def test_every_widening_matrix_entry_widens_in_place(observed: DataType, desired: DataType) -> None:
+    # Given each entry of the Delta type-widening matrix
+    # Then the change is an in-place widening
+    assert can_widen_in_place(observed, desired)
+
+
+@pytest.mark.parametrize(
+    ("observed", "desired"),
+    [
+        pytest.param(Long(), Integer(), id="narrowing"),
+        pytest.param(Long(), Double(), id="double-cannot-hold-every-long"),
+        pytest.param(Integer(), String(), id="unrelated-types"),
+        pytest.param(
+            Array(Integer()), Array(Long()), id="composite-types-are-never-widened-as-a-whole"
+        ),
+    ],
+)
+def test_changes_outside_the_matrix_cannot_widen_in_place(
+    observed: DataType, desired: DataType
+) -> None:
+    # Given a type change the Delta matrix does not permit
+    # Then it is not an in-place widening
+    assert not can_widen_in_place(observed, desired)
+
+
+def test_decimal_widening_keeps_integer_digits_and_never_shrinks_scale() -> None:
+    # Then precision growth at unchanged scale widens
+    assert can_widen_in_place(Decimal(10, 2), Decimal(12, 2))
+    # And scale growth widens when precision grows with it (integer digits kept)
+    assert can_widen_in_place(Decimal(10, 1), Decimal(12, 3))
+    # And scale growth that eats into integer digits is not a widening
+    assert not can_widen_in_place(Decimal(10, 2), Decimal(10, 3))
+    # And neither is a precision shrink
+    assert not can_widen_in_place(Decimal(10, 2), Decimal(8, 2))
+    # And neither is a scale shrink, even though integer digits grow
+    assert not can_widen_in_place(Decimal(10, 2), Decimal(12, 1))
+
+
+def test_integer_to_decimal_widening_requires_enough_integer_digits() -> None:
+    # Given Databricks' minimums: DECIMAL(10,0) for Byte/Short/Integer, DECIMAL(20,0) for Long
+    assert can_widen_in_place(Integer(), Decimal(10, 0))
+    assert can_widen_in_place(Byte(), Decimal(12, 2))
+    assert can_widen_in_place(Long(), Decimal(20, 0))
+
+    # Then a decimal without room for every source value is not a widening
+    assert not can_widen_in_place(Integer(), Decimal(9, 0))
+    assert not can_widen_in_place(Short(), Decimal(11, 2))
+    assert not can_widen_in_place(Long(), Decimal(19, 0))
 
 
 def test_walking_a_type_yields_every_type_nested_inside_it() -> None:
