@@ -18,7 +18,6 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedTable,
     QualifiedName,
-    ReconciliationMode,
     TableAspect,
     TableFeature,
     walk_data_type,
@@ -80,9 +79,8 @@ class TableDrift:
     ``actions`` are remedied differences, each carrying the executable
     operation that closes its gap. ``unresolvable`` are differences no action
     can close; they exist to be judged by validation. Diffing compares every
-    aspect the scope does not reconcile as ``IGNORE``; validation's
-    eligibility checks decide whether each difference is within the
-    declaration's scope.
+    aspect the scope does not ignore; validation's eligibility checks decide
+    whether each difference is within the declaration's scope.
     ``desired`` and ``observed`` are the two endpoints the differences
     separate, carried as judging context: the declaration's side (scope and
     declared properties) and the catalog's side (observed facts such
@@ -562,7 +560,7 @@ def _diff_properties(
     tuple[PropertyUndeclared, ...],
 ]:
     """Return all differences implied by exact property declarations."""
-    if desired.scope.reconciles(TableAspect.PROPERTIES) is ReconciliationMode.IGNORE:
+    if desired.scope.ignores(TableAspect.PROPERTIES):
         return (), ()
 
     actions: list[SetProperty | UnsetProperty] = []

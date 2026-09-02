@@ -138,6 +138,10 @@ class TableScope(Enum):
         """Return whether this scope manages ``aspect``."""
         return self.reconciles(aspect) is ReconciliationMode.MANAGE
 
+    def ignores(self, aspect: TableAspect) -> bool:
+        """Return whether this scope carries ``aspect`` without comparing it."""
+        return self.reconciles(aspect) is ReconciliationMode.IGNORE
+
     def is_within(self, other: Self) -> bool:
         """Return whether this scope grants no more authority than ``other``."""
         return self.value <= other.value

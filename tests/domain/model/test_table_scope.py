@@ -32,6 +32,15 @@ def test_each_scope_manages_its_part_of_the_table(
 
 
 @pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
+def test_a_scope_ignores_properties_exactly_when_it_does_not_manage_them(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Then properties are the only ignored aspect, and only outside the scope
+    ignored = {aspect for aspect in TableAspect if scope.ignores(aspect)}
+    assert ignored == ({TableAspect.PROPERTIES} - managed)
+
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
 def test_a_scope_converges_exactly_the_aspects_it_manages(
     scope: TableScope, managed: frozenset[TableAspect]
 ) -> None:

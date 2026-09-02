@@ -508,8 +508,8 @@ declared value is reconciled, a declared `None` asserts absence (unset
 when present), a managed key observed without a declaration is a blocking
 change, and unmanaged keys (platform-written) are invisible. The reader
 adapter filters unmanaged keys out of the observed state before the domain
-sees them, and a scope that does not manage `PROPERTIES` reconciles them as
-`IGNORE`, so the properties diff does not run at all. Tags are full-state
+sees them, and a scope that does not manage `PROPERTIES` ignores them
+(`TableScope.ignores`), so the properties diff does not run at all. Tags are full-state
 (an observed-only tag is drift and is unset).
 
 ## Managed aspects
@@ -523,7 +523,9 @@ table to the declaration, `REQUIRE_MATCH` mirrors the live table and refuses
 drift, and `IGNORE` makes no assertion at all. Managed aspects are `MANAGE`;
 below its minimum scope every aspect is `REQUIRE_MATCH` except properties,
 which are `IGNORE` — a restricted declaration carries property values without
-comparing them. The differ compares every aspect that is not `IGNORE`, so its
+comparing them. `manages` and `ignores` name the two modes callers branch on,
+so a site reads `scope.ignores(PROPERTIES)` rather than comparing modes
+itself. The differ compares every aspect the scope does not ignore, so its
 one scope question is whether to diff properties (see Diff-first planning).
 The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableCreation`), so the diff is self-contained
