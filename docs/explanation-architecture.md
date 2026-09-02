@@ -508,19 +508,25 @@ declared value is reconciled, a declared `None` asserts absence (unset
 when present), a managed key observed without a declaration is a blocking
 change, and unmanaged keys (platform-written) are invisible. The reader
 adapter filters unmanaged keys out of the observed state before the domain
-sees them, and the properties diff runs only when the declaration manages
-`PROPERTIES`. Tags are full-state (an observed-only tag is drift and is
-unset).
+sees them, and a scope that does not manage `PROPERTIES` ignores them
+(`TableScope.ignores`), so the properties diff does not run at all. Tags are full-state
+(an observed-only tag is drift and is unset).
 
 ## Managed aspects
 
 Every `DesiredTable` carries a closed `TableScope` value. It owns the questions
 of whether an aspect is managed and whether one scope fits within another, so
 callers do not interpret a permission bitmap themselves and arbitrary scope
-combinations cannot enter the domain. The differ
-(`diff_table`) is scope-blind for every aspect except properties — the
-properties diff runs only when the declaration manages `PROPERTIES` (see
-Diff-first planning). The `TableDrift` it produces carries the `desired`
+combinations cannot enter the domain. For each aspect the scope answers
+exactly one of three questions: `manages` (compare, and converge the live
+table to the declaration), `requires_match` (compare, but refuse drift — the
+declaration mirrors the live state), or `ignores` (do not compare at all).
+Managed aspects follow the minimum-scope ladder; below it every aspect must
+match except properties, which are ignored — a restricted declaration carries
+property values without comparing them. The differ compares every aspect the
+scope does not ignore, so its one scope question is whether to diff
+properties (see Diff-first planning).
+The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableCreation`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in
 validation, as an eligibility check rather than an optional rule. Before any

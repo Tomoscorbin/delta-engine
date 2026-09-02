@@ -15,21 +15,41 @@ STRUCTURE = frozenset(
     }
 )
 
+MANAGED_BY_SCOPE = [
+    (TableScope.TAGS, TAGS),
+    (TableScope.ANNOTATIONS, TAGS | COMMENTS),
+    (TableScope.METADATA, TAGS | COMMENTS | KEYS),
+    (TableScope.FULL, TAGS | COMMENTS | KEYS | STRUCTURE),
+]
 
-@pytest.mark.parametrize(
-    ("scope", "managed"),
-    [
-        (TableScope.TAGS, TAGS),
-        (TableScope.ANNOTATIONS, TAGS | COMMENTS),
-        (TableScope.METADATA, TAGS | COMMENTS | KEYS),
-        (TableScope.FULL, TAGS | COMMENTS | KEYS | STRUCTURE),
-    ],
-)
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
 def test_each_scope_manages_its_part_of_the_table(
     scope: TableScope, managed: frozenset[TableAspect]
 ) -> None:
     # Then each scope manages exactly its slice of the aspect vocabulary
     assert {aspect for aspect in TableAspect if scope.manages(aspect)} == managed
+
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
+def test_a_scope_ignores_properties_exactly_when_it_does_not_manage_them(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Then properties are the only ignored aspect, and only outside the scope
+    ignored = {aspect for aspect in TableAspect if scope.ignores(aspect)}
+    assert ignored == ({TableAspect.PROPERTIES} - managed)
+
+
+@pytest.mark.parametrize(("scope", "managed"), MANAGED_BY_SCOPE)
+def test_aspects_outside_a_scope_must_match_the_live_table_except_properties(
+    scope: TableScope, managed: frozenset[TableAspect]
+) -> None:
+    # Given the aspects outside this scope
+    outside = frozenset(TableAspect) - managed
+
+    # Then every outside aspect except properties must mirror the live table
+    checked = {aspect for aspect in TableAspect if scope.requires_match(aspect)}
+    assert checked == outside - {TableAspect.PROPERTIES}
 
 
 @pytest.mark.parametrize(

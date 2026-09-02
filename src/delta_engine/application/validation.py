@@ -476,7 +476,12 @@ def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
 
 class UnmanagedAspectDrift:
     """
-    Fail once per unmanaged aspect that has drifted.
+    Fail once per require-match aspect that has drifted.
+
+    The interpreter of ``TableScope.requires_match``: an aspect the scope
+    mirrors rather than manages must match the live table, and this check is
+    where a mismatch becomes a failure. Ignored aspects never surface here —
+    the differ does not compare them at all.
 
     One of the ``ELIGIBILITY_CHECKS``: it defines what a declaration is allowed
     to govern and runs before any safety rule, short-circuiting
@@ -501,12 +506,12 @@ class UnmanagedAspectDrift:
     name: ClassVar[str] = "UnmanagedAspectDrift"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every drifted aspect the declaration does not manage."""
+        """Flag every drifted aspect the declaration requires to match."""
         lines_by_aspect: dict[TableAspect, list[str]] = {}
         for difference in (*drift.actions, *drift.unresolvable):
             if isinstance(difference, ColumnCaseDrift):
                 continue
-            if drift.desired.scope.manages(difference.aspect):
+            if not drift.desired.scope.requires_match(difference.aspect):
                 continue
             lines_by_aspect.setdefault(difference.aspect, []).extend(_difference_lines(difference))
 

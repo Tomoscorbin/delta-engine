@@ -105,7 +105,15 @@ ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
 class TableScope(Enum):
-    """The portion of a desired table managed by the engine."""
+    """
+    The portion of a desired table managed by the engine.
+
+    For each aspect a declaration under this scope answers exactly one of
+    three questions: it manages the aspect (compared, and the live table is
+    converged to the declaration), requires it to match (compared, but drift
+    is refused rather than converged — the declaration mirrors the live
+    state), or ignores it (not compared at all).
+    """
 
     TAGS = 1
     ANNOTATIONS = 2
@@ -115,6 +123,17 @@ class TableScope(Enum):
     def manages(self, aspect: TableAspect) -> bool:
         """Return whether this scope manages ``aspect``."""
         return self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value
+
+    def ignores(self, aspect: TableAspect) -> bool:
+        """Return whether this scope carries ``aspect`` without comparing it."""
+        # Properties are the one unmanaged aspect that is not mirrored: a
+        # restricted declaration makes no property assertion at all, so a
+        # pipeline-owned or previously synced property never reads as drift.
+        return aspect is TableAspect.PROPERTIES and not self.manages(aspect)
+
+    def requires_match(self, aspect: TableAspect) -> bool:
+        """Return whether the declaration must mirror the live table's ``aspect``."""
+        return not self.manages(aspect) and not self.ignores(aspect)
 
     def is_within(self, other: Self) -> bool:
         """Return whether this scope grants no more authority than ``other``."""
