@@ -1,10 +1,10 @@
 """
-Interpretation of plan actions as category-tagged diff entries.
+Interpretation of plan actions and unresolvable differences as diff entries.
 
 The shared meaning layer between the two report views: text rendering
 (`rendering.py`) and the machine projection (`SyncReport.to_dict`). States
-what each action *means* (category, operation, subject, detail); presentation
-(grouping, grids, dict shapes) belongs to the consumers.
+what each difference *means* (category, operation, subject, detail);
+presentation (grouping, grids, dict shapes) belongs to the consumers.
 """
 
 from collections.abc import Sequence
@@ -243,14 +243,14 @@ def _key_cells(kind: str, name: str | None, columns: Sequence[str]) -> tuple[str
 
 
 @functools.singledispatch
-def action_entries(action: Action) -> tuple[DiffEntry, ...]:
-    """Render one plan action as one or more category-tagged diff entries."""
-    raise NotImplementedError(f"No diff entries for action {type(action).__name__}")
+def difference_entries(difference: Action | Unresolvable) -> tuple[DiffEntry, ...]:
+    """Render one difference — plan action or unresolvable — as category-tagged diff entries."""
+    raise NotImplementedError(f"No diff entries for {type(difference).__name__}")
 
 
 def plan_entries(plan: ActionPlan) -> tuple[DiffEntry, ...]:
     """Every diff entry a plan lowers to, in plan order — one action may yield several."""
-    return tuple(entry for action in plan for entry in action_entries(action))
+    return tuple(entry for action in plan for entry in difference_entries(action))
 
 
 def drift_entries(drift: TableDrift) -> tuple[DiffEntry, ...]:
@@ -262,17 +262,14 @@ def drift_entries(drift: TableDrift) -> tuple[DiffEntry, ...]:
     frequently the very reason the diff was rejected, so showing only the
     actions would omit the answer.
     """
-    return (
-        *(entry for action in drift.actions for entry in action_entries(action)),
-        *(
-            entry
-            for unresolvable in drift.unresolvable
-            for entry in unresolvable_entries(unresolvable)
-        ),
+    return tuple(
+        entry
+        for difference in (*drift.actions, *drift.unresolvable)
+        for entry in difference_entries(difference)
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     entries = [_column_add_entry(column) for column in action.table.columns]
 
@@ -327,17 +324,17 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     return tuple(entries)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: AddColumn) -> tuple[DiffEntry, ...]:
     return (_column_add_entry(action.column),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: DropColumn) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, subject=action.column.name),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: RenameColumn) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -349,7 +346,7 @@ def _(action: RenameColumn) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
     if action.desired_nullable:
         change = "drop NOT NULL (was NOT NULL)"
@@ -365,7 +362,7 @@ def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -377,7 +374,7 @@ def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
     return (
         _comment_set_entry(
@@ -386,12 +383,12 @@ def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
     return (_comment_set_entry("table", action.desired_comment, action.observed_comment),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: EnableTableFeature) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -403,7 +400,7 @@ def _(action: EnableTableFeature) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetProperty) -> tuple[DiffEntry, ...]:
     return (
         _named_value_entry(
@@ -412,12 +409,12 @@ def _(action: SetProperty) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: UnsetProperty) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.PROPERTIES, DiffOperation.REMOVE, subject=action.name),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetTableTag) -> tuple[DiffEntry, ...]:
     return (
         _named_value_entry(
@@ -426,12 +423,12 @@ def _(action: SetTableTag) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: UnsetTableTag) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, subject=action.name),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetColumnTag) -> tuple[DiffEntry, ...]:
     return (
         _named_value_entry(
@@ -443,7 +440,7 @@ def _(action: SetColumnTag) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -454,13 +451,13 @@ def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
     subject, detail = _key_cells("primary key", action.primary_key.name, action.primary_key.columns)
     return (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, subject=subject, detail=detail),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -471,7 +468,7 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
     subject, leading = _key_cells(
         "foreign key", action.constraint.name, action.constraint.local_columns
@@ -480,7 +477,7 @@ def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, subject=subject, detail=detail),)
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -491,7 +488,7 @@ def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
     )
 
 
-@action_entries.register
+@difference_entries.register
 def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     # No hint on removal: OPTIMIZE FULL errors on a table without clustering
     # columns (DELTA_OPTIMIZE_FULL_NOT_SUPPORTED); existing files simply keep
@@ -515,21 +512,11 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     )
 
 
-@functools.singledispatch
-def unresolvable_entries(unresolvable: Unresolvable) -> tuple[DiffEntry, ...]:
-    """
-    Describe one unresolvable difference as category-tagged diff entries.
-
-    The sibling of :func:`action_entries` for differences no action can close.
-    Every entry is a ``CHANGE``: an unresolvable difference is neither an
-    addition nor a removal the engine could make, it is a disagreement between
-    the declaration and the catalog that something outside this sync must
-    settle.
-    """
-    raise NotImplementedError(f"No diff entries for unresolvable {type(unresolvable).__name__}")
-
-
-@unresolvable_entries.register
+# Every unresolvable entry is a CHANGE: an unresolvable difference is neither
+# an addition nor a removal the engine could make, it is a disagreement
+# between the declaration and the catalog that something outside this sync
+# must settle.
+@difference_entries.register
 def _(unresolvable: ColumnCaseDrift) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -541,7 +528,7 @@ def _(unresolvable: ColumnCaseDrift) -> tuple[DiffEntry, ...]:
     )
 
 
-@unresolvable_entries.register
+@difference_entries.register
 def _(unresolvable: ColumnRenameConflict) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
@@ -553,7 +540,7 @@ def _(unresolvable: ColumnRenameConflict) -> tuple[DiffEntry, ...]:
     )
 
 
-@unresolvable_entries.register
+@difference_entries.register
 def _(unresolvable: PropertyUndeclared) -> tuple[DiffEntry, ...]:
     # Same two-phrase shape as a property change, so the trailing clause aligns
     # into its own column down a group of property lines.
@@ -567,7 +554,7 @@ def _(unresolvable: PropertyUndeclared) -> tuple[DiffEntry, ...]:
     )
 
 
-@unresolvable_entries.register
+@difference_entries.register
 def _(unresolvable: PartitioningChanged) -> tuple[DiffEntry, ...]:
     observed = ", ".join(unresolvable.observed_partitioning)
     desired = ", ".join(unresolvable.desired_partitioning)
