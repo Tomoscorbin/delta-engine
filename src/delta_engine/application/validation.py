@@ -7,7 +7,6 @@ from delta_engine.application.diff_entries import difference_entries
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, PropertyPolicy
 from delta_engine.domain.model import (
-    ReconciliationMode,
     TableAspect,
     TableKind,
     TableProperty,
@@ -479,10 +478,10 @@ class UnmanagedAspectDrift:
     """
     Fail once per require-match aspect that has drifted.
 
-    The interpreter of ``ReconciliationMode.REQUIRE_MATCH``: an aspect the
-    scope mirrors rather than manages must match the live table, and this
-    check is where a mismatch becomes a failure. Ignored aspects never
-    surface here — the differ does not compare them at all.
+    The interpreter of ``TableScope.requires_match``: an aspect the scope
+    mirrors rather than manages must match the live table, and this check is
+    where a mismatch becomes a failure. Ignored aspects never surface here —
+    the differ does not compare them at all.
 
     One of the ``ELIGIBILITY_CHECKS``: it defines what a declaration is allowed
     to govern and runs before any safety rule, short-circuiting
@@ -512,8 +511,7 @@ class UnmanagedAspectDrift:
         for difference in (*drift.actions, *drift.unresolvable):
             if isinstance(difference, ColumnCaseDrift):
                 continue
-            mode = drift.desired.scope.reconciles(difference.aspect)
-            if mode is not ReconciliationMode.REQUIRE_MATCH:
+            if not drift.desired.scope.requires_match(difference.aspect):
                 continue
             lines_by_aspect.setdefault(difference.aspect, []).extend(_difference_lines(difference))
 

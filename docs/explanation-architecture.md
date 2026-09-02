@@ -517,16 +517,15 @@ sees them, and a scope that does not manage `PROPERTIES` ignores them
 Every `DesiredTable` carries a closed `TableScope` value. It owns the questions
 of whether an aspect is managed and whether one scope fits within another, so
 callers do not interpret a permission bitmap themselves and arbitrary scope
-combinations cannot enter the domain. For each aspect the scope answers a
-*reconciliation mode* (`TableScope.reconciles`): `MANAGE` converges the live
-table to the declaration, `REQUIRE_MATCH` mirrors the live table and refuses
-drift, and `IGNORE` makes no assertion at all. Managed aspects are `MANAGE`;
-below its minimum scope every aspect is `REQUIRE_MATCH` except properties,
-which are `IGNORE` — a restricted declaration carries property values without
-comparing them. `manages` and `ignores` name the two modes callers branch on,
-so a site reads `scope.ignores(PROPERTIES)` rather than comparing modes
-itself. The differ compares every aspect the scope does not ignore, so its
-one scope question is whether to diff properties (see Diff-first planning).
+combinations cannot enter the domain. For each aspect the scope answers
+exactly one of three questions: `manages` (compare, and converge the live
+table to the declaration), `requires_match` (compare, but refuse drift — the
+declaration mirrors the live state), or `ignores` (do not compare at all).
+Managed aspects follow the minimum-scope ladder; below it every aspect must
+match except properties, which are ignored — a restricted declaration carries
+property values without comparing them. The differ compares every aspect the
+scope does not ignore, so its one scope question is whether to diff
+properties (see Diff-first planning).
 The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableCreation`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in

@@ -104,43 +104,36 @@ class TableAspect(Enum):
 ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
-class ReconciliationMode(Enum):
-    """
-    How a declaration treats one aspect of the observed table.
-
-    ``MANAGE``: compare the aspect and converge the live table to the
-    declaration. ``REQUIRE_MATCH``: compare the aspect, but drift is refused
-    rather than converged — the declaration mirrors the live state and asserts
-    it. ``IGNORE``: do not compare the aspect at all; declared values are
-    carried but make no assertion about the live table.
-    """
-
-    MANAGE = auto()
-    REQUIRE_MATCH = auto()
-    IGNORE = auto()
-
-
 class TableScope(Enum):
-    """The portion of a desired table managed by the engine."""
+    """
+    The portion of a desired table managed by the engine.
+
+    For each aspect a declaration under this scope answers exactly one of
+    three questions: it manages the aspect (compared, and the live table is
+    converged to the declaration), requires it to match (compared, but drift
+    is refused rather than converged — the declaration mirrors the live
+    state), or ignores it (not compared at all).
+    """
 
     TAGS = 1
     ANNOTATIONS = 2
     METADATA = 3
     FULL = 4
 
-    def reconciles(self, aspect: TableAspect) -> ReconciliationMode:
-        """Return how a declaration under this scope reconciles ``aspect``."""
-        if self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value:
-            return ReconciliationMode.MANAGE
-        return _UNMANAGED_MODE_BY_ASPECT[aspect]
-
     def manages(self, aspect: TableAspect) -> bool:
         """Return whether this scope manages ``aspect``."""
-        return self.reconciles(aspect) is ReconciliationMode.MANAGE
+        return self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value
 
     def ignores(self, aspect: TableAspect) -> bool:
         """Return whether this scope carries ``aspect`` without comparing it."""
-        return self.reconciles(aspect) is ReconciliationMode.IGNORE
+        # Properties are the one unmanaged aspect that is not mirrored: a
+        # restricted declaration makes no property assertion at all, so a
+        # pipeline-owned or previously synced property never reads as drift.
+        return aspect is TableAspect.PROPERTIES and not self.manages(aspect)
+
+    def requires_match(self, aspect: TableAspect) -> bool:
+        """Return whether the declaration must mirror the live table's ``aspect``."""
+        return not self.manages(aspect) and not self.ignores(aspect)
 
     def is_within(self, other: Self) -> bool:
         """Return whether this scope grants no more authority than ``other``."""
@@ -161,27 +154,6 @@ _MINIMUM_SCOPE_BY_ASPECT: Final[Mapping[TableAspect, TableScope]] = MappingProxy
         TableAspect.PROPERTIES: TableScope.FULL,
         TableAspect.PARTITIONING: TableScope.FULL,
         TableAspect.CLUSTERING: TableScope.FULL,
-    }
-)
-
-# What a scope too narrow to manage an aspect does with it instead. Most
-# aspects are mirrored: the declaration restates the live table and drift is
-# refused, never converged. Properties are the one exception — a restricted
-# declaration makes no property assertion at all, so a pipeline-owned or
-# previously synced property never reads as drift.
-_UNMANAGED_MODE_BY_ASPECT: Final[Mapping[TableAspect, ReconciliationMode]] = MappingProxyType(
-    {
-        TableAspect.TABLE_TAGS: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.COLUMN_TAGS: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.TABLE_COMMENT: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.COLUMN_COMMENTS: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.PRIMARY_KEY: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.FOREIGN_KEYS: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.TABLE_EXISTENCE: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.COLUMN_STRUCTURE: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.PROPERTIES: ReconciliationMode.IGNORE,
-        TableAspect.PARTITIONING: ReconciliationMode.REQUIRE_MATCH,
-        TableAspect.CLUSTERING: ReconciliationMode.REQUIRE_MATCH,
     }
 )
 
