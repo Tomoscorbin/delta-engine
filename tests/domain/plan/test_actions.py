@@ -164,7 +164,7 @@ def test_plan_ordering_ignores_non_subject_fields():
         (SetColumnComment("email", "customer email", ""), "email"),
         (SetTableComment("table comment", ""), ""),
         (SetColumnNullability("email", False, True), "email"),
-        (DropPrimaryKey("table_pk"), "table_pk"),
+        (DropPrimaryKey(("tenant_id", "order_id")), "tenant_id,order_id"),
         (SetPrimaryKey(_primary_key()), "id"),
         (
             SetPrimaryKey(_primary_key(None, columns=("tenant_id", "order_id"))),
@@ -199,7 +199,7 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
         (SetColumnComment("email", "new", "old"), TableAspect.COLUMN_COMMENTS),
         (SetTableComment("new", "old"), TableAspect.TABLE_COMMENT),
         (SetColumnNullability("email", False, True), TableAspect.COLUMN_STRUCTURE),
-        (DropPrimaryKey("table_pk"), TableAspect.PRIMARY_KEY),
+        (DropPrimaryKey(("id",)), TableAspect.PRIMARY_KEY),
         (SetPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
         (DropForeignKey("table_customer_id_fk"), TableAspect.FOREIGN_KEYS),
         (SetForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
@@ -235,7 +235,7 @@ def test_plan_orders_constraint_drops_before_column_work():
     # Given constraint drops mixed with column changes
     plan = _plan(
         DropColumn(_observed_column("customer_id")),
-        DropPrimaryKey("table_pk"),
+        DropPrimaryKey(("id",)),
         DropForeignKey("orders_customer_id_fk"),
         RenameColumn("old", "new"),
         AddColumn(_column("added")),

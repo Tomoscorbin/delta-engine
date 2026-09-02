@@ -8,13 +8,13 @@ from delta_engine.domain.model import (
     DataType,
     Date,
     Decimal,
+    ForeignKeyConstraint,
     Integer,
     Long,
     Map,
     ObservedColumn,
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     ObservedTable,
+    PrimaryKeyConstraint,
     QualifiedName,
     String,
     Struct,
@@ -106,9 +106,9 @@ def test_full_featured_table_renders_every_argument() -> None:
         comment="One row per order.",
         tags={"owner": "tom", "domain": "sales"},
         clustered_by=("id",),
-        primary_key=ObservedPrimaryKeyConstraint(("id",), "orders_pk"),
+        primary_key=PrimaryKeyConstraint(("id",), "orders_pk"),
         foreign_keys=(
-            ObservedForeignKeyConstraint(
+            ForeignKeyConstraint(
                 local_columns=("customer_id",),
                 referenced_table=QualifiedName("dev", "sales", "customers"),
                 referenced_columns=("id",),
@@ -162,7 +162,7 @@ def test_declared_state_matches_observed_state_for_a_fully_specified_table() -> 
         comment="Event stream.",
         tags={"tier": "gold"},
         partitioned_by=("event_date",),
-        primary_key=ObservedPrimaryKeyConstraint(("event_id",), "events_pk"),
+        primary_key=PrimaryKeyConstraint(("event_id",), "events_pk"),
         properties={"delta.columnMapping.mode": "name"},
     )
 
@@ -186,15 +186,15 @@ def test_foreign_keys_round_trip_through_generated_source() -> None:
             ObservedColumn("customer_id", Long()),
             ObservedColumn("parent_id", Long()),
         ),
-        primary_key=ObservedPrimaryKeyConstraint(("id",), "orders_pk"),
+        primary_key=PrimaryKeyConstraint(("id",), "orders_pk"),
         foreign_keys=(
-            ObservedForeignKeyConstraint(
+            ForeignKeyConstraint(
                 local_columns=("customer_id",),
                 referenced_table=QualifiedName("dev", "sales", "customers"),
                 referenced_columns=("id",),
                 name="fk_orders_customer",
             ),
-            ObservedForeignKeyConstraint(
+            ForeignKeyConstraint(
                 local_columns=("parent_id",),
                 referenced_table=QualifiedName("dev", "sales", "orders"),
                 referenced_columns=("id",),

@@ -26,8 +26,8 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_query,
 )
 from delta_engine.domain.model import (
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
     QualifiedName,
 )
 from tests.adapters.databricks.sql.strategies import (
@@ -76,7 +76,7 @@ def test_primary_key_rows_preserve_catalog_spelling() -> None:
 
     # Then each spelling is preserved and columns hold their canonical order
     assert result is not None
-    assert isinstance(result, ObservedPrimaryKeyConstraint)
+    assert isinstance(result, PrimaryKeyConstraint)
     assert tuple(str(column) for column in result.columns) == ("Line_No", "Order_Id")
     assert str(result.name) == "Orders_PK"
 
@@ -105,7 +105,7 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
     # Then constraint and column spellings carry verbatim
-    assert isinstance(fk, ObservedForeignKeyConstraint)
+    assert isinstance(fk, ForeignKeyConstraint)
     assert str(fk.name) == "Orders_Customer_FK"
     assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
     assert fk.referenced_table == QualifiedName("dev", "silver", "customer")

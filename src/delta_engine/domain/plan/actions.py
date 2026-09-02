@@ -333,19 +333,25 @@ class SetColumnNullability(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropPrimaryKey(Action):
-    """Drop the table's observed primary key."""
+    """
+    Drop the table's observed primary key.
 
-    name: str
+    A table has at most one primary key and the platform drops it positionally
+    (``DROP PRIMARY KEY``), so no constraint name is carried; the observed
+    key's columns identify what is dropped in plans and reports.
+    """
+
+    columns: ListOrTuple[str]
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "name", Identifier(self.name))
+        object.__setattr__(self, "columns", tuple(Identifier(name) for name in self.columns))
 
     @property
     def subject(self) -> str:
-        return self.name
+        return ",".join(self.columns)
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,8 +7,6 @@ from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 
@@ -142,26 +140,6 @@ def test_rejects_invalid_constraint_name(
         make_constraint(name)
 
 
-@pytest.mark.parametrize(
-    "make_observed",
-    [
-        lambda: ObservedPrimaryKeyConstraint(columns=("id",), name=None),  # type: ignore[arg-type]
-        lambda: ObservedForeignKeyConstraint(
-            local_columns=("customer_id",),
-            referenced_table=_CUSTOMERS,
-            referenced_columns=("id",),
-            name=None,  # type: ignore[arg-type]
-        ),
-    ],
-    ids=["primary-key", "foreign-key"],
-)
-def test_observed_constraint_requires_a_name(make_observed: Callable[[], Any]) -> None:
-    # When a catalog-observed constraint is built without its physical name
-    # Then construction fails — the catalog always has one
-    with pytest.raises(TypeError):
-        make_observed()
-
-
 # ---------- primary keys
 
 
@@ -181,7 +159,7 @@ def test_primary_key_equality_uses_structural_column_set_identity() -> None:
     # Given equivalent desired and observed constraints with different names,
     # casing, and column order
     desired = PrimaryKeyConstraint(columns=("TenantId", "OrderId"), name="Orders_PK")
-    observed = ObservedPrimaryKeyConstraint(columns=("orderid", "tenantid"), name="legacy_pk")
+    observed = PrimaryKeyConstraint(columns=("orderid", "tenantid"), name="legacy_pk")
 
     # Then only their semantic column set determines equality
     assert desired == observed
@@ -256,7 +234,7 @@ def test_desired_and_observed_foreign_keys_compare_by_definition() -> None:
         referenced_columns=("Id", "TenantId"),
         name="requested_name",
     )
-    observed = ObservedForeignKeyConstraint(
+    observed = ForeignKeyConstraint(
         local_columns=("tenantid", "customerid"),
         referenced_table=_CUSTOMERS,
         referenced_columns=("tenantid", "id"),

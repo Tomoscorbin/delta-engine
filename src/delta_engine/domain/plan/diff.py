@@ -479,13 +479,13 @@ def _diff_primary_key(
         return () if desired_key is None else (SetPrimaryKey(primary_key=desired_key),)
 
     if desired_key is None:
-        return (DropPrimaryKey(name=observed_key.name),)
+        return (DropPrimaryKey(columns=observed_key.columns),)
 
     if desired_key == observed_key:
         return ()
 
     return (
-        DropPrimaryKey(name=observed_key.name),
+        DropPrimaryKey(columns=observed_key.columns),
         SetPrimaryKey(primary_key=desired_key),
     )
 
@@ -517,7 +517,11 @@ def _diff_foreign_keys(
         else:
             unmatched_observed.remove(observed_constraint)
 
-    drops = [DropForeignKey(name=constraint.name) for constraint in unmatched_observed]
+    drops: list[DropForeignKey] = []
+    for constraint in unmatched_observed:
+        # ObservedTable guarantees observed constraints are named.
+        assert constraint.name is not None
+        drops.append(DropForeignKey(name=constraint.name))
     return (*drops, *sets)
 
 

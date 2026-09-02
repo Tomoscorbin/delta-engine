@@ -21,11 +21,11 @@ from delta_engine.domain.model import (
     DesiredColumn,
     Double,
     Float,
+    ForeignKeyConstraint,
     Integer,
     Long,
     Map,
     ObservedColumn,
-    ObservedForeignKeyConstraint,
     ObservedTable,
     QualifiedName,
     Short,
@@ -164,9 +164,7 @@ def generate_module(observed: ObservedTable) -> GeneratedModule:
     )
 
 
-def _raise_foreign_key(
-    constraint: ObservedForeignKeyConstraint, owner: QualifiedName
-) -> ForeignKey:
+def _raise_foreign_key(constraint: ForeignKeyConstraint, owner: QualifiedName) -> ForeignKey:
     """Raise one observed foreign key into its declaration counterpart."""
     references = Self if constraint.referenced_table == owner else str(constraint.referenced_table)
     return ForeignKey(
@@ -177,7 +175,7 @@ def _raise_foreign_key(
 
 
 def _render_foreign_key(
-    constraint: ObservedForeignKeyConstraint,
+    constraint: ForeignKeyConstraint,
     owner: QualifiedName,
     used_names: set[str],
 ) -> str:
@@ -194,7 +192,7 @@ def _render_foreign_key(
     )
 
 
-def _foreign_key_columns(constraint: ObservedForeignKeyConstraint) -> dict[str, str]:
+def _foreign_key_columns(constraint: ForeignKeyConstraint) -> dict[str, str]:
     """Pair each local column with the referenced column it points at."""
     return {
         str(local): str(referenced)

@@ -2,8 +2,6 @@ from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.data_type import (
@@ -63,8 +61,6 @@ __all__ = [
     "Long",
     "Map",
     "ObservedColumn",
-    "ObservedForeignKeyConstraint",
-    "ObservedPrimaryKeyConstraint",
     "ObservedTable",
     "PrimaryKeyConstraint",
     "QualifiedName",

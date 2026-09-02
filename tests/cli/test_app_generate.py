@@ -4,11 +4,11 @@ from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import TablePresent
 from delta_engine.cli.app import app
 from delta_engine.domain.model import (
+    ForeignKeyConstraint,
     Long,
     ObservedColumn,
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     ObservedTable,
+    PrimaryKeyConstraint,
     QualifiedName,
     TableKind,
 )
@@ -39,9 +39,9 @@ def test_generate_declares_foreign_keys_with_nothing_to_warn_about(runner, fake_
                 ObservedColumn("id", Long(), nullable=False),
                 ObservedColumn("customer_id", Long()),
             ),
-            primary_key=ObservedPrimaryKeyConstraint(("id",), "orders_pk"),
+            primary_key=PrimaryKeyConstraint(("id",), "orders_pk"),
             foreign_keys=(
-                ObservedForeignKeyConstraint(
+                ForeignKeyConstraint(
                     local_columns=("customer_id",),
                     referenced_table=QualifiedName("dev", "silver", "customers"),
                     referenced_columns=("id",),
