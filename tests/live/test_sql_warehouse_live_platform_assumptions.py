@@ -1,9 +1,18 @@
 """
-Live pins for Databricks platform rules the engine's declaration gates assume.
+Live pins for Databricks behaviours whose drift would go unnoticed.
 
-Each test states a platform behaviour the engine relies on but cannot verify
-locally: if a runtime upgrade changes one, the corresponding gate is either
-over-blocking or under-blocking and needs revisiting.
+A pin belongs here only when it earns its place one of two ways: the behaviour
+was established empirically because the docs were silent or wrong, or a change
+to it would make the engine silently wrong rather than fail loudly. The
+case-sensitivity and lowercasing pins are the core: if the platform's canonical
+form diverged from the engine's, diffs would match the wrong columns and keys
+would vanish with no error to catch.
+
+A documented rule that a client-side declaration gate already enforces does not
+belong here. If the platform tightened such a rule the gate would under-block
+and execution would raise a typed failure; if it relaxed one the gate would
+over-block and users would report it at once. Neither is silent, so a live pin
+mirroring the gate buys nothing.
 """
 
 import re
@@ -21,31 +30,6 @@ from tests.live.sql_warehouse_live_helpers import (
     read_live_table,
     table_exists,
 )
-
-
-def test_cdf_enablement_fails_on_a_table_carrying_reserved_cdf_columns(
-    live_connection, live_tables
-):
-    """Databricks blocks enabling change data feed on a table with reserved CDF columns."""
-    # The API refuses declarations that combine change data feed with
-    # _change_type/_commit_version/_commit_timestamp columns because the
-    # platform enforces the same rule at enablement time.
-
-    # Given a live table already carrying a reserved CDF column
-    table_name = live_tables("cdf_reserved")
-    execute_sql(
-        live_connection,
-        f"CREATE TABLE {qualified_table(table_name)} (id INT, _change_type STRING) USING DELTA",
-    )
-
-    # Then enabling change data feed on it is rejected for that reason
-    with pytest.raises(ServerOperationError) as error:
-        execute_sql(
-            live_connection,
-            f"ALTER TABLE {qualified_table(table_name)} "
-            "SET TBLPROPERTIES ('delta.enableChangeDataFeed'='true')",
-        )
-    assert "DELTA_TABLE_ALREADY_CONTAINS_CDC_COLUMNS" in str(error.value)
 
 
 def test_special_characters_in_nested_struct_field_names_require_column_mapping(
@@ -182,29 +166,6 @@ def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
     assert "DELTA_CONSTRAINT_DEPENDENT_COLUMN_CHANGE" in str(error.value)
 
 
-def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_tables):
-    """Databricks refuses to cluster a partitioned table."""
-    # PartitioningChangeNotSupported blocks partitioned->clustered
-    # conversions; the platform refuses the direct conversion too, so the
-    # engine is not withholding a supported operation.
-
-    # Given a partitioned live table
-    table_name = live_tables("part_to_cluster")
-    execute_sql(
-        live_connection,
-        f"CREATE TABLE {qualified_table(table_name)} "
-        "(id INT, region STRING) USING DELTA PARTITIONED BY (region)",
-    )
-
-    # Then clustering it is rejected for that reason
-    with pytest.raises(ServerOperationError) as error:
-        execute_sql(
-            live_connection,
-            f"ALTER TABLE {qualified_table(table_name)} CLUSTER BY (`id`)",
-        )
-    assert "CLUSTER_BY_ON_PARTITIONED_TABLE" in str(error.value)
-
-
 def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, live_tables):
     """Databricks rejects a column tag key or value longer than 256 characters."""
     # A column tag key or value longer than 256 characters is rejected (first
@@ -239,30 +200,6 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
             f"SET TAGS ('{over_long}'='prod')",
         )
     assert length_complaint.search(str(error.value))
-
-
-def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, live_tables):
-    """Databricks rejects a complex type as a partition column."""
-    # Delta refuses complex/nested types as partition columns, raising
-    # INVALID_PARTITION_COLUMN_DATA_TYPE (error class confirmed live
-    # 2026-07-14; the older DELTA_INVALID_PARTITION_COLUMN_TYPE spelling no
-    # longer matches). This backs the partition gate in api/delta_table.py
-    # (_TYPES_UNUSABLE_AS_PARTITION_KEYS), which rejects Array/Map/Struct/Variant
-    # as partition columns at declaration time; if the platform ever accepted
-    # one, that gate would be over-blocking. An array stands in for the
-    # complex-type category. Clustering is a distinct backend rule with a
-    # narrower type list (_TYPES_UNUSABLE_AS_CLUSTERING_KEYS also excludes
-    # Boolean and Binary), not pinned here.
-    # Then creating a table partitioned by an array column is rejected for
-    # that reason
-    array_name = live_tables("partition_array")
-    with pytest.raises(ServerOperationError) as error:
-        execute_sql(
-            live_connection,
-            f"CREATE TABLE {qualified_table(array_name)} "
-            "(id INT, labels ARRAY<INT>) USING DELTA PARTITIONED BY (labels)",
-        )
-    assert "INVALID_PARTITION_COLUMN_DATA_TYPE" in str(error.value)
 
 
 def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection, live_tables):
