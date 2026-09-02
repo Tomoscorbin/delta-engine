@@ -17,7 +17,7 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `PropertyTransitionNotSupported`        | A property transition that is unsafe in place — the catalog rejects it, or applying it would rewrite the table (e.g. `delta.columnMapping.mode` `name` → `none` rewrites every data file) | Update the declaration to match the catalog value                                                      |
 | `PropertyMustBeDeclared`                | A managed property set on the table but missing from the declaration                                                                                                                      | Declare it (or declare it `None` to remove it, where removal is possible)                              |
 | `ColumnMappingRequiredForDrop`          | A plan drops a column but the declaration lacks `delta.columnMapping.mode='name'`                                                                                                         | Declare the property (it may be set in the same sync as the drop)                                      |
-| `AmbiguousColumnRename`                 | A declared rename whose old and new column both exist on the table                                                                                                                        | Remove the `renamed_from` hint and drop the old column in its own sync                                 |
+| `AmbiguousColumnRename`                 | A declared rename whose old and new column both exist on the table                                                                                                                        | Remove the `renamed_from` hint; if the old column should also be dropped, drop it in its own sync      |
 | `PrimaryKeyReferencedByForeignKeys`     | Dropping or changing a primary key while foreign keys reference it (same-table FKs dropped in the same sync are exempt)                                                                   | Sync the referencing tables without those foreign keys first, then change the key                      |
 
 `PrimaryKeyReferencedByForeignKeys` sees the inbound foreign keys recorded in
@@ -75,13 +75,16 @@ the rename at execution.
 Three further checks are laws rather than rules — they define what a declaration
 is allowed to govern and how it must name the table's columns, and always run
 regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
-`application/validation.py`, evaluated before any safety rule:
+`application/validation.py`, evaluated before any safety rule. When any of them
+fires the safety rules are skipped entirely, so a diff that also breaks a safety
+rule reports only the eligibility failure — fixing it can surface further
+safety-rule failures on the next sync:
 
 | Law                              | What it blocks                                                                                          | How to resolve                                                                        |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `ColumnSpellingMustMatchCatalog` | A declared column (or `renamed_from` reference) spelled differently from the catalog — case must match exactly | Update the declaration to the catalog's exact spelling (`DESCRIBE TABLE` shows it)     |
-| `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync — the failure names each difference | Update the declaration to match the live table, or widen its scope to manage this aspect |
 | `StreamingTableAnnotationsOnly`  | The observed table is a streaming table and the declaration manages more than comments and tags | Declare it with `scope="annotations"` or `scope="tags"`; the table's schema, properties, and keys belong to its owning pipeline |
+| `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync — the failure names each difference | Update the declaration to match the live table, or widen its scope to manage this aspect |
 
 A missing table under a scope that does not manage table existence is not a
 validation failure: the sync logs a warning and defers the table (it reports

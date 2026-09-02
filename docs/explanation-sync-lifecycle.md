@@ -136,7 +136,9 @@ block. You get every action and SQL statement planned from the catalog snapshot
 it read, plus any read, validation, foreign-key, or dependency-blocking failure
 the run found.
 It cannot predict execution-time Databricks errors. The run makes zero catalog
-mutations and raises no exception.
+mutations and never raises `SyncFailedError` — failures come back in the report
+instead. (Two tables sharing a qualified name still raise
+`DuplicateTableDefinitionError` before any phase runs, the same as a real run.)
 See [how to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down
