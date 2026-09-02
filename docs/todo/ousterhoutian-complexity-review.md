@@ -353,6 +353,19 @@ outcomes into `ReadError`.
 Pure relation policy and domain assembly should run outside a broad catch so
 assertions, indexing defects, and other programming errors remain visible.
 
+### Closed without change (2026-09-02)
+
+Decision: keep the broad catch. Three narrowings were built on
+[PR #401](https://github.com/Tomoscorbin/delta-engine/pull/401) — a typed
+transport envelope, `ReadError` raised at the point of detection, and
+positive absence probing — and none bought enough clarity to justify its
+machinery. The failure record already names the real exception type and
+chains the cause, so nothing is lost diagnostically; only the
+loud-crash-on-engine-defect behaviour was at stake. The live pin written
+during the work (a describe in a missing schema reports
+TABLE_OR_VIEW_NOT_FOUND) landed separately
+([PR #402](https://github.com/Tomoscorbin/delta-engine/pull/402)).
+
 ## 6. Enforce the rename name frame
 
 ### Cause
@@ -722,6 +735,19 @@ For optional dependencies, classify absence of the directly declared package
 roots. Narrow `ModuleNotFoundError` handling should preserve the friendly
 installation hint while symbol errors, unrelated transitive imports, and
 incompatible installed packages remain visible.
+
+### Partially resolved (2026-09-02)
+
+The CLI half is fixed: both import boundaries translate only
+`ModuleNotFoundError` into the install hint, so an installed-but-incompatible
+package (module present, symbol gone) propagates with its real traceback.
+The shadowing diagnosis is checked before the narrowing, because a stray
+`databricks.py` raises plain `ImportError`, not `ModuleNotFoundError`.
+
+The executor half is deliberately left as is, for the same reason finding 5
+was closed without change: the broad catch sits at the execution boundary,
+the failure record names the real exception type and chains the cause, and
+the typed-transport machinery costs more clarity than it buys.
 
 ## 13. Scope declaration imports to one invocation
 
