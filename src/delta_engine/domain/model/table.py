@@ -15,9 +15,10 @@ from delta_engine.domain.model.constraints import (
     ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
+from delta_engine.domain.model.feature import TableFeature
 from delta_engine.domain.model.identifier import Identifier
+from delta_engine.domain.model.property import DeclaredProperties
 from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table_feature import TableFeature
 
 
 def _require_existing_columns(kind: str, names: Sequence[str], exact_names: set[str]) -> None:
@@ -169,13 +170,14 @@ class DesiredTable:
         clustered_by: Ordered tuple of liquid clustering column names.
         primary_key: Primary key constraint, or ``None`` when no primary key is defined.
         foreign_keys: Foreign key constraints owned by this table.
-        properties: Table properties; a ``None`` value asserts the key must be
-            absent from the table.
+        properties: Declared table properties; accepts any mapping and is
+            normalized to ``DeclaredProperties``, where a ``None`` value
+            asserts the key must be absent from the table.
         scope: The portion of the table this declaration manages.
 
     A desired table contains only declared state. Table features implied by
-    its column types are derived at the application planning boundary when an
-    existing table must be reconciled.
+    its column types are derived by the domain differ when an existing table
+    must be reconciled.
 
     """
 
@@ -187,7 +189,7 @@ class DesiredTable:
     clustered_by: ListOrTuple[str] = ()
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
-    properties: Mapping[str, str | None] = field(default_factory=dict)
+    properties: DeclaredProperties = field(default_factory=DeclaredProperties)
     scope: TableScope = TableScope.FULL
 
     @property
@@ -227,7 +229,7 @@ class DesiredTable:
         object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
-        object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(self, "properties", DeclaredProperties(self.properties))
         _validate_table_structure(
             columns=self.columns,
             tags=self.tags,

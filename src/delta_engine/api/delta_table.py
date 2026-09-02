@@ -31,7 +31,7 @@ from dataclasses import dataclass, field as dataclass_field
 from types import MappingProxyType
 from typing import Final, NamedTuple, cast
 
-from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.application.scopes import ScopeName, table_scope_for
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
@@ -39,6 +39,7 @@ from delta_engine.domain.model import (
     Binary,
     Boolean,
     DataType,
+    DeclaredProperties,
     DesiredColumn as Column,
     DesiredTable,
     ForeignKeyConstraint,
@@ -48,6 +49,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     Struct,
     TableAspect,
+    TableProperty,
     TableScope,
     Variant,
 )
@@ -196,7 +198,7 @@ class _NormalizedDeclaration:
     columns: tuple[Column, ...]
     columns_by_name: Mapping[Identifier, Column]
     comment: str
-    properties: Mapping[str, str | None]
+    properties: DeclaredProperties
     tags: Mapping[str, str]
     partitioned_by: tuple[Identifier, ...]
     clustered_by: tuple[Identifier, ...]
@@ -254,7 +256,7 @@ def _normalize_declaration(
         columns=declared_columns,
         columns_by_name=MappingProxyType(columns_by_name),
         comment=comment,
-        properties=MappingProxyType(dict(properties or {})),
+        properties=DeclaredProperties(properties or {}),
         tags=MappingProxyType(dict(tags or {})),
         partitioned_by=tuple(
             _declared_spelling(columns_by_name, column_name) for column_name in partitioned_by
@@ -397,7 +399,7 @@ def _validate_layout(declaration: _NormalizedDeclaration) -> None:
         )
 
 
-def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str | None]) -> None:
+def _validate_renames(columns: tuple[Column, ...], properties: DeclaredProperties) -> None:
     """
     Reject rename hints without name-based column mapping.
 
@@ -406,17 +408,17 @@ def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str 
     hinted = [column.name for column in columns if column.renamed_from is not None]
     if not hinted:
         return
-    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+    if not properties.enables_column_mapping():
         raise ValueError(
             f"Columns {hinted} declare renamed_from, which requires"
-            f" {Property.COLUMN_MAPPING_MODE}='name'. Declare"
-            f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}} on this table."
+            f" {TableProperty.COLUMN_MAPPING_MODE}='name'. Declare"
+            f" properties={{'{TableProperty.COLUMN_MAPPING_MODE}': 'name'}} on this table."
         )
 
 
 def _validate_column_names(
     columns: tuple[Column, ...],
-    properties: Mapping[str, str | None],
+    properties: DeclaredProperties,
 ) -> None:
     """
     Reject column names the declared properties make invalid on Delta.
@@ -425,7 +427,7 @@ def _validate_column_names(
     permitted under column mapping, and change data feed reserves its output
     column names.
     """
-    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+    if not properties.enables_column_mapping():
         offending = [
             declared_name
             for column in columns
@@ -436,17 +438,17 @@ def _validate_column_names(
             raise ValueError(
                 f"Column or struct field names {offending} contain characters Delta only"
                 " permits with column mapping. Declare"
-                f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
+                f" properties={{'{TableProperty.COLUMN_MAPPING_MODE}': 'name'}}"
                 " or rename the columns."
             )
 
-    if properties.get(Property.CHANGE_DATA_FEED) == "true":
+    if properties.enables_change_data_feed():
         reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
         if reserved:
             raise ValueError(
                 f"Column names {reserved} are reserved by change data feed."
                 " Rename them or do not enable"
-                f" {Property.CHANGE_DATA_FEED}."
+                f" {TableProperty.CHANGE_DATA_FEED}."
             )
 
 

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from hypothesis import strategies as st
 
-from delta_engine.application.properties import Property
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -26,6 +25,7 @@ from delta_engine.domain.model import (
     TimestampNtz,
     Variant,
 )
+from delta_engine.domain.model.property import TableProperty
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,12 +116,12 @@ OBSERVED_TABLE_PROPERTIES = st.lists(
 ).map(dict)
 
 _MANAGED_PROPERTY_VALUES = {
-    Property.COLUMN_MAPPING_MODE: ("none", "name"),
-    Property.CHANGE_DATA_FEED: ("true", "false"),
-    Property.DELETED_FILE_RETENTION_DURATION: ("interval 1 day", "interval 7 days"),
-    Property.LOG_RETENTION_DURATION: ("interval 7 days", "interval 30 days"),
-    Property.DATA_SKIPPING_NUM_INDEXED_COLS: ("-1", "0", "32"),
-    Property.TYPE_WIDENING: ("true", "false"),
+    TableProperty.COLUMN_MAPPING_MODE: ("none", "name"),
+    TableProperty.CHANGE_DATA_FEED: ("true", "false"),
+    TableProperty.DELETED_FILE_RETENTION_DURATION: ("interval 1 day", "interval 7 days"),
+    TableProperty.LOG_RETENTION_DURATION: ("interval 7 days", "interval 30 days"),
+    TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS: ("-1", "0", "32"),
+    TableProperty.TYPE_WIDENING: ("true", "false"),
 }
 
 
@@ -129,9 +129,9 @@ _MANAGED_PROPERTY_VALUES = {
 def _managed_property_maps(draw: st.DrawFn) -> dict[str, str | None]:
     keys = draw(
         st.lists(
-            st.sampled_from(tuple(Property)),
+            st.sampled_from(tuple(TableProperty)),
             unique=True,
-            max_size=len(Property),
+            max_size=len(TableProperty),
         )
     )
     properties: dict[str, str | None] = {}

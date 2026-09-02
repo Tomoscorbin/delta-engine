@@ -7,11 +7,7 @@ from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.diff_entries import difference_entries
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.application.properties import (
-    DELTA_PROPERTY_POLICY,
-    Property,
-    PropertyPolicy,
-)
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY, PropertyPolicy
 from delta_engine.domain.model import (
     Byte,
     DataType,
@@ -24,6 +20,7 @@ from delta_engine.domain.model import (
     Short,
     TableAspect,
     TableKind,
+    TableProperty,
     TableScope,
     TimestampNtz,
 )
@@ -230,7 +227,7 @@ class TypeWideningRequiredForTypeChange:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every widening type change when the declaration lacks the property."""
-        if drift.desired.properties.get(Property.TYPE_WIDENING) == "true":
+        if drift.desired.properties.enables_type_widening():
             return ()
         return tuple(
             ValidationFailure(
@@ -238,8 +235,8 @@ class TypeWideningRequiredForTypeChange:
                 message=(
                     f"Operation not allowed: widening column '{change.column_name}'"
                     f" from {change.observed_type} to {change.desired_type} requires"
-                    f" {Property.TYPE_WIDENING}='true'. Declare"
-                    f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
+                    f" {TableProperty.TYPE_WIDENING}='true'. Declare"
+                    f" properties={{'{TableProperty.TYPE_WIDENING}': 'true'}} on this table."
                 ),
                 subject=str(change.column_name),
             )
@@ -392,15 +389,15 @@ class ColumnMappingRequiredForDrop:
         drops_a_column = any(isinstance(change, DropColumn) for change in drift.actions)
         if not drops_a_column:
             return ()
-        if drift.desired.properties.get(Property.COLUMN_MAPPING_MODE) == "name":
+        if drift.desired.properties.enables_column_mapping():
             return ()
         return (
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: dropping a column requires"
-                    f" {Property.COLUMN_MAPPING_MODE}='name'. Declare"
-                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}} on this table."
+                    f" {TableProperty.COLUMN_MAPPING_MODE}='name'. Declare"
+                    f" properties={{'{TableProperty.COLUMN_MAPPING_MODE}': 'name'}} on this table."
                 ),
             ),
         )

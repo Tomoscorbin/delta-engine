@@ -23,11 +23,11 @@ from delta_engine.schema import (
     Integer,
     Long,
     Map,
-    Property,
     Short,
     String,
     Struct,
     StructField,
+    TableProperty,
     Timestamp,
     TimestampNtz,
     Variant,
@@ -148,12 +148,12 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
     # Given a declaration setting every managed property
     table_name = live_tables("properties")
     declared = {
-        Property.COLUMN_MAPPING_MODE: "name",
-        Property.CHANGE_DATA_FEED: "true",
-        Property.DELETED_FILE_RETENTION_DURATION: "interval 7 days",
-        Property.LOG_RETENTION_DURATION: "interval 30 days",
-        Property.DATA_SKIPPING_NUM_INDEXED_COLS: "-1",
-        Property.TYPE_WIDENING: "false",
+        TableProperty.COLUMN_MAPPING_MODE: "name",
+        TableProperty.CHANGE_DATA_FEED: "true",
+        TableProperty.DELETED_FILE_RETENTION_DURATION: "interval 7 days",
+        TableProperty.LOG_RETENTION_DURATION: "interval 30 days",
+        TableProperty.DATA_SKIPPING_NUM_INDEXED_COLS: "-1",
+        TableProperty.TYPE_WIDENING: "false",
     }
 
     # When syncing it into the live catalog
@@ -174,7 +174,7 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
 
 def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tables):
     """A freshly created table carries none of the managed property keys."""
-    # Property-policy admission: a key belongs in the managed set only
+    # TableProperty-policy admission: a key belongs in the managed set only
     # if Databricks does not auto-write it, otherwise every undeclared table
     # would fail validation on resync.
 
@@ -191,7 +191,7 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
 
     # Then the platform wrote none of the managed keys
     properties = read_live_table(live_connection, table_name)["properties"]
-    assert not set(properties) & {str(key) for key in Property}
+    assert not set(properties) & {str(key) for key in TableProperty}
 
 
 def test_unmanaged_properties_are_invisible_to_a_full_sync(live_connection, live_tables):
@@ -241,7 +241,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
             columns=(Column("id", Short(), nullable=False), Column("bucket", Short())),
             partitioned_by=("bucket",),
             primary_key=("id",),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         ),
         DeltaTable(
             live_catalog(),
@@ -249,7 +249,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
             clustered_name,
             columns=(Column("id", Short()), Column("payload", String())),
             clustered_by=("id",),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         ),
     )
 
@@ -262,7 +262,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
             columns=(Column("id", Integer(), nullable=False), Column("bucket", Integer())),
             partitioned_by=("bucket",),
             primary_key=("id",),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         ),
         DeltaTable(
             live_catalog(),
@@ -270,7 +270,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
             clustered_name,
             columns=(Column("id", Integer()), Column("payload", String())),
             clustered_by=("id",),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         ),
     )
 
@@ -396,7 +396,7 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
                 Column("amount", Decimal(12, 3)),
                 Column("identifier", Decimal(22, 2)),
             ),
-            properties={Property.TYPE_WIDENING: "true"},
+            properties={TableProperty.TYPE_WIDENING: "true"},
         )
     )
 

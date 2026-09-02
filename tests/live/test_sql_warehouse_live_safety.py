@@ -20,8 +20,8 @@ from delta_engine.schema import (
     ForeignKey,
     Integer,
     Long,
-    Property,
     String,
+    TableProperty,
 )
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
@@ -216,7 +216,7 @@ def test_permanent_column_mapping_transition_is_rejected_without_catalog_change(
             live_schema(),
             table_name,
             columns=columns,
-            properties={Property.COLUMN_MAPPING_MODE: "name"},
+            properties={TableProperty.COLUMN_MAPPING_MODE: "name"},
         )
     )
 
@@ -230,7 +230,7 @@ def test_permanent_column_mapping_transition_is_rejected_without_catalog_change(
             live_schema(),
             table_name,
             columns=columns,
-            properties={Property.COLUMN_MAPPING_MODE: "none"},
+            properties={TableProperty.COLUMN_MAPPING_MODE: "none"},
         ),
     )
 

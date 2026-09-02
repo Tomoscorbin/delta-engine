@@ -229,9 +229,11 @@ are encoded as ordinary Python in the domain and application layers:
   `supported_features` observed by the reader. Each missing member becomes an
   `EnableTableFeature` discrepancy. Missing tables skip this step because
   CREATE establishes the schema-implied features.
-- `application/properties.py` defines the Delta table-property policy
+- `domain/model/property.py` defines the managed Delta property vocabulary
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
-  durations, …), with Delta-specific value formats and transition rules.
+  durations, …) and what declared values mean; `application/properties.py`
+  holds the policy over it, with Delta-specific value formats and
+  transition rules.
 
   Feature requirements come in two kinds. A feature is _implied_ when the
   desired shape cannot exist without it — a `TIMESTAMP_NTZ` column always has
@@ -364,7 +366,7 @@ phase each one failed in.
 | Package                    | Responsibility                                                                                      | Examples                                                                             |
 | -------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
-| `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
+| `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `TableProperty`                                               |
 | `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`                                                           |
 | `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_changes`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |

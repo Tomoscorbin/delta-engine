@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import ClassVar, Self
 
 from delta_engine.domain.collection_types import ListOrTuple
+from delta_engine.domain.model.feature import TableFeature
 from delta_engine.domain.model.identifier import Identifier
-from delta_engine.domain.model.table_feature import TableFeature
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 
