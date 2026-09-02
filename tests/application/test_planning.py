@@ -39,7 +39,6 @@ from delta_engine.domain.plan import (
     TableDrift,
     diff_table,
 )
-from tests.builders import as_observed_foreign_keys, as_observed_primary_key
 
 _NAME = QualifiedName("dev", "silver", "test")
 
@@ -58,8 +57,6 @@ def _observed(**overrides) -> ObservedTable:
         "columns": (ObservedColumn("id", Integer()),),
     }
     merged = values | overrides
-    merged["primary_key"] = as_observed_primary_key(merged.get("primary_key"))
-    merged["foreign_keys"] = as_observed_foreign_keys(merged.get("foreign_keys", ()))
     return ObservedTable(**merged)
 
 

@@ -11,8 +11,6 @@ from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.feature import TableFeature
@@ -44,8 +42,8 @@ def _validate_table_structure(
     tags: Mapping[str, str],
     partitioned_by: Sequence[str],
     clustered_by: Sequence[str],
-    primary_key: PrimaryKeyConstraint | ObservedPrimaryKeyConstraint | None,
-    foreign_keys: Sequence[ForeignKeyConstraint | ObservedForeignKeyConstraint],
+    primary_key: PrimaryKeyConstraint | None,
+    foreign_keys: Sequence[ForeignKeyConstraint],
 ) -> None:
     """
     Validate the structural invariants shared by desired and observed tables.
@@ -313,8 +311,10 @@ class ObservedTable:
         tags: Read-only mapping of Unity Catalog tag keys to values.
         partitioned_by: Ordered tuple of partition column names.
         clustered_by: Ordered tuple of liquid clustering column names.
-        primary_key: Primary key constraint, or ``None`` when no primary key is defined.
-        foreign_keys: Foreign key constraints owned by this table.
+        primary_key: Primary key constraint, or ``None`` when no primary key is
+            defined. An observed constraint always carries its catalog name.
+        foreign_keys: Foreign key constraints owned by this table, each
+            carrying its catalog name.
         properties: Observed values of the engine-managed property keys only;
             the other keys a table carries are not engine state (values only —
             a catalog has no absence assertions, unlike a desired table's).
@@ -338,8 +338,8 @@ class ObservedTable:
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: ListOrTuple[str] = ()
     clustered_by: ListOrTuple[str] = ()
-    primary_key: ObservedPrimaryKeyConstraint | None = None
-    foreign_keys: ListOrTuple[ObservedForeignKeyConstraint] = ()
+    primary_key: PrimaryKeyConstraint | None = None
+    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     supported_features: Set[TableFeature] = frozenset()
     referencing_foreign_keys: ListOrTuple[ForeignKeyReference] = ()
@@ -363,15 +363,10 @@ class ObservedTable:
         object.__setattr__(self, "supported_features", frozenset(self.supported_features))
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
 
-        if self.primary_key is not None and not isinstance(
-            self.primary_key, ObservedPrimaryKeyConstraint
-        ):
-            raise TypeError("ObservedTable primary_key must be an observed primary key")
-        if not all(
-            isinstance(foreign_key, ObservedForeignKeyConstraint)
-            for foreign_key in self.foreign_keys
-        ):
-            raise TypeError("ObservedTable foreign_keys must be observed foreign keys")
+        if self.primary_key is not None and self.primary_key.name is None:
+            raise ValueError("An observed primary key must carry its catalog name")
+        if any(foreign_key.name is None for foreign_key in self.foreign_keys):
+            raise ValueError("An observed foreign key must carry its catalog name")
 
         _validate_table_structure(
             columns=self.columns,

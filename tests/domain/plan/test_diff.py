@@ -21,7 +21,6 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.plan.actions import (
@@ -57,11 +56,7 @@ from delta_engine.domain.plan.unresolvable import (
     PartitioningChanged,
     PropertyUndeclared,
 )
-from tests.builders import (
-    as_observed_columns,
-    as_observed_foreign_keys,
-    as_observed_primary_key,
-)
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _PARENT_NAME = QualifiedName("dev", "silver", "other")
@@ -76,8 +71,6 @@ def _observed(**overrides) -> ObservedTable:
     defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(ObservedColumn("id", Integer()),))
     merged = {**defaults, **overrides}
     merged["columns"] = as_observed_columns(merged["columns"])
-    merged["primary_key"] = as_observed_primary_key(merged.get("primary_key"))
-    merged["foreign_keys"] = as_observed_foreign_keys(merged.get("foreign_keys", ()))
     return ObservedTable(**merged)
 
 
@@ -1157,7 +1150,7 @@ def test_case_only_layout_and_key_differences_produce_no_actions():
         qualified_name=qualified_name,
         columns=(ObservedColumn("requestid", String(), nullable=False),),
         clustered_by=("requestid",),
-        primary_key=ObservedPrimaryKeyConstraint(columns=("requestid",), name="t_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestid",), name="t_pk"),
     )
 
     diff = diff_table(desired, observed)

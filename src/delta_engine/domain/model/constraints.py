@@ -1,7 +1,7 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
@@ -29,38 +29,10 @@ def _constraint_columns(columns: object, *, kind: str) -> tuple[Identifier, ...]
     return normalized
 
 
-class _PrimaryKey:
-    """Shared structural identity for desired and observed primary keys."""
-
-    __slots__ = ()
-
-    columns: ListOrTuple[str]
-
-    def matches_columns(self, columns: Iterable[str]) -> bool:
-        """Return whether columns identify this key, ignoring order and case."""
-        return frozenset(self.columns) == frozenset(Identifier(column) for column in columns)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _PrimaryKey):
-            return NotImplemented
-        return self.columns == other.columns
-
-    def __hash__(self) -> int:
-        return hash(self.columns)
-
-    def _normalize_columns(self) -> None:
-        columns = _constraint_columns(self.columns, kind="primary key")
-        # Column order is not part of a primary key's meaning. Store one
-        # canonical order while preserving each identifier's spelling, so
-        # identity and rendered DDL are independent of declaration order.
-        canonical = tuple(sorted(columns, key=lambda column: column.lower()))
-        object.__setattr__(self, "columns", canonical)
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class PrimaryKeyConstraint(_PrimaryKey):
+@dataclass(frozen=True, slots=True)
+class PrimaryKeyConstraint:
     """
-    A primary key constraint declaration.
+    A primary key constraint, declared or observed.
 
     Symmetric with :class:`ForeignKeyConstraint`: a table-level key constraint
     over an ordered set of columns.
@@ -70,58 +42,63 @@ class PrimaryKeyConstraint(_PrimaryKey):
             stored sorted by identifier key. Column order is not part of a
             primary key's meaning, so identity and rendered DDL are independent
             of declaration order. Duplicates are judged by identifier key.
-        name: Optional physical name to request when creating the constraint.
-            It is not part of structural identity; once created, Databricks
-            owns the catalog name.
+        name: Physical constraint name. On a declaration it is an optional
+            creation preference — once created, Databricks owns the catalog
+            name; on a catalog observation it is the concrete name the catalog
+            reports. Either way it is excluded from equality: names are
+            creation preferences, not structural identity.
 
     """
 
     columns: ListOrTuple[str]
-    name: str | None = None
+    name: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
-        self._normalize_columns()
+        columns = _constraint_columns(self.columns, kind="primary key")
+        # Column order is not part of a primary key's meaning. Store one
+        # canonical order while preserving each identifier's spelling, so
+        # identity and rendered DDL are independent of declaration order.
+        canonical = tuple(sorted(columns, key=lambda column: column.lower()))
+        object.__setattr__(self, "columns", canonical)
         object.__setattr__(
             self,
             "name",
             Identifier(self.name) if self.name is not None else None,
         )
 
-
-@dataclass(frozen=True, slots=True, eq=False)
-class ObservedPrimaryKeyConstraint(_PrimaryKey):
-    """A catalog-observed primary key with a concrete physical name."""
-
-    columns: ListOrTuple[str]
-    name: str
-
-    def __post_init__(self) -> None:
-        self._normalize_columns()
-        object.__setattr__(self, "name", Identifier(self.name))
+    def matches_columns(self, columns: Iterable[str]) -> bool:
+        """Return whether columns identify this key, ignoring order and case."""
+        return frozenset(self.columns) == frozenset(Identifier(column) for column in columns)
 
 
-class _ForeignKey:
-    """Shared structural identity for desired and observed foreign keys."""
+@dataclass(frozen=True, slots=True)
+class ForeignKeyConstraint:
+    """
+    A foreign key constraint, declared or observed.
 
-    __slots__ = ()
+    Attributes:
+        local_columns: Tuple of local column names in the constraint,
+            preserving spelling and stored sorted by identifier key (pairing
+            with ``referenced_columns`` preserved). Column order is not part of
+            a foreign key's meaning, mirroring the primary key, so identity and
+            rendered DDL are independent of declaration order.
+        referenced_table: Fully qualified name of the referenced table.
+        referenced_columns: Tuple of column names in the referenced table,
+            positionally aligned with ``local_columns`` after identity-key sorting.
+        name: Physical constraint name. On a declaration it is an optional
+            creation preference — once created, Databricks owns the catalog
+            name; on a catalog observation it is the concrete name the catalog
+            reports. Either way it is excluded from equality: names are
+            creation preferences, not structural identity.
+
+    """
 
     local_columns: ListOrTuple[str]
     referenced_table: QualifiedName
     referenced_columns: ListOrTuple[str]
+    name: str | None = field(default=None, compare=False)
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _ForeignKey):
-            return NotImplemented
-        return (
-            self.local_columns == other.local_columns
-            and self.referenced_table == other.referenced_table
-            and self.referenced_columns == other.referenced_columns
-        )
-
-    def __hash__(self) -> int:
-        return hash((self.local_columns, self.referenced_table, self.referenced_columns))
-
-    def _normalize_columns(self) -> None:
+    def __post_init__(self) -> None:
         local_columns = _constraint_columns(self.local_columns, kind="foreign key local")
         referenced_columns = _constraint_columns(
             self.referenced_columns,
@@ -143,54 +120,11 @@ class _ForeignKey:
         )
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class ForeignKeyConstraint(_ForeignKey):
-    """
-    A foreign key constraint declaration.
-
-    Attributes:
-        local_columns: Tuple of local column names in the constraint,
-            preserving spelling and stored sorted by identifier key (pairing
-            with ``referenced_columns`` preserved). Column order is not part of
-            a foreign key's meaning, mirroring the primary key, so identity and
-            rendered DDL are independent of declaration order.
-        referenced_table: Fully qualified name of the referenced table.
-        referenced_columns: Tuple of column names in the referenced table,
-            positionally aligned with ``local_columns`` after identity-key sorting.
-        name: Optional physical name to request when creating the constraint.
-            It is not part of structural identity; once created, Databricks
-            owns the catalog name.
-
-    """
-
-    local_columns: ListOrTuple[str]
-    referenced_table: QualifiedName
-    referenced_columns: ListOrTuple[str]
-    name: str | None = None
-
-    def __post_init__(self) -> None:
-        self._normalize_columns()
         object.__setattr__(
             self,
             "name",
             Identifier(self.name) if self.name is not None else None,
         )
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class ObservedForeignKeyConstraint(_ForeignKey):
-    """A catalog-observed foreign key with a concrete physical name."""
-
-    local_columns: ListOrTuple[str]
-    referenced_table: QualifiedName
-    referenced_columns: ListOrTuple[str]
-    name: str
-
-    def __post_init__(self) -> None:
-        self._normalize_columns()
-        object.__setattr__(self, "name", Identifier(self.name))
 
 
 @dataclass(frozen=True, slots=True)

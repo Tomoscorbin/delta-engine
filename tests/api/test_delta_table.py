@@ -4,7 +4,7 @@ import pytest
 
 from delta_engine.domain.model import (
     DesiredColumn as DomainColumn,
-    ObservedForeignKeyConstraint,
+    ForeignKeyConstraint,
     ObservedTable,
     QualifiedName,
     TableAspect,
@@ -2361,7 +2361,7 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
         qualified_name=before.qualified_name,
         columns=as_observed_columns(before.columns),
         foreign_keys=(
-            ObservedForeignKeyConstraint(
+            ForeignKeyConstraint(
                 local_columns=before.foreign_keys[0].local_columns,
                 referenced_table=before.foreign_keys[0].referenced_table,
                 referenced_columns=before.foreign_keys[0].referenced_columns,

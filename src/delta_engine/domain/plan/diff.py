@@ -458,6 +458,13 @@ def _diff_layout(
     return actions, unresolvable
 
 
+def _require_catalog_name(name: str | None) -> str:
+    """Return the catalog name ``ObservedTable`` guarantees on an observed constraint."""
+    if name is None:
+        raise ValueError("An observed constraint must carry its catalog name")
+    return name
+
+
 def _diff_primary_key(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
@@ -479,13 +486,13 @@ def _diff_primary_key(
         return () if desired_key is None else (SetPrimaryKey(primary_key=desired_key),)
 
     if desired_key is None:
-        return (DropPrimaryKey(name=observed_key.name),)
+        return (DropPrimaryKey(name=_require_catalog_name(observed_key.name)),)
 
     if desired_key == observed_key:
         return ()
 
     return (
-        DropPrimaryKey(name=observed_key.name),
+        DropPrimaryKey(name=_require_catalog_name(observed_key.name)),
         SetPrimaryKey(primary_key=desired_key),
     )
 
@@ -517,7 +524,10 @@ def _diff_foreign_keys(
         else:
             unmatched_observed.remove(observed_constraint)
 
-    drops = [DropForeignKey(name=constraint.name) for constraint in unmatched_observed]
+    drops = [
+        DropForeignKey(name=_require_catalog_name(constraint.name))
+        for constraint in unmatched_observed
+    ]
     return (*drops, *sets)
 
 

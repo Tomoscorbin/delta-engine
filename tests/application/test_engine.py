@@ -31,8 +31,8 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
 from delta_engine.domain.model.constraints import (
-    ObservedForeignKeyConstraint,
-    ObservedPrimaryKeyConstraint,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
 )
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
@@ -155,7 +155,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), nullable=False),),
-            primary_key=ObservedPrimaryKeyConstraint(
+            primary_key=PrimaryKeyConstraint(
                 columns=("id",),
                 name=f"{table_name}_pk",
             ),
@@ -173,12 +173,12 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=desired.qualified_name,
             columns=as_observed_columns(desired.columns),
-            primary_key=ObservedPrimaryKeyConstraint(
+            primary_key=PrimaryKeyConstraint(
                 columns=desired.primary_key.columns,
                 name="databricks_generated_pk",
             ),
             foreign_keys=(
-                ObservedForeignKeyConstraint(
+                ForeignKeyConstraint(
                     local_columns=desired_foreign_key.local_columns,
                     referenced_table=desired_foreign_key.referenced_table,
                     referenced_columns=desired_foreign_key.referenced_columns,
@@ -1788,7 +1788,7 @@ def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "parent"),
                     columns=(ObservedColumn("orderid", String(), nullable=False),),
-                    primary_key=ObservedPrimaryKeyConstraint(("orderid",), "parent_pk"),
+                    primary_key=PrimaryKeyConstraint(("orderid",), "parent_pk"),
                 )
             ),
             "c.s.child": TablePresent(

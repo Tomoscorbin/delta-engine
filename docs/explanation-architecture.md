@@ -818,13 +818,14 @@ that name when the constraint is created. Once the constraint exists,
 Databricks owns its physical name. Changing only the preference is therefore a
 no-op rather than an implicit drop and recreate.
 
-Catalog reads produce `ObservedPrimaryKeyConstraint` and
-`ObservedForeignKeyConstraint`, whose names are required. This keeps physical
-identity available for drop operations without making every constraint
-consumer handle `None`. Reconciliation itself stays ordinary: desired and
-observed constraints compare with `==`, unmatched observations are dropped,
-and unmatched declarations are created. Optional SQL grammar remains inside
-the compiler; other layers neither predict nor reconcile platform names.
+Desired and observed constraints share one class per kind
+(`PrimaryKeyConstraint`, `ForeignKeyConstraint`); what distinguishes an
+observed constraint is that `ObservedTable` requires it to carry its catalog
+name, keeping physical identity available for drop operations. Reconciliation
+itself stays ordinary: desired and observed constraints compare with `==`,
+unmatched observations are dropped, and unmatched declarations are created.
+Optional SQL grammar remains inside the compiler; other layers neither predict
+nor reconcile platform names.
 
 ## Reporting and failure semantics
 
