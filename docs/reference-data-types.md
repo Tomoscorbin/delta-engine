@@ -19,7 +19,7 @@ under [Unsupported types](#unsupported-types).
 | `String()`                               | `STRING`               |                                                                      |
 | `Date()`                                 | `DATE`                 |                                                                      |
 | `Timestamp()`                            | `TIMESTAMP`            |                                                                      |
-| `Decimal(precision, scale)`              | `DECIMAL(p, s)`        | Both required; precision 1–38, scale 0–precision (Delta/Spark limit) |
+| `Decimal(precision, scale=0)`            | `DECIMAL(p, s)`        | `scale` defaults to 0; precision 1–38, scale 0–precision (Delta/Spark limit) |
 | `Array(element_type)`                    | `ARRAY<T>`             | `element_type` must be a supported type                              |
 | `Map(key_type, value_type)`              | `MAP<K, V>`            | Both arguments must be supported types                               |
 | `Byte()`                                 | `TINYINT`              |                                                                      |
