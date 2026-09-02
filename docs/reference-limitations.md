@@ -150,12 +150,20 @@ partitioning:
 
 ## Concurrent catalog changes
 
-A sync is not transactional across its read, plan, and execute phases. Table
-creation compiles as a plain `CREATE TABLE`: if another writer creates the same
-name after the reader observed it missing, that statement errors and the table
-is reported as an execution failure rather than a false success. The next sync
-reads the table that actually exists and reports any resulting drift. Avoid
-concurrent creators for the same qualified table name.
+A sync is not transactional across its read, plan, and execute phases, and it
+never re-reads a table after executing its statements. The operating contract
+is single-writer: while a sync runs, no other actor should run DDL against the
+tables it manages. A successful table report means every planned statement
+executed, not that the desired state was verified afterwards — DDL from
+another actor between the read and a statement is invisible to the run unless
+it makes a statement fail
+([how a sync works](explanation-sync-lifecycle.md#one-writer-at-a-time-what-success-means)).
+
+Table creation compiles as a plain `CREATE TABLE`: if another writer creates
+the same name after the reader observed it missing, that statement errors and
+the table is reported as an execution failure rather than a false success. The
+next sync reads the table that actually exists and reports any resulting
+drift. Avoid concurrent creators for the same qualified table name.
 
 ## Runtime features
 

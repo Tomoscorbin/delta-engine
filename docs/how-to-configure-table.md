@@ -746,6 +746,12 @@ create a cross-catalog constraint but never observe it afterwards — every
 later sync would re-plan and fail. A cross-catalog `references` is therefore
 rejected when the `DeltaTable` is constructed.
 
+The same per-catalog visibility limits the inbound direction: a cross-catalog
+foreign key created with raw SQL that references one of this sync's primary
+keys is invisible to `PrimaryKeyReferencedByForeignKeys`, so changing that key
+fails at execution rather than validation — see
+[safe-change rules](reference-safe-change-rules.md).
+
 The same dependency logic propagates failure: a referenced table that won't
 reach its desired state this sync blocks every table downstream of it, which
 report `FOREIGN_KEY_FAILED`. That cross-table blocking is part of the safety

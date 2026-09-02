@@ -20,6 +20,13 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `AmbiguousColumnRename`                 | A declared rename whose old and new column both exist on the table                                                                                                                        | Remove the `renamed_from` hint and drop the old column in its own sync                                 |
 | `PrimaryKeyReferencedByForeignKeys`     | Dropping or changing a primary key while foreign keys reference it (same-table FKs dropped in the same sync are exempt)                                                                   | Sync the referencing tables without those foreign keys first, then change the key                      |
 
+`PrimaryKeyReferencedByForeignKeys` sees the inbound foreign keys recorded in
+the table's own catalog. `information_schema` is per-catalog, so a foreign key
+referencing the table from another catalog — which only raw SQL can create; a
+declared `ForeignKey` must stay within its owner's catalog — is invisible to
+validation. Dropping or changing a primary key with such a reference fails at
+execution instead, with Unity Catalog's dependent-constraints error.
+
 ## Clustering is not a blocked change
 
 Unlike `partitioned_by`, changing a table's liquid clustering keys has no
