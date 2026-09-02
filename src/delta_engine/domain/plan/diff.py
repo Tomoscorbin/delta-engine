@@ -96,8 +96,7 @@ class TableDrift:
     def __post_init__(self) -> None:
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "unresolvable", tuple(self.unresolvable))
-        
-        if desired.qualified_name != observed.qualified_name:
+        if self.desired.qualified_name != self.observed.qualified_name:
             raise ValueError(
                 "Cannot compare different tables:"
                 f" {self.desired.qualified_name} != {self.observed.qualified_name}"
