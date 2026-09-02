@@ -781,6 +781,19 @@ execution is simpler but may break that behavior; scoping the whole invocation
 retains in-invocation shadowing but prevents cross-invocation leakage. Choose
 and document that contract explicitly.
 
+### Resolved (2026-09-02)
+
+The working directory now fronts `sys.path` only while the declaration module
+imports (`_front_working_directory_on_path`, a context manager around the
+import, attribute fetch, and validation), and the exact previous `sys.path`
+is restored on the way out — on failure too. The chosen contract: scoping
+covers initial module execution only; the loader's docstring states that
+nothing the load did to `sys.path` outlives the call. The shadowing diagnosis
+survives because a stray `databricks.py` imported during loading stays cached
+in `sys.modules` after the restore, and `_shadowing_module_file` reads
+`sys.modules`, not `sys.path` — both comments now state that pairing.
+Restoration is pinned for the success and failure paths.
+
 ## 14. Make a planning outcome own the diff it judged
 
 ### Cause
