@@ -77,8 +77,9 @@ if report.has_failures:
 ```
 
 `report.has_changes` reports whether any table has a planned change, and
-`report.planned_sql_statements` maps each table's name to the SQL preview
-compiled for the current snapshot. For a machine-readable view of the whole
+`report.planned_sql_statements` maps each table with a planned change to the
+SQL preview compiled for the current snapshot; tables already in sync are
+omitted. For a machine-readable view of the whole
 run — status, planned actions, and SQL as plain JSON — call `report.to_dict()` (see
 [the run report schema](reference-run-report.md)). To turn a dry run into a
 red/green pull-request check, see

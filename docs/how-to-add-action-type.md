@@ -163,8 +163,8 @@ ever sees differences the declaration manages — declare the correct
 ```python
 from typing import ClassVar
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.domain.plan import TableDrift
 from delta_engine.domain.plan.actions import UpdateComment
-from delta_engine.domain.plan.diff import TableDrift
 
 
 class NoUnsafeCommentChange:

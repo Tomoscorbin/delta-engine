@@ -46,7 +46,8 @@ after fixing the declaration is always safe.
 ## Managed aspects: what a declaration is responsible for
 
 Every declaration manages a defined set of _aspects_ of its table — column
-structure, comments, properties, tags, partitioning, and key constraints. For
+structure, comments, properties, tags, partitioning, clustering, and key
+constraints. For
 catalog state it can represent, the engine reconciles drift in managed aspects
 and rejects to proceed when an unmanaged aspect has drifted. It never silently
 reconciles something a declaration did not claim responsibility for.
@@ -63,7 +64,7 @@ ever drops authority:
 
 | Scope                  | Manages                                                                                 | Use for                                                                                                           |
 | ---------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                                           |
+| `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, clustering, primary and foreign keys | Tables this declaration owns end to end                                                                           |
 | `"metadata"`           | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in                           |
 | `"annotations"`        | Table and column comments, table and column tags                                        | Documenting and tagging a table whose structure and keys belong elsewhere — including streaming tables            |
 | `"tags"`               | Table and column tags only                                                              | Tag governance alone, where even a comment would be too much authority to claim                                   |
