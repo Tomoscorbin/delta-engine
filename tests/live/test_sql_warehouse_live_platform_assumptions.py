@@ -16,6 +16,7 @@ mirroring the gate buys nothing.
 """
 
 import re
+from uuid import uuid4
 
 import pytest
 
@@ -23,9 +24,11 @@ pytest.importorskip("databricks.sql")
 
 from databricks.sql.exc import ServerOperationError
 
+from delta_engine.adapters.databricks.sql.dialect import backtick
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     fetch_rows,
+    live_catalog,
     qualified_table,
     read_live_table,
     table_exists,
@@ -200,6 +203,24 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
             f"SET TAGS ('{over_long}'='prod')",
         )
     assert length_complaint.search(str(error.value))
+
+
+def test_platform_reports_table_not_found_when_the_schema_is_what_is_missing(live_connection):
+    """DESCRIBE in a nonexistent schema reports TABLE_OR_VIEW_NOT_FOUND, not SCHEMA_NOT_FOUND."""
+    # The describe does not say which part of the three-part name failed to
+    # resolve (first observed live 2026-07-16). This is why the reader cannot
+    # treat TABLE_OR_VIEW_NOT_FOUND alone as a creatable absence and probes
+    # the schema for positive confirmation. If this pin ever fails — the
+    # platform naming the missing schema directly — the probe is redundant.
+
+    # Given a table name in a schema that does not exist
+    missing_schema = f"de_live_missing_schema_{uuid4().hex[:8]}"
+    qualified = f"{backtick(live_catalog())}.{backtick(missing_schema)}.{backtick('t')}"
+
+    # When describing it the complaint names the relation, not the schema
+    with pytest.raises(ServerOperationError) as error:
+        execute_sql(live_connection, f"DESCRIBE TABLE EXTENDED {qualified} AS JSON")
+    assert "TABLE_OR_VIEW_NOT_FOUND" in str(error.value)
 
 
 def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection, live_tables):
