@@ -98,7 +98,7 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 2 | High | Foreign-key references mix object and name identity | The API and resolver validate different parent objects |
 | 3 | Strategic | Dependencies are action-level but scheduling is table-level | Cross-table ordering produces special cases and duplicate policy folds |
 | 4 ◐ | Medium | One scope value still implies three reconciliation modes | Every consumer interprets an unmanaged aspect differently |
-| 5 | Medium | The shared reader catches beyond the backend boundary | Programming defects become ordinary per-table read failures |
+| 5 ✅ | Medium | The shared reader catches beyond the backend boundary | Programming defects become ordinary per-table read failures |
 | 6 | Medium | Rename name frames are documented but not enforced | A valid `ActionPlan` can compile actions against stale column names |
 | 7 ✅ | High | Compiled execution does not prove plan coverage | A changed table can report success without executing work |
 | 8 ✅ | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
@@ -352,6 +352,21 @@ outcomes into `ReadError`.
 
 Pure relation policy and domain assembly should run outside a broad catch so
 assertions, indexing defects, and other programming errors remain visible.
+
+### Update (2026-09-02) — RESOLVED
+
+Implemented as recommended, with the translation living at the injection
+point rather than in each backend runner: ``read_catalog_state`` wraps the
+injected ``run_query`` so anything the callable raises crosses as a private
+``_QueryError`` — the callable is the outbound client call, so the boundary
+is executable by construction and the backends stay unchanged. The top-level
+catch now enumerates the expected outcomes (``_QueryError``,
+``MissingSchemaError`` — previously a bare ``RuntimeError`` —
+``MetadataParseError``, ``UnsupportedRelationError``) and unwraps
+``_QueryError`` to its physical cause so failure records keep naming the
+backend's own exception type. Defects in parsing, relation policy, and
+assembly propagate as themselves; pinned by a test injecting a malformed
+tag row shape.
 
 ## 6. Enforce the rename name frame
 
