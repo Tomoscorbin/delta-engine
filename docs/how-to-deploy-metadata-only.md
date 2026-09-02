@@ -54,11 +54,11 @@ metadata is applied.
   columns to declare keys or comments over them, a column declared
   `requestid` against a catalog holding `requestId` fails with
   `ColumnSpellingMustMatchCatalog` naming both spellings. `DESCRIBE TABLE`
-  shows the spelling to copy. Catalog properties are the exception: a declaration that does not
-  manage properties makes no property assertion at all, so they are never
-  compared — declared properties are carried but ignored, and properties on
-  the live table (for example those written by a previous fully managed sync)
-  are not drift.
+  shows the spelling to copy. Catalog properties are the exception: a
+  metadata-only declaration makes no property assertion at all, so properties
+  on the live table (for example those written by a previous fully managed
+  sync) are not drift. Declaring `properties` under a restricted scope is
+  rejected when the declaration is constructed.
 - **Cannot create** a missing table. If the table does not exist, the sync
   logs a warning and defers it — the table reports `DEFERRED`, neither changed
   nor failed — because a metadata-only declaration has no authority to create

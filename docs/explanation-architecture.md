@@ -522,8 +522,8 @@ exactly one of three questions: `manages` (compare, and converge the live
 table to the declaration), `requires_match` (compare, but refuse drift — the
 declaration mirrors the live state), or `ignores` (do not compare at all).
 Managed aspects follow the minimum-scope ladder; below it every aspect must
-match except properties, which are ignored — a restricted declaration carries
-property values without comparing them. The differ compares every aspect the
+match except properties, which are ignored — a restricted declaration may not
+declare properties, and the live table's are never compared. The differ compares every aspect the
 scope does not ignore, so its one scope question is whether to diff
 properties (see Diff-first planning).
 The `TableDrift` it produces carries the `desired`
