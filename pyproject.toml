@@ -35,7 +35,7 @@ dependencies = []
 sql = ["databricks-sql-connector>=4.0.0,<5"]
 cli = [
   "typer>=0.15.4,<1",
-  "databricks-sdk>=0.70.0,<1",
+  "databricks-sdk>=0.20.0,<1",
   "databricks-sql-connector>=4.0.0,<5",
 ]
 
@@ -61,7 +61,7 @@ dev = [
   "commitizen>=4.0",
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
-  "databricks-sdk>=0.70.0",
+  "databricks-sdk>=0.20.0",
   "typer>=0.15.4",
   # tests/test_packaging.py imports it directly; do not rely on pytest's
   # transitive dependency.
